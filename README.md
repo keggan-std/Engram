@@ -378,15 +378,14 @@ New machine:
 
 ---
 
-## Migration from v1.0.0
+## Migration from v1.0.0 (sql.js)
 
-If you're upgrading from the original sql.js version:
+If you're upgrading from the original `sql.js` version (v1.0.0) to native SQLite:
 
-1. **Your existing `.engram/memory.db` files are fully compatible** — the SQLite format is the same
-2. **Run `npm install` to get the new dependencies** (better-sqlite3 replaces sql.js)
-3. **Run `npm run build`**
-4. The migration system will automatically upgrade your schema on first startup — adding FTS5 indexes, config table, and composite indexes
-5. Your existing data is preserved and immediately searchable via FTS5
+1. Follow the **Quickstart** above to update your agent's MCP config to use `npx -y engram-mcp-server`
+2. Restart your IDE
+
+**That's it.** Your existing `.engram/memory.db` files are fully compatible. The migration system will automatically upgrade your schema on first startup — adding FTS5 indexes, the config table, composite indexes, and the new scheduled events tables. Your existing data is preserved and instantly searchable.
 
 ---
 
