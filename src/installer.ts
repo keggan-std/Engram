@@ -6,54 +6,72 @@ import readline from "readline";
 const HOME = os.homedir();
 const APPDATA = process.env.APPDATA || path.join(HOME, ".config");
 
-// ─── IDE Config Locations ────────────────────────────────────────────
+interface IdeDefinition {
+    name: string;
+    format: "mcpServers" | "servers";
+    scopes: {
+        global?: string[];
+        localDirs?: string[]; // e.g. [".vs", ".vscode"] - appended to a user-provided solution path
+    };
+}
 
-const IDE_CONFIGS: Record<string, any> = {
+const IDE_CONFIGS: Record<string, IdeDefinition> = {
     antigravity: {
         name: "Antigravity IDE",
-        paths: [
-            path.join(HOME, ".gemini", "antigravity", "mcp_config.json"),
-        ],
         format: "mcpServers",
+        scopes: {
+            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
+        },
     },
     cursor: {
         name: "Cursor",
-        paths: [
-            path.join(HOME, ".cursor", "mcp.json"),
-            path.join(APPDATA, "Cursor", "mcp.json"),
-        ],
         format: "mcpServers",
+        scopes: {
+            global: [
+                path.join(HOME, ".cursor", "mcp.json"),
+                path.join(APPDATA, "Cursor", "mcp.json"),
+            ],
+            localDirs: [".cursor"],
+        },
     },
     vscode: {
         name: "VS Code (Copilot)",
-        paths: [
-            path.join(APPDATA, "Code", "User", "mcp.json"),
-            path.join(HOME, ".vscode", "mcp.json"),
-        ],
         format: "servers",
+        scopes: {
+            global: [
+                path.join(APPDATA, "Code", "User", "mcp.json"),
+                path.join(HOME, ".vscode", "mcp.json"),
+            ],
+            localDirs: [".vscode"],
+        },
     },
     cline: {
         name: "Cline / Roo Code",
-        paths: [
-            path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-            path.join(HOME, ".cline", "mcp_settings.json"),
-        ],
         format: "mcpServers",
+        scopes: {
+            global: [
+                path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+                path.join(HOME, ".cline", "mcp_settings.json"),
+            ],
+        },
     },
     windsurf: {
         name: "Windsurf",
-        paths: [
-            path.join(HOME, ".codeium", "windsurf", "mcp_config.json"),
-            path.join(APPDATA, "Windsurf", "mcp.json"),
-        ],
         format: "mcpServers",
+        scopes: {
+            global: [
+                path.join(HOME, ".codeium", "windsurf", "mcp_config.json"),
+                path.join(APPDATA, "Windsurf", "mcp.json"),
+            ],
+        },
     },
     visualstudio: {
-        name: "Visual Studio 2022",
-        paths: [
-            path.join(HOME, ".mcp.json"), // Global config for Visual Studio
-        ],
+        name: "Visual Studio 2022/2026",
         format: "servers",
+        scopes: {
+            global: [path.join(HOME, ".mcp.json")],
+            localDirs: [".vs", ""], // "" means root of solution (e.g. SolutionDir/.mcp.json)
+        },
     },
 };
 
@@ -159,8 +177,11 @@ export async function runInstaller(args: string[]) {
     if (args.includes("--list")) {
         console.log("\nEngram can be auto-installed into these IDEs:\n");
         for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-            const found = ide.paths.find((p: string) => fs.existsSync(p) || fs.existsSync(path.dirname(p)));
-            console.log(`  ${id.padEnd(15)} ${ide.name} ${found ? "✅ detected" : "❌ not found"}`);
+            let found = false;
+            if (ide.scopes.global) {
+                found = !!ide.scopes.global.find(p => fs.existsSync(p) || fs.existsSync(path.dirname(p)));
+            }
+            console.log(`  ${id.padEnd(15)} ${ide.name}${ide.scopes.localDirs ? " (Global / Local)" : " (Global)"} ${found ? "✅ global path detected" : "❌ global not found"}`);
         }
         process.exit(0);
     }
@@ -173,7 +194,7 @@ export async function runInstaller(args: string[]) {
             console.error(`Unknown IDE: "${targetIde}". Options: ${Object.keys(IDE_CONFIGS).join(", ")}`);
             process.exit(1);
         }
-        await performInstallation({ [targetIde]: IDE_CONFIGS[targetIde] });
+        await performInstallationInteractive({ [targetIde]: IDE_CONFIGS[targetIde] });
         return;
     }
 
@@ -187,7 +208,7 @@ export async function runInstaller(args: string[]) {
         const ans = await askQuestion("   Install Engram for this IDE? [Y/n]: ");
 
         if (ans.trim().toLowerCase() !== 'n') {
-            await performInstallation({ [currentIde]: IDE_CONFIGS[currentIde] });
+            await performInstallationInteractive({ [currentIde]: IDE_CONFIGS[currentIde] });
             return;
         }
         console.log(""); // Skip to menu
@@ -241,19 +262,74 @@ export async function runInstaller(args: string[]) {
         process.exit(1);
     }
 
-    await performInstallation(idesToProcess);
+    await performInstallationInteractive(idesToProcess);
 }
 
-async function performInstallation(idesToProcess: Record<string, any>) {
-    let installed = 0;
+// Interactive wizard to resolve specific config paths for the selected IDEs
+async function performInstallationInteractive(idesToProcess: Record<string, IdeDefinition | any>) {
+    let resolvedConfigs: { name: string; path: string; format: string }[] = [];
 
     for (const [id, ide] of Object.entries(idesToProcess)) {
-        const configPath = ide.paths.find((p: string) => fs.existsSync(p)) || ide.paths[0];
+        if (id === "custom") {
+            resolvedConfigs.push({ name: ide.name, path: ide.paths[0], format: ide.format });
+            continue;
+        }
 
+        const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
+        const supportsGlobal = ide.scopes?.global && ide.scopes.global.length > 0;
+
+        let targetScope = "global";
+
+        if (supportsLocal && supportsGlobal) {
+            console.log(`\n${ide.name} supports multiple installation scopes.`);
+            console.log(`  1. Global (Applies to all projects)`);
+            console.log(`  2. Local  (Applies to a specific Solution/Workspace)`);
+            const scopeAns = await askQuestion("Select scope [1-2] (default 1): ");
+            if (scopeAns.trim() === "2") {
+                targetScope = "local";
+            }
+        } else if (supportsLocal && !supportsGlobal) {
+            targetScope = "local";
+        }
+
+        if (targetScope === "global") {
+            const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
+            resolvedConfigs.push({ name: `${ide.name} (Global)`, path: configPath, format: ide.format });
+        } else if (targetScope === "local") {
+            const solutionDir = await askQuestion(`Enter the absolute path to your ${ide.name} Solution/Workspace directory:\n> `);
+            if (!solutionDir.trim()) {
+                console.log(`Skipping ${ide.name} local installation (no path provided).`);
+                continue;
+            }
+
+            // For Visual studio, it's .vs/mcp.json or .mcp.json at root. We'll use the first defined localDir.
+            const localDirPrefix = ide.scopes.localDirs![0];
+
+            let configFileName = "mcp.json";
+            // Visual Studio special case: if localDir is "" (root), the file is usually .mcp.json
+            if (id === "visualstudio" && localDirPrefix === "") {
+                configFileName = ".mcp.json";
+            } else if (id === "visualstudio" && localDirPrefix === ".vs") {
+                configFileName = "mcp.json";
+            }
+            // If they use `.mcp.json` vs `mcp.json` varies slightly, but standard is mcp.json inside `.vscode` or `.vs`
+
+            const configPath = path.join(solutionDir.trim(), localDirPrefix, configFileName);
+            resolvedConfigs.push({ name: `${ide.name} (Local: ${path.basename(solutionDir)})`, path: configPath, format: ide.format });
+        }
+    }
+
+    await performInstallation(resolvedConfigs);
+}
+
+async function performInstallation(configs: { name: string; path: string; format: string }[]) {
+    let installed = 0;
+
+    for (const config of configs) {
         try {
-            const result = addToConfig(configPath, ide.format);
-            console.log(`\n   ✅ ${ide.name}`);
-            console.log(`      Config: ${configPath}`);
+            const result = addToConfig(config.path, config.format);
+            console.log(`\n   ✅ ${config.name}`);
+            console.log(`      Config: ${config.path}`);
 
             let statusText = "";
             if (result === "added") statusText = "Engram added";
@@ -266,17 +342,20 @@ async function performInstallation(idesToProcess: Record<string, any>) {
                 installed++;
             }
         } catch (e: any) {
-            console.log(`\n   ⚠️  ${ide.name}`);
-            console.log(`      Could not write to: ${configPath}`);
+            console.log(`\n   ⚠️  ${config.name}`);
+            console.log(`      Could not write to: ${config.path}`);
             console.log(`      Reason: ${e.message}`);
+            console.log(`\n      For manual instructions, visit: https://github.com/keggan-std/Engram`);
         }
     }
 
-    if (installed === 0) {
-        console.log("\n   No supported IDEs were found on this machine.");
-        console.log("   Run 'npx -y engram-mcp-server --list' to see what was detected.\n");
+    if (configs.length === 0) {
+        console.log("\n   No target configurations resolved.");
+    } else if (installed === 0) {
+        // Technically they could all just be "already exists"
+        console.log("\n✅ Done! No new changes were needed.");
     } else {
-        console.log(`\n✅ Done! Engram configured in ${installed} IDE(s).`);
+        console.log(`\n✅ Done! Engram configured in ${installed} IDE scope(s).`);
         console.log("   Restart your IDE(s) to load Engram.\n");
     }
 }
