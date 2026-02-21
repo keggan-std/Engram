@@ -36,13 +36,13 @@ const IDE_CONFIGS: Record<string, IdeDefinition> = {
     },
     vscode: {
         name: "VS Code (Copilot)",
-        format: "servers",
+        format: "mcpServers",
         scopes: {
             global: [
                 path.join(APPDATA, "Code", "User", "mcp.json"),
                 path.join(HOME, ".vscode", "mcp.json"),
             ],
-            localDirs: [".vscode"],
+            localDirs: ["", ".vscode"], // "" means root of workspace, .vscode is fallback
         },
     },
     cline: {
@@ -67,10 +67,10 @@ const IDE_CONFIGS: Record<string, IdeDefinition> = {
     },
     visualstudio: {
         name: "Visual Studio 2022/2026",
-        format: "servers",
+        format: "mcpServers",
         scopes: {
             global: [path.join(HOME, ".mcp.json")],
-            localDirs: [".vs", ""], // "" means root of solution (e.g. SolutionDir/.mcp.json)
+            localDirs: ["", ".vs"], // "" means root of solution (e.g. SolutionDir/.mcp.json)
         },
     },
 };
@@ -306,13 +306,10 @@ async function performInstallationInteractive(idesToProcess: Record<string, IdeD
             const localDirPrefix = ide.scopes.localDirs![0];
 
             let configFileName = "mcp.json";
-            // Visual Studio special case: if localDir is "" (root), the file is usually .mcp.json
-            if (id === "visualstudio" && localDirPrefix === "") {
+            if (localDirPrefix === "") {
+                // If the config is at the absolute root of the workspace, it's virtually always hidden (.mcp.json)
                 configFileName = ".mcp.json";
-            } else if (id === "visualstudio" && localDirPrefix === ".vs") {
-                configFileName = "mcp.json";
             }
-            // If they use `.mcp.json` vs `mcp.json` varies slightly, but standard is mcp.json inside `.vscode` or `.vs`
 
             const configPath = path.join(solutionDir.trim(), localDirPrefix, configFileName);
             resolvedConfigs.push({ name: `${ide.name} (Local: ${path.basename(solutionDir)})`, path: configPath, format: ide.format });
