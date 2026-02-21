@@ -210,209 +210,114 @@ See total sessions, changes, decisions, most-changed files, layer distribution, 
 
 ---
 
-## Installation
+## Quickstart
 
-### Prerequisites
-- Node.js 18+ installed
-- npm or yarn
+Engram is published to the npm registry. **You do not need to download or compile any code.**
 
-### Setup
+As long as you have Node.js installed, your IDE will download and run the latest version of Engram automatically using `npx`.
 
-```bash
-# Clone the repository
-git clone git@github.com:keggan-std/Engram.git
-cd Engram
+### 1. Configure Your AI Agent
 
-# Install dependencies
-npm install
+Add Engram to your agent's MCP configuration using the zero-install `npx` command:
 
-# Build
-npm run build
-
-# (Optional) Install git hooks for automatic change tracking
-npm run install-hooks
+#### Cline / Roo Code
+In the extension settings → MCP Servers:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
 ```
 
-### Add to Your IDE — One Command
+#### Cursor
+1. Go to **Cursor Settings** → **Features** → **MCP**
+2. Click **+ Add new MCP server**
+3. Select **command** type
+4. Name: `engram`
+5. Command: `npx -y engram-mcp-server`
 
-Run this after building to automatically add Engram to all supported IDEs detected on your machine:
-
-```bash
-npm run install-mcp
+#### Claude Desktop
+Add to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
 ```
 
-This detects and updates the MCP config for **Antigravity IDE, Cursor, VS Code, Cline, and Windsurf** — no manual path editing required. Just restart your IDE after.
-
-To preview which IDEs were detected before installing:
-
-```bash
-npm run install-mcp:list
+#### VS Code (with GitHub Copilot)
+Create `.vscode/mcp.json` in your project root:
+```json
+{
+  "servers": {
+    "engram": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
 ```
+Or add to your user `settings.json` to make it available across all workspaces.
 
-To add to a specific IDE only:
-
-```bash
-node scripts/install-mcp.js --ide antigravity
-node scripts/install-mcp.js --ide cursor
-node scripts/install-mcp.js --ide vscode
+#### Visual Studio 2022/2026
+Create `.vs/mcp.json` in your solution root:
+```json
+{
+  "servers": {
+    "engram": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
 ```
+Or create a global config at `%USERPROFILE%\.mcp.json`. Note: Server names in Visual Studio must not contain spaces.
 
-### Verify it works
-
-```bash
-# Test with MCP Inspector
-npm run inspect
+#### Windsurf
+In Settings → MCP:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
 ```
 
 ---
 
-## Configuration
+### 2. Auto-Updates
+Because the configuration uses `npx -y engram-mcp-server`, your agent will **automatically fetch the latest version** of Engram from the npm registry every time it starts. You never have to manually update or run `git pull` again!
 
-> [!TIP]
-> **Quickest way**: Run `npm run install-mcp` after building — it auto-detects your IDEs and writes the config for you. Restart your IDE after.
+---
 
-If you prefer to configure manually, find your IDE below and paste the config snippet.
+### 3. Optional: Build from Source
+If you prefer to run Engram locally instead of fetching it via `npx` (e.g. for contributing to the repository):
 
-### Antigravity IDE
-
-1. Click the **`...`** menu at the top of the Agent panel
-2. Select **MCP Servers → Manage MCP Servers**
-3. Click **"View raw config"**
-4. Add the `engram` block inside `"mcpServers"`:
-
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"],
-      "env": {}
-    }
-  }
-}
+```bash
+git clone https://github.com/keggan-std/Engram.git
+cd Engram
+npm install
+npm run build
 ```
-
-5. Save and **restart Antigravity IDE**
-
-> Replace `/absolute/path/to/Engram/dist/index.js` with the actual path on your machine — or just run `npm run install-mcp` and it's done automatically.
-
-### Claude Code
-
-Add to `~/.claude.json` or your project's `.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
-  }
-}
-```
-
-### Cursor
-
-In Cursor Settings → Features → MCP Servers, add:
-
+Then, point your MCP configuration to the local `dist/index.js` file instead of using `npx`:
 ```json
 {
   "engram": {
     "command": "node",
     "args": ["/absolute/path/to/Engram/dist/index.js"]
-  }
-}
-```
-
-### VS Code (with GitHub Copilot)
-
-Create `.vscode/mcp.json` in your project root:
-
-```json
-{
-  "servers": {
-    "engram": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
-  }
-}
-```
-
-Or add to your user `settings.json` to make Engram available across all workspaces:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "engram": {
-        "type": "stdio",
-        "command": "node",
-        "args": ["/absolute/path/to/Engram/dist/index.js"]
-      }
-    }
-  }
-}
-```
-
-### Visual Studio 2022/2026
-
-Create `.vs/mcp.json` in your solution root:
-
-```json
-{
-  "servers": {
-    "engram": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
-  }
-}
-```
-
-Or create a global config at `%USERPROFILE%\.mcp.json` (makes Engram available in all solutions):
-
-```json
-{
-  "servers": {
-    "engram": {
-      "type": "stdio",
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
-  }
-}
-```
-
-> **Note:** Server names in Visual Studio must not contain spaces.
-
-### Cline / Roo Code
-
-In the Cline extension settings → MCP Servers:
-
-```json
-{
-  "engram": {
-    "command": "node",
-    "args": ["/absolute/path/to/Engram/dist/index.js"],
-    "disabled": false
-  }
-}
-```
-
-### Windsurf
-
-In Settings → MCP:
-
-```json
-{
-  "mcpServers": {
-    "engram": {
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
   }
 }
 ```
