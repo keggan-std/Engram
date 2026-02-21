@@ -47,6 +47,13 @@ const IDE_CONFIGS: Record<string, any> = {
         ],
         format: "mcpServers",
     },
+    visualstudio: {
+        name: "Visual Studio 2022",
+        paths: [
+            path.join(HOME, ".mcp.json"), // Global config for Visual Studio
+        ],
+        format: "servers",
+    },
 };
 
 // ─── Engram Entry ────────────────────────────────────────────────────

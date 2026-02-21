@@ -218,7 +218,7 @@ As long as you have Node.js installed, your IDE will download and run the latest
 
 ### Option 1: The Magic Installer (Zero Config)
 
-Run this single command in your terminal. It will automatically detect your IDEs (Cursor, VS Code, Cline, Windsurf, Antigravity) and inject the correct configuration for you:
+Run this single command in your terminal. It will automatically detect your IDEs (Cursor, VS Code, Visual Studio, Cline, Windsurf, Antigravity) and inject the correct configuration for you:
 
 ```bash
 npx -y engram-mcp-server --install
