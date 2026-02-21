@@ -437,25 +437,105 @@ All data is stored in `.engram/memory.db` (SQLite with WAL mode) inside your pro
 
 ---
 
+## System Prompt for AI Agents
+
+To get the most out of Engram, **add this to your agent's system prompt** (or custom instructions). This tells the agent to use Engram automatically — without this, the agent won't know Engram exists.
+
+```
+You have access to Engram, a persistent memory MCP server. Follow these rules:
+
+1. ALWAYS call engram_start_session at the very beginning of each conversation.
+   This loads your context: previous session summary, changes, decisions, conventions, and tasks.
+
+2. After deeply reading a file for the first time, call engram_set_file_notes with:
+   purpose, dependencies, layer, and complexity. This means you won't need to re-read it next time.
+
+3. After modifying files, call engram_record_change with file path, change type, and description.
+   Use bulk recording when changing multiple files.
+
+4. When making architectural decisions, call engram_record_decision with the decision,
+   rationale, and affected files. This preserves the "why" for future sessions.
+
+5. Before ending a conversation, call engram_end_session with a detailed summary
+   of what was accomplished and what's pending. This summary is the first thing
+   the next session will see.
+
+6. If work is interrupted or partially complete, call engram_create_task to ensure
+   continuity. The next session will see open tasks automatically.
+
+7. Use engram_search to find anything previously recorded — it uses fast full-text search.
+```
+
+You can paste this into your IDE's custom instructions:
+- **Cursor**: Settings → Rules → User Rules
+- **Claude Code**: `CLAUDE.md` or `~/.claude/CLAUDE.md`
+- **Cline**: Custom instructions field in extension settings
+- **VS Code Copilot**: `.github/copilot-instructions.md`
+- **Visual Studio**: GitHub Copilot → Custom Instructions
+
+---
+
+## Backup & Restore Guide
+
+### Quick Backup (default location)
+
+The agent calls `engram_backup` — creates a timestamped copy at `.engram/backups/memory-{timestamp}.db`. Old backups are auto-pruned to keep the 10 most recent.
+
+### Backup to Cloud-Synced Folder
+
+For cross-machine portability, back up to a folder that auto-syncs:
+
+```
+engram_backup output_path="C:/Users/you/Dropbox/engram-backups/myproject.db"
+engram_backup output_path="C:/Users/you/OneDrive/engram-backups/myproject.db"
+engram_backup output_path="/Users/you/Google Drive/engram-backups/myproject.db"
+```
+
+### Restore on Another Machine
+
+```
+engram_restore input_path="C:/Users/you/Dropbox/engram-backups/myproject.db" confirm="yes-restore"
+```
+
+A safety backup of the current database is created automatically before overwriting. Restart the MCP server after restoring.
+
+### List Available Backups
+
+```
+engram_list_backups
+```
+
+Shows all backup files with sizes and timestamps.
+
+### JSON Export (Human-Readable)
+
+```
+engram_export output_path="./project-memory.json"
+```
+
+Produces a portable JSON dump you can inspect, share, or import into another project with `engram_import`.
+
+---
+
 ## Tips for Best Results
 
-1. **Always call `engram_start_session` first** — this is the agent's "wake up" call that loads all context.
+### What the agent does automatically
 
-2. **Record changes as you go** — don't wait until the end. Bulk recording is supported.
+These happen without you doing anything, as long as the system prompt above is configured:
 
-3. **Log decisions immediately** — "We chose X over Y because Z" is invaluable in future sessions.
+- **Session management** — starts and ends sessions with context and summaries
+- **Change tracking** — records file modifications as it works
+- **Decision logging** — captures "why" behind architectural choices
+- **File intelligence** — stores notes about files it reads deeply
+- **Convention tracking** — remembers project rules you agree on
+- **Auto-compaction** — when completed sessions exceed the threshold (default: 50), Engram automatically compacts old data at session start, with a backup first
 
-4. **Use file notes liberally** — especially for complex files. A 2-line purpose note saves 5 minutes of re-reading.
+### What you should do
 
-5. **End sessions with good summaries** — the summary is literally the first thing the next session sees.
-
-6. **Install git hooks** — `npm run install-hooks` gives you automatic change tracking even when the agent doesn't explicitly record changes.
-
-7. **Use tasks for continuity** — if work is interrupted, create a task so the next session knows to pick it up.
-
-8. **Back up to cloud-synced folders** — `engram_backup output_path="/path/to/Dropbox/engram-backup.db"` gives you cross-machine portability.
-
-9. **Compact periodically** — after 50+ sessions, run `engram_compact` to keep the database lean. It auto-backs up first.
+- **Add the system prompt** — without it, the agent won't use Engram at all. This is the single most important step.
+- **Install git hooks** — run `npm run install-hooks` once. This tracks git commits even when the agent forgets to record changes.
+- **Tell the agent to create tasks** — if you're stopping mid-work, say "create a task for what's pending" so the next session picks it up.
+- **Set your backup destination** — tell the agent where to back up: "back up engram to my Dropbox folder." This enables cross-machine portability.
 
 ---
 
@@ -466,3 +546,4 @@ MIT
 ---
 
 *Engram: Because your AI agent shouldn't have amnesia.*
+

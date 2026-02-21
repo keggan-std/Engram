@@ -4,9 +4,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb } from "../database.js";
+import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, backupDatabase } from "../database.js";
 import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince } from "../utils.js";
-import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES } from "../constants.js";
+import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, COMPACTION_THRESHOLD_SESSIONS } from "../constants.js";
 import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext } from "../types.js";
 
 export function registerSessionTools(server: McpServer): void {
@@ -54,6 +54,64 @@ Returns:
         "INSERT INTO sessions (started_at, agent_name, project_root) VALUES (?, ?, ?)"
       ).run(timestamp, agent_name, projectRoot);
       const sessionId = result.lastInsertRowid as number;
+
+      // ─── Auto-compaction ────────────────────────────────────
+      let autoCompacted = false;
+      try {
+        // Check config for threshold (fallback to constant)
+        let threshold = COMPACTION_THRESHOLD_SESSIONS;
+        try {
+          const configRow = db.prepare("SELECT value FROM config WHERE key = 'compact_threshold'").get() as { value: string } | undefined;
+          if (configRow) threshold = parseInt(configRow.value, 10);
+        } catch { /* config table may not exist yet */ }
+
+        const totalSessions = (db.prepare("SELECT COUNT(*) as c FROM sessions WHERE ended_at IS NOT NULL").get() as { c: number }).c;
+        if (totalSessions > threshold) {
+          // Check if auto_compact is enabled
+          let autoCompactEnabled = true;
+          try {
+            const autoRow = db.prepare("SELECT value FROM config WHERE key = 'auto_compact'").get() as { value: string } | undefined;
+            if (autoRow) autoCompactEnabled = autoRow.value === 'true';
+          } catch { /* default to enabled */ }
+
+          if (autoCompactEnabled) {
+            console.error(`[Engram] Auto-compacting: ${totalSessions} sessions exceed threshold of ${threshold}`);
+            try { backupDatabase(); } catch { /* best effort */ }
+
+            // Compact: keep recent sessions, summarize old changes
+            const cutoff = db.prepare(
+              "SELECT id FROM sessions ORDER BY id DESC LIMIT 1 OFFSET ?"
+            ).get(threshold) as { id: number } | undefined;
+
+            if (cutoff) {
+              const doCompact = db.transaction(() => {
+                const oldSessions = db.prepare(
+                  "SELECT id FROM sessions WHERE id <= ? AND ended_at IS NOT NULL"
+                ).all(cutoff.id) as Array<{ id: number }>;
+
+                for (const s of oldSessions) {
+                  const changes = db.prepare(
+                    "SELECT change_type, file_path, description FROM changes WHERE session_id = ? AND file_path != '(compacted)'"
+                  ).all(s.id) as Array<{ change_type: string; file_path: string; description: string }>;
+
+                  if (changes.length > 0) {
+                    const summary = changes.map(c => `[${c.change_type}] ${c.file_path}`).join("; ");
+                    db.prepare(
+                      "INSERT INTO changes (session_id, timestamp, file_path, change_type, description, impact_scope) VALUES (?, ?, ?, ?, ?, ?)"
+                    ).run(s.id, now(), "(compacted)", "modified", `Compacted ${changes.length} changes: ${summary.slice(0, 2000)}`, "global");
+                  }
+                  db.prepare("DELETE FROM changes WHERE session_id = ? AND file_path != '(compacted)'").run(s.id);
+                }
+              });
+              doCompact();
+              autoCompacted = true;
+              console.error(`[Engram] Auto-compaction complete.`);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`[Engram] Auto-compaction skipped: ${e}`);
+      }
 
       // Gather changes since last session
       let recordedChanges: ChangeRow[] = [];
@@ -126,7 +184,7 @@ Returns:
         project_snapshot_age_minutes: snapshotAge,
         git: { branch: gitBranch, head: gitHead },
         message: lastSession
-          ? `Session #${sessionId} started. Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${snapshotAge && snapshotAge > SNAPSHOT_TTL_MINUTES ? " Project snapshot is stale — consider refreshing with engram_scan_project." : ""}`
+          ? `Session #${sessionId} started. Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${snapshotAge && snapshotAge > SNAPSHOT_TTL_MINUTES ? " Project snapshot is stale — consider refreshing with engram_scan_project." : ""}`
           : `Session #${sessionId} started. This is the first session — no prior memory. Use engram_scan_project to build an initial project snapshot.`,
       };
 
