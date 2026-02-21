@@ -216,15 +216,17 @@ Engram is published to the npm registry. **You do not need to download or compil
 
 As long as you have Node.js installed, your IDE will download and run the latest version of Engram automatically using `npx`.
 
-### Option 1: The Magic Installer (Zero Config)
+### Option 1: The Magic Installer (Interactive)
 
-Run this single command in your terminal. It will automatically detect your IDEs (Cursor, VS Code, Visual Studio, Cline, Windsurf, Antigravity) and inject the correct configuration for you:
+Run this single command in your terminal. It will automatically detect your IDE (Cursor, VS Code, Visual Studio, Cline, Windsurf, Antigravity) and ask for confirmation before injecting the configuration:
 
 ```bash
 npx -y engram-mcp-server --install
 ```
 
-*(You can also run `npx -y engram-mcp-server --list` to see what IDEs it detects before installing)*
+If it cannot detect your IDE automatically, it will present a numbered menu where you can choose your IDE from a list, or even **provide a custom path** to any `mcp.json` file on your system.
+
+*(You can also run `npx -y engram-mcp-server --list` to preview which IDEs are detected on your machine!)*
 
 Restart your IDE, and Engram is ready!
 
