@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { dbCompat, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, forceFlush } from "../database.js";
+import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import type { TaskRow } from "../types.js";
 
@@ -44,7 +44,7 @@ Returns:
       },
     },
     async ({ title, description, priority, status, assigned_files, tags, blocked_by }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -107,7 +107,7 @@ Returns:
       },
     },
     async ({ id, status, priority, description, blocked_by, assigned_files, tags }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
 
       // Build dynamic update
@@ -169,7 +169,7 @@ Returns:
       },
     },
     async ({ status, priority, tag, include_done, limit }) => {
-      const db = dbCompat();
+      const db = getDb();
       let query = "SELECT * FROM tasks WHERE 1=1";
       const params: unknown[] = [];
 

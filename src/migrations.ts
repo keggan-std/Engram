@@ -1,0 +1,324 @@
+// ============================================================================
+// Engram MCP Server — Schema Migration System
+// ============================================================================
+
+import type { Database as DatabaseType } from "better-sqlite3";
+
+interface Migration {
+    version: number;
+    description: string;
+    up: (db: DatabaseType) => void;
+}
+
+// ─── Migration Definitions ───────────────────────────────────────────
+
+const migrations: Migration[] = [
+    // ─── V1: Baseline Schema ───────────────────────────────────────────
+    {
+        version: 1,
+        description: "Baseline schema — sessions, changes, decisions, file_notes, conventions, tasks, milestones, snapshot_cache",
+        up: (db) => {
+            db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          started_at TEXT NOT NULL,
+          ended_at TEXT,
+          summary TEXT,
+          agent_name TEXT DEFAULT 'unknown',
+          project_root TEXT NOT NULL,
+          tags TEXT,
+          parent_session_id INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS changes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          timestamp TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          change_type TEXT NOT NULL,
+          description TEXT NOT NULL,
+          diff_summary TEXT,
+          impact_scope TEXT DEFAULT 'local'
+        );
+        CREATE INDEX IF NOT EXISTS idx_changes_session ON changes(session_id);
+        CREATE INDEX IF NOT EXISTS idx_changes_file ON changes(file_path);
+        CREATE INDEX IF NOT EXISTS idx_changes_time ON changes(timestamp);
+
+        CREATE TABLE IF NOT EXISTS decisions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          timestamp TEXT NOT NULL,
+          decision TEXT NOT NULL,
+          rationale TEXT,
+          affected_files TEXT,
+          tags TEXT,
+          status TEXT DEFAULT 'active',
+          superseded_by INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
+
+        CREATE TABLE IF NOT EXISTS file_notes (
+          file_path TEXT PRIMARY KEY,
+          purpose TEXT,
+          dependencies TEXT,
+          dependents TEXT,
+          layer TEXT,
+          last_reviewed TEXT,
+          last_modified_session INTEGER,
+          notes TEXT,
+          complexity TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS conventions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          timestamp TEXT NOT NULL,
+          category TEXT NOT NULL,
+          rule TEXT NOT NULL,
+          examples TEXT,
+          enforced INTEGER DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT DEFAULT 'backlog',
+          priority TEXT DEFAULT 'medium',
+          assigned_files TEXT,
+          tags TEXT,
+          completed_at TEXT,
+          blocked_by TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS milestones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          timestamp TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          version TEXT,
+          tags TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS snapshot_cache (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          ttl_minutes INTEGER
+        );
+      `);
+        },
+    },
+
+    // ─── V2: FTS5 Full-Text Search ─────────────────────────────────────
+    {
+        version: 2,
+        description: "Add FTS5 virtual tables for high-performance full-text search",
+        up: (db) => {
+            db.exec(`
+        -- FTS5 for session summaries
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_sessions USING fts5(
+          summary,
+          tags,
+          content='sessions',
+          content_rowid='id'
+        );
+
+        -- FTS5 for change descriptions
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_changes USING fts5(
+          file_path,
+          description,
+          diff_summary,
+          content='changes',
+          content_rowid='id'
+        );
+
+        -- FTS5 for decisions
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_decisions USING fts5(
+          decision,
+          rationale,
+          tags,
+          content='decisions',
+          content_rowid='id'
+        );
+
+        -- FTS5 for file notes
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_file_notes USING fts5(
+          file_path,
+          purpose,
+          notes,
+          content='file_notes'
+        );
+
+        -- FTS5 for conventions
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_conventions USING fts5(
+          rule,
+          examples,
+          content='conventions',
+          content_rowid='id'
+        );
+
+        -- FTS5 for tasks
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_tasks USING fts5(
+          title,
+          description,
+          tags,
+          content='tasks',
+          content_rowid='id'
+        );
+
+        -- Triggers to keep FTS indexes in sync with main tables
+
+        -- Sessions triggers
+        CREATE TRIGGER IF NOT EXISTS trg_sessions_ai AFTER INSERT ON sessions BEGIN
+          INSERT INTO fts_sessions(rowid, summary, tags) VALUES (new.id, new.summary, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_sessions_au AFTER UPDATE ON sessions BEGIN
+          INSERT INTO fts_sessions(fts_sessions, rowid, summary, tags) VALUES('delete', old.id, old.summary, old.tags);
+          INSERT INTO fts_sessions(rowid, summary, tags) VALUES (new.id, new.summary, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_sessions_ad AFTER DELETE ON sessions BEGIN
+          INSERT INTO fts_sessions(fts_sessions, rowid, summary, tags) VALUES('delete', old.id, old.summary, old.tags);
+        END;
+
+        -- Changes triggers
+        CREATE TRIGGER IF NOT EXISTS trg_changes_ai AFTER INSERT ON changes BEGIN
+          INSERT INTO fts_changes(rowid, file_path, description, diff_summary) VALUES (new.id, new.file_path, new.description, new.diff_summary);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_changes_au AFTER UPDATE ON changes BEGIN
+          INSERT INTO fts_changes(fts_changes, rowid, file_path, description, diff_summary) VALUES('delete', old.id, old.file_path, old.description, old.diff_summary);
+          INSERT INTO fts_changes(rowid, file_path, description, diff_summary) VALUES (new.id, new.file_path, new.description, new.diff_summary);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_changes_ad AFTER DELETE ON changes BEGIN
+          INSERT INTO fts_changes(fts_changes, rowid, file_path, description, diff_summary) VALUES('delete', old.id, old.file_path, old.description, old.diff_summary);
+        END;
+
+        -- Decisions triggers
+        CREATE TRIGGER IF NOT EXISTS trg_decisions_ai AFTER INSERT ON decisions BEGIN
+          INSERT INTO fts_decisions(rowid, decision, rationale, tags) VALUES (new.id, new.decision, new.rationale, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_decisions_au AFTER UPDATE ON decisions BEGIN
+          INSERT INTO fts_decisions(fts_decisions, rowid, decision, rationale, tags) VALUES('delete', old.id, old.decision, old.rationale, old.tags);
+          INSERT INTO fts_decisions(rowid, decision, rationale, tags) VALUES (new.id, new.decision, new.rationale, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_decisions_ad AFTER DELETE ON decisions BEGIN
+          INSERT INTO fts_decisions(fts_decisions, rowid, decision, rationale, tags) VALUES('delete', old.id, old.decision, old.rationale, old.tags);
+        END;
+
+        -- Conventions triggers
+        CREATE TRIGGER IF NOT EXISTS trg_conventions_ai AFTER INSERT ON conventions BEGIN
+          INSERT INTO fts_conventions(rowid, rule, examples) VALUES (new.id, new.rule, new.examples);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_conventions_au AFTER UPDATE ON conventions BEGIN
+          INSERT INTO fts_conventions(fts_conventions, rowid, rule, examples) VALUES('delete', old.id, old.rule, old.examples);
+          INSERT INTO fts_conventions(rowid, rule, examples) VALUES (new.id, new.rule, new.examples);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_conventions_ad AFTER DELETE ON conventions BEGIN
+          INSERT INTO fts_conventions(fts_conventions, rowid, rule, examples) VALUES('delete', old.id, old.rule, old.examples);
+        END;
+
+        -- Tasks triggers
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_ai AFTER INSERT ON tasks BEGIN
+          INSERT INTO fts_tasks(rowid, title, description, tags) VALUES (new.id, new.title, new.description, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_au AFTER UPDATE ON tasks BEGIN
+          INSERT INTO fts_tasks(fts_tasks, rowid, title, description, tags) VALUES('delete', old.id, old.title, old.description, old.tags);
+          INSERT INTO fts_tasks(rowid, title, description, tags) VALUES (new.id, new.title, new.description, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_ad AFTER DELETE ON tasks BEGIN
+          INSERT INTO fts_tasks(fts_tasks, rowid, title, description, tags) VALUES('delete', old.id, old.title, old.description, old.tags);
+        END;
+      `);
+
+            // Populate FTS tables from existing data
+            db.exec(`
+        INSERT OR IGNORE INTO fts_sessions(rowid, summary, tags)
+          SELECT id, summary, tags FROM sessions;
+        INSERT OR IGNORE INTO fts_changes(rowid, file_path, description, diff_summary)
+          SELECT id, file_path, description, diff_summary FROM changes;
+        INSERT OR IGNORE INTO fts_decisions(rowid, decision, rationale, tags)
+          SELECT id, decision, rationale, tags FROM decisions;
+        INSERT OR IGNORE INTO fts_conventions(rowid, rule, examples)
+          SELECT id, rule, examples FROM conventions;
+        INSERT OR IGNORE INTO fts_tasks(rowid, title, description, tags)
+          SELECT id, title, description, tags FROM tasks;
+      `);
+        },
+    },
+
+    // ─── V3: Config Table ──────────────────────────────────────────────
+    {
+        version: 3,
+        description: "Add config table for user settings (retention, auto-compact, etc.)",
+        up: (db) => {
+            db.exec(`
+        CREATE TABLE IF NOT EXISTS config (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        -- Default settings
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('auto_compact', 'true', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('compact_threshold', '50', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('retention_days', '90', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('max_backups', '10', datetime('now'));
+
+        -- Additional composite indexes for better query performance
+        CREATE INDEX IF NOT EXISTS idx_changes_file_time ON changes(file_path, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_conventions_enforced ON conventions(enforced);
+        CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
+      `);
+        },
+    },
+];
+
+// ─── Migration Runner ────────────────────────────────────────────────
+
+export function runMigrations(db: DatabaseType): void {
+    // Ensure schema_meta table exists
+    db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+
+    // Get current version
+    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    const currentVersion = row ? parseInt(row.value, 10) : 0;
+
+    // Filter migrations that need to run
+    const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+
+    if (pendingMigrations.length === 0) {
+        return; // Already up to date
+    }
+
+    console.error(`[Engram] Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
+
+    for (const migration of pendingMigrations) {
+        console.error(`[Engram]   v${migration.version}: ${migration.description}`);
+
+        // Run migration in a transaction for safety
+        const runMigration = db.transaction(() => {
+            migration.up(db);
+            db.prepare(
+                "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
+            ).run(String(migration.version));
+        });
+
+        runMigration();
+    }
+
+    console.error(`[Engram] Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
+}
+
+export function getCurrentSchemaVersion(db: DatabaseType): number {
+    try {
+        const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+        return row ? parseInt(row.value, 10) : 0;
+    } catch {
+        return 0;
+    }
+}

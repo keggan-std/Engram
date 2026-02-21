@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { dbCompat, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, forceFlush } from "../database.js";
+import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import type { ChangeRow, DecisionRow, FileNoteRow, ConventionRow } from "../types.js";
 
@@ -46,7 +46,7 @@ Returns:
       },
     },
     async ({ changes }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -102,7 +102,7 @@ Returns:
       },
     },
     async ({ file_path, limit }) => {
-      const db = dbCompat();
+      const db = getDb();
 
       const notes = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(file_path) as unknown as FileNoteRow | undefined;
       const changes = db.prepare(
@@ -163,7 +163,7 @@ Returns:
       },
     },
     async ({ decision, rationale, affected_files, tags, status, supersedes }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -225,7 +225,7 @@ Returns:
       },
     },
     async ({ status, tag, file_path, limit }) => {
-      const db = dbCompat();
+      const db = getDb();
       let query = "SELECT * FROM decisions WHERE 1=1";
       const params: unknown[] = [];
 
@@ -271,7 +271,7 @@ Returns:
       },
     },
     async ({ id, status }) => {
-      const db = dbCompat();
+      const db = getDb();
       const result = db.prepare("UPDATE decisions SET status = ? WHERE id = ?").run(status, id);
       if (result.changes === 0) {
         return { isError: true, content: [{ type: "text", text: `Decision #${id} not found.` }] };
@@ -318,7 +318,7 @@ Returns:
       },
     },
     async ({ file_path, purpose, dependencies, dependents, layer, complexity, notes }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -387,7 +387,7 @@ Returns:
       },
     },
     async ({ file_path, layer, complexity }) => {
-      const db = dbCompat();
+      const db = getDb();
 
       if (file_path) {
         const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(file_path);
@@ -435,7 +435,7 @@ Returns:
       },
     },
     async ({ category, rule, examples }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -480,7 +480,7 @@ Returns:
       },
     },
     async ({ category, include_disabled }) => {
-      const db = dbCompat();
+      const db = getDb();
       let query = "SELECT * FROM conventions WHERE 1=1";
       const params: unknown[] = [];
 
@@ -530,7 +530,7 @@ Returns:
       },
     },
     async ({ id, enforced }) => {
-      const db = dbCompat();
+      const db = getDb();
       const result = db.prepare("UPDATE conventions SET enforced = ? WHERE id = ?").run(enforced ? 1 : 0, id);
       if (result.changes === 0) {
         return { isError: true, content: [{ type: "text", text: `Convention #${id} not found.` }] };

@@ -10,20 +10,24 @@ Named after the [engram](https://en.wikipedia.org/wiki/Engram_(neuropsychology))
 
 ---
 
-## The Problem
+## Why Engram Exists
 
-Every AI coding agent (GitHub Copilot, Claude Code, Cursor, Windsurf, Cline, etc.) is **stateless by default**. Each new session starts from scratch:
+Every AI coding agent — GitHub Copilot, Claude Code, Cursor, Windsurf, Cline — is **stateless by default**. Each new session starts from scratch:
 
 - The agent re-reads file structures and re-discovers architecture
 - Architectural decisions made in previous sessions are forgotten
 - The agent doesn't know what changed since it last worked
 - Conventions agreed upon are lost
 - Work-in-progress tasks have no continuity
-- Time, tokens, and patience are wasted on repeated discovery
+- **Time, tokens, and patience are wasted on repeated discovery**
 
-## The Solution
+### The Vision
 
-Engram is a local MCP server that maintains a SQLite database in your project (`.engram/memory.db`). The agent reads from it, writes to it, and picks up exactly where it left off.
+Engram was born out of a real frustration: watching AI agents in Visual Studio and other IDEs **review the same files over and over**, burning tokens and time on rediscovery instead of actual work. The idea is simple but powerful:
+
+> **An AI agent should only need to deeply review a file once.** After that, it should *remember* — what the file does, how it's structured, what decisions shaped it, and exactly where things are. When the user asks to change something, the agent shouldn't re-read the entire codebase. It should already know where to go, review the specific area in detail, make the change, and remember how it left things for next time.
+
+This is what Engram provides: a **persistent brain** that makes every session after the first one dramatically faster and more efficient.
 
 ```
 Session 1                          Session 2
@@ -39,6 +43,49 @@ Session 1                          Session 2
                                   │ Starts working immediately.  │
                                   └──────────────────────────────┘
 ```
+
+---
+
+## What's New in v1.1.0
+
+### 🚀 Native SQLite Engine (better-sqlite3)
+Replaced the in-memory sql.js (WASM) engine with **better-sqlite3** — a native, file-backed SQLite driver with Write-Ahead Logging (WAL). This means:
+- **No more loading the entire database into RAM** — reads and writes go directly to disk
+- **WAL mode** enables concurrent reads while writing, dramatically improving responsiveness
+- **No more full-database re-serialization** on every save — writes are incremental
+- **3-5x faster** for typical operations
+
+### 🔄 Schema Migration System
+Version-aware, incremental database migrations that run automatically on startup:
+- Safely evolves the schema without data loss
+- Each migration runs in a transaction — if it fails, nothing changes
+- Enables future features to add new tables/indexes without breaking existing databases
+
+### 🔍 FTS5 Full-Text Search
+Replaced slow `LIKE '%term%'` pattern matching with **FTS5** (SQLite's Full-Text Search 5):
+- **10-100x faster** searches across sessions, changes, decisions, notes, conventions, and tasks
+- Ranked results by relevance
+- Auto-sync triggers keep FTS indexes current — zero maintenance
+- Falls back to LIKE for backward compatibility
+
+### 🛡️ Auto-Backup Before Destructive Operations
+Before compaction or clearing memory, Engram automatically creates a backup copy of the database using SQLite's native backup API. No more accidental data loss.
+
+### 💾 Backup & Restore System
+New tools for cross-machine portability:
+- **`engram_backup`** — Create timestamped backups to any path (including cloud-synced folders)
+- **`engram_restore`** — Restore from a backup with automatic safety backup
+- **`engram_list_backups`** — Browse available backups
+- Auto-pruning keeps backup count under control
+
+### 📊 Enhanced Statistics
+`engram_stats` now reports schema version, database engine, and more detailed metrics.
+
+### ⚙️ Configuration Table
+Per-project settings for auto-compact threshold, data retention days, and max backup count.
+
+### 📈 Better Indexing
+Additional composite indexes for common query patterns — faster queries as data grows.
 
 ---
 
@@ -62,8 +109,8 @@ Record project conventions (naming, architecture, styling, testing, etc.) that t
 ### ✅ Task Management
 Create, update, and track work items across sessions. Tasks persist until completed — nothing falls through the cracks between sessions. Supports priorities, blocking relationships, and file assignments.
 
-### 🔍 Full-Text Search
-Search across everything: sessions, changes, decisions, file notes, conventions, and tasks. Find anything the agent has ever recorded.
+### 🔍 Full-Text Search (FTS5)
+High-performance ranked search across everything: sessions, changes, decisions, file notes, conventions, and tasks. Find anything the agent has ever recorded — instantly.
 
 ### 🗺️ Project Scanning
 Cached filesystem scanning with automatic architectural layer detection. The agent gets a structural overview without re-walking the directory tree.
@@ -74,14 +121,17 @@ Track file dependencies and dependents. Understand the impact radius of changes 
 ### 🏆 Milestones
 Record major project achievements — feature completions, releases, major refactors. Build a project timeline.
 
+### 💾 Backup & Restore
+Create and restore database backups to any location. Save to cloud-synced folders for cross-machine portability.
+
 ### 📦 Export & Import
 Export the entire memory as portable JSON. Import into another project or share knowledge with teammates.
 
 ### 🗜️ Memory Compaction
-Automatically summarize old session data to keep the database lean while preserving important context.
+Automatically summarize old session data to keep the database lean while preserving important context. Now with auto-backup and age-based retention.
 
 ### 📈 Statistics Dashboard
-See total sessions, changes, decisions, most-changed files, layer distribution, task status, and database size at a glance.
+See total sessions, changes, decisions, most-changed files, layer distribution, task status, schema version, and database size at a glance.
 
 ---
 
@@ -106,16 +156,19 @@ See total sessions, changes, decisions, most-changed files, layer distribution, 
 | `engram_update_task` | Update task status/priority | No |
 | `engram_get_tasks` | Query tasks with filters | Yes |
 | `engram_scan_project` | Scan and cache project structure | No |
-| `engram_search` | Full-text search across all memory | Yes |
+| `engram_search` | FTS5-powered search across all memory | Yes |
 | `engram_what_changed` | Comprehensive diff report since a timestamp | Yes |
 | `engram_get_dependency_map` | File dependency graph | Yes |
 | `engram_record_milestone` | Record a project milestone | No |
 | `engram_get_milestones` | Browse milestone timeline | Yes |
 | `engram_stats` | Memory statistics dashboard | Yes |
-| `engram_compact` | Compress old session data | No |
+| `engram_compact` | Compress old session data (auto-backup) | No |
+| `engram_backup` | Create a database backup | No |
+| `engram_restore` | Restore from a backup file | No |
+| `engram_list_backups` | List available backups | Yes |
 | `engram_export` | Export memory as JSON | Yes |
 | `engram_import` | Import memory from JSON | No |
-| `engram_clear` | Clear memory (with safety confirmation) | No |
+| `engram_clear` | Clear memory (auto-backup, safety confirm) | No |
 
 ---
 
@@ -128,10 +181,9 @@ See total sessions, changes, decisions, most-changed files, layer distribution, 
 ### Setup
 
 ```bash
-# Clone or copy the server into your tools directory
-cd /path/to/your/tools
-git clone <repo-url> engram-mcp-server
-cd engram-mcp-server
+# Clone the repository
+git clone git@github.com:keggan-std/Engram.git
+cd Engram
 
 # Install dependencies
 npm install
@@ -163,7 +215,7 @@ Add to `~/.claude.json` or your project's `.claude/settings.json`:
   "mcpServers": {
     "engram": {
       "command": "node",
-      "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"],
+      "args": ["/absolute/path/to/Engram/dist/index.js"],
       "env": {
         "ENGRAM_PROJECT_ROOT": "/path/to/your/project"
       }
@@ -179,7 +231,7 @@ Or for auto-detection (recommended — Engram walks up from cwd to find the proj
   "mcpServers": {
     "engram": {
       "command": "node",
-      "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"]
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
     }
   }
 }
@@ -193,7 +245,7 @@ In Cursor Settings → Features → MCP Servers, add:
 {
   "engram": {
     "command": "node",
-    "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"]
+    "args": ["/absolute/path/to/Engram/dist/index.js"]
   }
 }
 ```
@@ -207,7 +259,7 @@ Create `.vscode/mcp.json` in your project:
   "servers": {
     "engram": {
       "command": "node",
-      "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"]
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
     }
   }
 }
@@ -221,7 +273,7 @@ Visual Studio's MCP support is configured through the IDE:
 2. Add a new MCP server entry:
    - **Name**: `engram`
    - **Command**: `node`
-   - **Arguments**: `/absolute/path/to/engram-mcp-server/dist/index.js`
+   - **Arguments**: `/absolute/path/to/Engram/dist/index.js`
    - **Working Directory**: Your project root
 
 Alternatively, create a `.vs/mcp.json` in your solution root:
@@ -232,7 +284,7 @@ Alternatively, create a `.vs/mcp.json` in your solution root:
     "engram": {
       "type": "stdio",
       "command": "node",
-      "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"],
+      "args": ["/absolute/path/to/Engram/dist/index.js"],
       "env": {
         "ENGRAM_PROJECT_ROOT": "${solutionDir}"
       }
@@ -249,7 +301,7 @@ In the Cline extension settings → MCP Servers:
 {
   "engram": {
     "command": "node",
-    "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"],
+    "args": ["/absolute/path/to/Engram/dist/index.js"],
     "disabled": false
   }
 }
@@ -264,7 +316,7 @@ In Settings → MCP:
   "mcpServers": {
     "engram": {
       "command": "node",
-      "args": ["/absolute/path/to/engram-mcp-server/dist/index.js"]
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
     }
   }
 }
@@ -312,6 +364,30 @@ Agent: [calls engram_start_session]
        Starts working immediately on the pending tests.
 ```
 
+### Moving to a New Machine
+
+```
+Old machine:
+  Agent: [calls engram_backup output_path="/path/to/cloud-sync/engram-backup.db"]
+         → Backup saved to your cloud-synced folder
+
+New machine:
+  Agent: [calls engram_restore input_path="/path/to/cloud-sync/engram-backup.db" confirm="yes-restore"]
+         → Database restored. All memory intact.
+```
+
+---
+
+## Migration from v1.0.0
+
+If you're upgrading from the original sql.js version:
+
+1. **Your existing `.engram/memory.db` files are fully compatible** — the SQLite format is the same
+2. **Run `npm install` to get the new dependencies** (better-sqlite3 replaces sql.js)
+3. **Run `npm run build`**
+4. The migration system will automatically upgrade your schema on first startup — adding FTS5 indexes, config table, and composite indexes
+5. Your existing data is preserved and immediately searchable via FTS5
+
 ---
 
 ## Environment Variables
@@ -330,7 +406,15 @@ If no environment variable is set, Engram walks up the directory tree from `cwd`
 
 ## Data Storage
 
-All data is stored in `.engram/memory.db` (SQLite) inside your project root. This directory is automatically added to `.gitignore`.
+All data is stored in `.engram/memory.db` (SQLite with WAL mode) inside your project root. This directory is automatically added to `.gitignore`.
+
+### Database Engine
+
+**v1.1.0+** uses `better-sqlite3` — a native, synchronous SQLite driver with:
+- **WAL (Write-Ahead Logging)** — reads don't block writes
+- **Direct file I/O** — no in-memory database or manual persistence
+- **Native backup API** — consistent, safe backup copies
+- **Full FTS5 support** — high-performance full-text search
 
 ### Schema
 
@@ -341,11 +425,15 @@ All data is stored in `.engram/memory.db` (SQLite) inside your project root. Thi
 - **conventions** — Project rules and coding standards
 - **tasks** — Work items with priority, status, and assignments
 - **milestones** — Project achievements and version markers
+- **config** — Per-project settings
 - **snapshot_cache** — Cached computed data with TTL
+- **fts_*** — FTS5 virtual tables for full-text search (auto-maintained)
 
 ### Backup
 
-The database is a single file. Back it up by copying `.engram/memory.db`, or use `engram_export` for a portable JSON export.
+**Native backup**: Use `engram_backup` to create timestamped copies using SQLite's backup API. Save to cloud-synced folders (Dropbox, OneDrive, Google Drive) for cross-machine portability.
+
+**JSON export**: Use `engram_export` for a portable, human-readable JSON dump.
 
 ---
 
@@ -365,7 +453,9 @@ The database is a single file. Back it up by copying `.engram/memory.db`, or use
 
 7. **Use tasks for continuity** — if work is interrupted, create a task so the next session knows to pick it up.
 
-8. **Compact periodically** — after 50+ sessions, run `engram_compact` to keep the database lean.
+8. **Back up to cloud-synced folders** — `engram_backup output_path="/path/to/Dropbox/engram-backup.db"` gives you cross-machine portability.
+
+9. **Compact periodically** — after 50+ sessions, run `engram_compact` to keep the database lean. It auto-backs up first.
 
 ---
 

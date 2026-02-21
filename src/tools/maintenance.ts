@@ -1,14 +1,14 @@
 // ============================================================================
-// Engram MCP Server — Maintenance & Milestone Tools
+// Engram MCP Server — Maintenance, Backup & Milestone Tools
 // ============================================================================
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { dbCompat, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, forceFlush } from "../database.js";
-import { TOOL_PREFIX, DB_DIR_NAME, COMPACTION_THRESHOLD_SESSIONS } from "../constants.js";
-import type { MemoryStats, CompactionResult } from "../types.js";
+import { getDb, now, getCurrentSessionId, getProjectRoot, getDbSizeKb, getDbPath, backupDatabase } from "../database.js";
+import { TOOL_PREFIX, DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, COMPACTION_THRESHOLD_SESSIONS, MAX_BACKUP_COUNT } from "../constants.js";
+import type { MemoryStats, CompactionResult, BackupInfo } from "../types.js";
 
 export function registerMaintenanceTools(server: McpServer): void {
   // ─── MEMORY STATS ───────────────────────────────────────────────────
@@ -29,7 +29,7 @@ Returns:
       },
     },
     async () => {
-      const db = dbCompat();
+      const db = getDb();
 
       const count = (table: string): number =>
         (db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c;
@@ -52,7 +52,19 @@ Returns:
         SELECT status, COUNT(*) as count FROM tasks GROUP BY status ORDER BY count DESC
       `).all() as Array<{ status: string; count: number }>;
 
-      const stats: MemoryStats & { layer_distribution: typeof layerDist; tasks_by_status: typeof tasksByStatus } = {
+      // Schema version
+      let schemaVersion = 0;
+      try {
+        const vRow = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+        schemaVersion = vRow ? parseInt(vRow.value, 10) : 0;
+      } catch { /* no schema_meta */ }
+
+      const stats: MemoryStats & {
+        layer_distribution: typeof layerDist;
+        tasks_by_status: typeof tasksByStatus;
+        schema_version: number;
+        engine: string;
+      } = {
         total_sessions: count("sessions"),
         total_changes: count("changes"),
         total_decisions: count("decisions"),
@@ -66,6 +78,8 @@ Returns:
         database_size_kb: getDbSizeKb(),
         layer_distribution: layerDist,
         tasks_by_status: tasksByStatus,
+        schema_version: schemaVersion,
+        engine: "better-sqlite3 (WAL mode)",
       };
 
       return {
@@ -79,16 +93,18 @@ Returns:
     `${TOOL_PREFIX}_compact`,
     {
       title: "Compact Memory",
-      description: `Compact old session data to reduce database size. Merges change records from old sessions into summaries and removes granular entries. Sessions newer than the threshold are preserved in full.
+      description: `Compact old session data to reduce database size. Merges change records from old sessions into summaries and removes granular entries. Sessions newer than the threshold are preserved in full. Automatically creates a backup before compacting.
 
 Args:
   - keep_sessions (number, optional): Number of recent sessions to keep in full detail (default: ${COMPACTION_THRESHOLD_SESSIONS})
+  - max_age_days (number, optional): Also remove sessions older than N days (default: no age limit)
   - dry_run (boolean, optional): Show what would be compacted without actually doing it (default: true)
 
 Returns:
   CompactionResult with counts and freed storage.`,
       inputSchema: {
         keep_sessions: z.number().int().min(5).default(COMPACTION_THRESHOLD_SESSIONS).describe("Recent sessions to preserve"),
+        max_age_days: z.number().int().min(7).optional().describe("Remove sessions older than N days"),
         dry_run: z.boolean().default(true).describe("Preview mode — no changes made"),
       },
       annotations: {
@@ -98,8 +114,8 @@ Returns:
         openWorldHint: false,
       },
     },
-    async ({ keep_sessions, dry_run }) => {
-      const db = dbCompat();
+    async ({ keep_sessions, max_age_days, dry_run }) => {
+      const db = getDb();
 
       // Find the cutoff session ID
       const cutoff = db.prepare(
@@ -113,9 +129,16 @@ Returns:
       }
 
       // Count what would be compacted
-      const sessionsToCompact = (db.prepare(
-        "SELECT COUNT(*) as c FROM sessions WHERE id <= ? AND ended_at IS NOT NULL"
-      ).get(cutoff.id) as { c: number }).c;
+      let sessionsQuery = "SELECT COUNT(*) as c FROM sessions WHERE id <= ? AND ended_at IS NOT NULL";
+      const sessionsParams: unknown[] = [cutoff.id];
+
+      if (max_age_days) {
+        const cutoffDate = new Date(Date.now() - max_age_days * 86400000).toISOString();
+        sessionsQuery += " AND started_at < ?";
+        sessionsParams.push(cutoffDate);
+      }
+
+      const sessionsToCompact = (db.prepare(sessionsQuery).get(...sessionsParams) as { c: number }).c;
 
       const changesToSummarize = (db.prepare(
         "SELECT COUNT(*) as c FROM changes WHERE session_id <= ?"
@@ -139,8 +162,17 @@ Returns:
         };
       }
 
-      // Execute compaction
-      db.transaction(() => {
+      // ─── Auto-backup before compacting ──────────────────────────
+      let backupPath = "";
+      try {
+        backupPath = backupDatabase();
+        console.error(`[Engram] Auto-backup created before compaction: ${backupPath}`);
+      } catch (e) {
+        console.error(`[Engram] Warning: failed to create backup before compaction: ${e}`);
+      }
+
+      // Execute compaction in a transaction
+      const compact = db.transaction(() => {
         // For each old session, create a summarized change record
         const oldSessions = db.prepare(
           "SELECT id, summary FROM sessions WHERE id <= ? AND ended_at IS NOT NULL"
@@ -162,9 +194,11 @@ Returns:
           // Delete granular changes
           db.prepare("DELETE FROM changes WHERE session_id = ? AND file_path != '(compacted)'").run(session.id);
         }
-      })();
+      });
 
-      // Vacuum to reclaim space
+      compact();
+
+      // Vacuum to reclaim space (must be outside transaction)
       db.exec("VACUUM");
 
       const sizeAfter = getDbSizeKb();
@@ -176,7 +210,222 @@ Returns:
       };
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ ...result, message: "Compaction complete." }, null, 2) }],
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ...result,
+            backup_path: backupPath || null,
+            message: `Compaction complete. ${backupPath ? `Backup saved at ${backupPath}.` : ""}`,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── BACKUP DATABASE ───────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_backup`,
+    {
+      title: "Backup Database",
+      description: `Create a backup of the Engram memory database. Uses SQLite's native backup API for safe, consistent copies. Save to any path — including cloud-synced folders (Dropbox, OneDrive, Google Drive) for cross-machine portability.
+
+Args:
+  - output_path (string, optional): Where to save the backup (default: .engram/backups/memory-{timestamp}.db)
+  - prune_old (boolean, optional): Remove old backups beyond the max count (default: true)
+
+Returns:
+  BackupInfo with path, size, and timestamp.`,
+      inputSchema: {
+        output_path: z.string().optional().describe("Custom backup destination path"),
+        prune_old: z.boolean().default(true).describe("Prune old backups beyond the max count"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ output_path, prune_old }) => {
+      const backupPath = backupDatabase(output_path);
+
+      const stats = fs.statSync(backupPath);
+      const sizeKb = Math.round(stats.size / 1024);
+
+      // Get schema version
+      let dbVersion = 0;
+      try {
+        const db = getDb();
+        const vRow = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+        dbVersion = vRow ? parseInt(vRow.value, 10) : 0;
+      } catch { /* skip */ }
+
+      const info: BackupInfo = {
+        path: backupPath,
+        size_kb: sizeKb,
+        created_at: now(),
+        database_version: dbVersion,
+      };
+
+      // Prune old backups if saving to default directory
+      if (prune_old && !output_path) {
+        const backupDir = path.join(getProjectRoot(), DB_DIR_NAME, BACKUP_DIR_NAME);
+        try {
+          const files = fs.readdirSync(backupDir)
+            .filter(f => f.startsWith("memory-") && f.endsWith(".db"))
+            .map(f => ({
+              name: f,
+              path: path.join(backupDir, f),
+              mtime: fs.statSync(path.join(backupDir, f)).mtimeMs,
+            }))
+            .sort((a, b) => b.mtime - a.mtime);
+
+          if (files.length > MAX_BACKUP_COUNT) {
+            const toDelete = files.slice(MAX_BACKUP_COUNT);
+            for (const f of toDelete) {
+              fs.unlinkSync(f.path);
+            }
+            (info as BackupInfo & { pruned: number }).pruned = toDelete.length;
+          }
+        } catch { /* skip pruning */ }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            ...info,
+            message: `Backup created successfully at ${backupPath} (${sizeKb} KB).`,
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── RESTORE DATABASE ──────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_restore`,
+    {
+      title: "Restore Database",
+      description: `Restore the Engram memory database from a backup file. Creates a safety backup of the current database before overwriting. The MCP server will need to be restarted after restore.
+
+Args:
+  - input_path (string): Path to the backup .db file
+  - confirm (string): Must be "yes-restore" to execute
+
+Returns:
+  Confirmation and instructions to restart.`,
+      inputSchema: {
+        input_path: z.string().describe("Path to the backup .db file"),
+        confirm: z.string().describe('Type "yes-restore" to confirm'),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ input_path, confirm }) => {
+      if (confirm !== "yes-restore") {
+        return {
+          isError: true,
+          content: [{ type: "text", text: 'Safety check: set confirm to "yes-restore" to proceed.' }],
+        };
+      }
+
+      const projectRoot = getProjectRoot();
+      const inputPath = path.isAbsolute(input_path) ? input_path : path.join(projectRoot, input_path);
+
+      if (!fs.existsSync(inputPath)) {
+        return { isError: true, content: [{ type: "text", text: `Backup file not found: ${inputPath}` }] };
+      }
+
+      // Create safety backup of current database
+      let safetyBackupPath = "";
+      try {
+        safetyBackupPath = backupDatabase();
+        console.error(`[Engram] Safety backup created before restore: ${safetyBackupPath}`);
+      } catch (e) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to create safety backup before restore: ${e}. Aborting.` }],
+        };
+      }
+
+      // Copy the backup file over the current database
+      const dbPath = getDbPath();
+      try {
+        fs.copyFileSync(inputPath, dbPath);
+      } catch (e) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: `Failed to restore: ${e}. Your previous database is backed up at ${safetyBackupPath}.` }],
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            restored_from: inputPath,
+            safety_backup: safetyBackupPath,
+            message: "Database restored successfully. Please RESTART the MCP server to load the restored database. A safety backup of the previous database was created.",
+          }, null, 2),
+        }],
+      };
+    }
+  );
+
+  // ─── LIST BACKUPS ──────────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_list_backups`,
+    {
+      title: "List Backups",
+      description: `List all available backup files in the default backup directory.
+
+Returns:
+  Array of backup files with sizes and timestamps.`,
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async () => {
+      const backupDir = path.join(getProjectRoot(), DB_DIR_NAME, BACKUP_DIR_NAME);
+
+      if (!fs.existsSync(backupDir)) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ backups: [], message: "No backups found." }, null, 2) }],
+        };
+      }
+
+      const files = fs.readdirSync(backupDir)
+        .filter(f => f.endsWith(".db"))
+        .map(f => {
+          const fullPath = path.join(backupDir, f);
+          const stats = fs.statSync(fullPath);
+          return {
+            filename: f,
+            path: fullPath,
+            size_kb: Math.round(stats.size / 1024),
+            created_at: stats.mtime.toISOString(),
+          };
+        })
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            backup_directory: backupDir,
+            count: files.length,
+            backups: files,
+          }, null, 2),
+        }],
       };
     }
   );
@@ -210,7 +459,7 @@ Returns:
       },
     },
     async ({ title, description, version, tags }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -252,7 +501,7 @@ Returns:
       },
     },
     async ({ limit }) => {
-      const db = dbCompat();
+      const db = getDb();
       const milestones = db.prepare("SELECT * FROM milestones ORDER BY timestamp DESC LIMIT ?").all(limit);
       return { content: [{ type: "text", text: JSON.stringify({ milestones }, null, 2) }] };
     }
@@ -281,11 +530,11 @@ Returns:
       },
     },
     async ({ output_path }) => {
-      const db = dbCompat();
+      const db = getDb();
       const projectRoot = getProjectRoot();
 
       const exportData = {
-        engram_version: "1.0.0",
+        engram_version: "1.1.0",
         exported_at: now(),
         project_root: projectRoot,
         sessions: db.prepare("SELECT * FROM sessions ORDER BY id").all(),
@@ -378,9 +627,9 @@ Returns:
       }
 
       // Actual import — decisions, conventions, file_notes, tasks, milestones
-      const db = dbCompat();
+      const db = getDb();
 
-      db.transaction(() => {
+      const importTransaction = db.transaction(() => {
         // Import conventions (skip duplicates by rule text)
         if (Array.isArray(importData.conventions)) {
           for (const c of importData.conventions as Array<Record<string, unknown>>) {
@@ -426,7 +675,9 @@ Returns:
             }
           }
         }
-      })();
+      });
+
+      importTransaction();
 
       return {
         content: [{
@@ -442,7 +693,7 @@ Returns:
     `${TOOL_PREFIX}_clear`,
     {
       title: "Clear Memory",
-      description: `Clear specific tables or the entire memory database. USE WITH EXTREME CAUTION. This is irreversible.
+      description: `Clear specific tables or the entire memory database. USE WITH EXTREME CAUTION. This is irreversible. A backup is automatically created before clearing.
 
 Args:
   - scope: "all" | "sessions" | "changes" | "decisions" | "file_notes" | "conventions" | "tasks" | "milestones" | "cache"
@@ -469,7 +720,16 @@ Returns:
         };
       }
 
-      const db = dbCompat();
+      // ─── Auto-backup before clearing ──────────────────────────
+      let backupPath = "";
+      try {
+        backupPath = backupDatabase();
+        console.error(`[Engram] Auto-backup created before clear: ${backupPath}`);
+      } catch (e) {
+        console.error(`[Engram] Warning: failed to create backup before clear: ${e}`);
+      }
+
+      const db = getDb();
       const tables = scope === "all"
         ? ["sessions", "changes", "decisions", "file_notes", "conventions", "tasks", "milestones", "snapshot_cache"]
         : scope === "cache" ? ["snapshot_cache"] : [scope];
@@ -479,7 +739,10 @@ Returns:
       }
 
       return {
-        content: [{ type: "text", text: `Cleared: ${tables.join(", ")}. Memory has been reset.` }],
+        content: [{
+          type: "text",
+          text: `Cleared: ${tables.join(", ")}. Memory has been reset.${backupPath ? ` Backup saved at ${backupPath}.` : ""}`,
+        }],
       };
     }
   );

@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { dbCompat, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, forceFlush } from "../database.js";
+import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb } from "../database.js";
 import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince } from "../utils.js";
 import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES } from "../constants.js";
 import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext } from "../types.js";
@@ -35,7 +35,7 @@ Returns:
       },
     },
     async ({ agent_name, resume_task }) => {
-      const db = dbCompat();
+      const db = getDb();
       const projectRoot = getProjectRoot();
       const timestamp = now();
 
@@ -110,11 +110,11 @@ Returns:
         session_id: sessionId,
         previous_session: lastSession
           ? {
-              id: lastSession.id,
-              summary: lastSession.summary,
-              ended_at: lastSession.ended_at,
-              agent: lastSession.agent_name,
-            }
+            id: lastSession.id,
+            summary: lastSession.summary,
+            ended_at: lastSession.ended_at,
+            agent: lastSession.agent_name,
+          }
           : null,
         changes_since_last: {
           recorded: recordedChanges,
@@ -161,7 +161,7 @@ Returns:
       },
     },
     async ({ summary, tags }) => {
-      const db = dbCompat();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
@@ -225,7 +225,7 @@ Returns:
       },
     },
     async ({ limit, agent_name, offset }) => {
-      const db = dbCompat();
+      const db = getDb();
 
       let sessions;
       if (agent_name) {

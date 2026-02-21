@@ -3,13 +3,13 @@
 // ============================================================================
 
 export const SERVER_NAME = "engram-mcp-server";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 export const TOOL_PREFIX = "engram";
 
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 1;
+export const DB_VERSION = 3;
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
@@ -20,6 +20,9 @@ export const MAX_RESPONSE_LENGTH = 50000;
 export const DEFAULT_PAGINATION_LIMIT = 20;
 export const SNAPSHOT_TTL_MINUTES = 30;
 export const COMPACTION_THRESHOLD_SESSIONS = 50;
+export const BACKUP_DIR_NAME = "backups";
+export const DEFAULT_RETENTION_DAYS = 90;
+export const MAX_BACKUP_COUNT = 10;
 
 // File patterns to exclude from scanning
 export const EXCLUDED_DIRS = new Set([

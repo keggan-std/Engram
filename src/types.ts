@@ -213,3 +213,16 @@ export interface CompactionResult {
   changes_summarized: number;
   storage_freed_kb: number;
 }
+
+export interface ConfigRow {
+  key: string;
+  value: string;
+  updated_at: string;
+}
+
+export interface BackupInfo {
+  path: string;
+  size_kb: number;
+  created_at: string;
+  database_version: number;
+}

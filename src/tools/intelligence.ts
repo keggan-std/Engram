@@ -4,10 +4,38 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { dbCompat, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, forceFlush } from "../database.js";
+import { getDb, now, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, MAX_SEARCH_RESULTS } from "../constants.js";
 import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse } from "../utils.js";
 import type { FileNoteRow, DecisionRow, ConventionRow, ChangeRow, ProjectSnapshot } from "../types.js";
+
+// ─── FTS5 Helpers ────────────────────────────────────────────────────
+
+/**
+ * Check if FTS5 tables exist (migration v2 applied).
+ */
+function hasFts(db: ReturnType<typeof getDb>): boolean {
+  try {
+    const row = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='fts_sessions'"
+    ).get() as { name: string } | undefined;
+    return !!row;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Escape a user query for FTS5 MATCH syntax.
+ * Wraps each word in quotes to avoid syntax errors from special chars.
+ */
+function ftsEscape(query: string): string {
+  return query
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => `"${word.replace(/"/g, '""')}"`)
+    .join(" ");
+}
 
 export function registerIntelligenceTools(server: McpServer): void {
   // ─── SCAN PROJECT ───────────────────────────────────────────────────
@@ -35,7 +63,7 @@ Returns:
       },
     },
     async ({ force_refresh, max_depth }) => {
-      const db = dbCompat();
+      const db = getDb();
       const projectRoot = getProjectRoot();
 
       // Check cache freshness
@@ -113,12 +141,12 @@ Returns:
     }
   );
 
-  // ─── SEARCH MEMORY ──────────────────────────────────────────────────
+  // ─── SEARCH MEMORY (FTS5-powered) ──────────────────────────────────
   server.registerTool(
     `${TOOL_PREFIX}_search`,
     {
       title: "Search Memory",
-      description: `Full-text search across ALL memory: sessions, changes, decisions, file notes, conventions, and tasks. Use this to find anything the agent has ever recorded.
+      description: `Full-text search across ALL memory: sessions, changes, decisions, file notes, conventions, and tasks. Uses FTS5 for high-performance ranked results when available, falls back to LIKE for compatibility.
 
 Args:
   - query (string): Search term(s)
@@ -140,53 +168,131 @@ Returns:
       },
     },
     async ({ query, scope, limit }) => {
-      const db = dbCompat();
-      const term = `%${query}%`;
+      const db = getDb();
+      const useFts = hasFts(db);
       const results: Record<string, unknown[]> = {};
       let totalFound = 0;
-
       const perTable = Math.ceil(limit / 6);
 
-      if (scope === "all" || scope === "sessions") {
-        const rows = db.prepare(
-          "SELECT * FROM sessions WHERE summary LIKE ? OR tags LIKE ? ORDER BY id DESC LIMIT ?"
-        ).all(term, term, perTable);
-        if (rows.length) { results.sessions = rows; totalFound += rows.length; }
-      }
+      if (useFts) {
+        // ─── FTS5 Path (fast, ranked) ────────────────────────────
+        const ftsQuery = ftsEscape(query);
 
-      if (scope === "all" || scope === "changes") {
-        const rows = db.prepare(
-          "SELECT * FROM changes WHERE description LIKE ? OR file_path LIKE ? OR diff_summary LIKE ? ORDER BY timestamp DESC LIMIT ?"
-        ).all(term, term, term, perTable);
-        if (rows.length) { results.changes = rows; totalFound += rows.length; }
-      }
+        if (scope === "all" || scope === "sessions") {
+          try {
+            const rows = db.prepare(
+              `SELECT s.*, rank FROM fts_sessions f
+               JOIN sessions s ON s.id = f.rowid
+               WHERE fts_sessions MATCH ?
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.sessions = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
 
-      if (scope === "all" || scope === "decisions") {
-        const rows = db.prepare(
-          "SELECT * FROM decisions WHERE decision LIKE ? OR rationale LIKE ? OR tags LIKE ? ORDER BY timestamp DESC LIMIT ?"
-        ).all(term, term, term, perTable);
-        if (rows.length) { results.decisions = rows; totalFound += rows.length; }
-      }
+        if (scope === "all" || scope === "changes") {
+          try {
+            const rows = db.prepare(
+              `SELECT c.*, rank FROM fts_changes f
+               JOIN changes c ON c.id = f.rowid
+               WHERE fts_changes MATCH ?
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.changes = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
 
-      if (scope === "all" || scope === "file_notes") {
-        const rows = db.prepare(
-          "SELECT * FROM file_notes WHERE file_path LIKE ? OR purpose LIKE ? OR notes LIKE ? LIMIT ?"
-        ).all(term, term, term, perTable);
-        if (rows.length) { results.file_notes = rows; totalFound += rows.length; }
-      }
+        if (scope === "all" || scope === "decisions") {
+          try {
+            const rows = db.prepare(
+              `SELECT d.*, rank FROM fts_decisions f
+               JOIN decisions d ON d.id = f.rowid
+               WHERE fts_decisions MATCH ?
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.decisions = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
 
-      if (scope === "all" || scope === "conventions") {
-        const rows = db.prepare(
-          "SELECT * FROM conventions WHERE rule LIKE ? OR examples LIKE ? LIMIT ?"
-        ).all(term, term, perTable);
-        if (rows.length) { results.conventions = rows; totalFound += rows.length; }
-      }
+        if (scope === "all" || scope === "file_notes") {
+          try {
+            const rows = db.prepare(
+              `SELECT * FROM file_notes WHERE file_path IN (
+                 SELECT file_path FROM fts_file_notes WHERE fts_file_notes MATCH ?
+               ) LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.file_notes = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
 
-      if (scope === "all" || scope === "tasks") {
-        const rows = db.prepare(
-          "SELECT * FROM tasks WHERE title LIKE ? OR description LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?"
-        ).all(term, term, term, perTable);
-        if (rows.length) { results.tasks = rows; totalFound += rows.length; }
+        if (scope === "all" || scope === "conventions") {
+          try {
+            const rows = db.prepare(
+              `SELECT c.*, rank FROM fts_conventions f
+               JOIN conventions c ON c.id = f.rowid
+               WHERE fts_conventions MATCH ?
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.conventions = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
+
+        if (scope === "all" || scope === "tasks") {
+          try {
+            const rows = db.prepare(
+              `SELECT t.*, rank FROM fts_tasks f
+               JOIN tasks t ON t.id = f.rowid
+               WHERE fts_tasks MATCH ?
+               ORDER BY rank LIMIT ?`
+            ).all(ftsQuery, perTable);
+            if (rows.length) { results.tasks = rows; totalFound += rows.length; }
+          } catch { /* FTS match failed, skip */ }
+        }
+      } else {
+        // ─── LIKE Fallback (slow but compatible) ─────────────────
+        const term = `%${query}%`;
+
+        if (scope === "all" || scope === "sessions") {
+          const rows = db.prepare(
+            "SELECT * FROM sessions WHERE summary LIKE ? OR tags LIKE ? ORDER BY id DESC LIMIT ?"
+          ).all(term, term, perTable);
+          if (rows.length) { results.sessions = rows; totalFound += rows.length; }
+        }
+
+        if (scope === "all" || scope === "changes") {
+          const rows = db.prepare(
+            "SELECT * FROM changes WHERE description LIKE ? OR file_path LIKE ? OR diff_summary LIKE ? ORDER BY timestamp DESC LIMIT ?"
+          ).all(term, term, term, perTable);
+          if (rows.length) { results.changes = rows; totalFound += rows.length; }
+        }
+
+        if (scope === "all" || scope === "decisions") {
+          const rows = db.prepare(
+            "SELECT * FROM decisions WHERE decision LIKE ? OR rationale LIKE ? OR tags LIKE ? ORDER BY timestamp DESC LIMIT ?"
+          ).all(term, term, term, perTable);
+          if (rows.length) { results.decisions = rows; totalFound += rows.length; }
+        }
+
+        if (scope === "all" || scope === "file_notes") {
+          const rows = db.prepare(
+            "SELECT * FROM file_notes WHERE file_path LIKE ? OR purpose LIKE ? OR notes LIKE ? LIMIT ?"
+          ).all(term, term, term, perTable);
+          if (rows.length) { results.file_notes = rows; totalFound += rows.length; }
+        }
+
+        if (scope === "all" || scope === "conventions") {
+          const rows = db.prepare(
+            "SELECT * FROM conventions WHERE rule LIKE ? OR examples LIKE ? LIMIT ?"
+          ).all(term, term, perTable);
+          if (rows.length) { results.conventions = rows; totalFound += rows.length; }
+        }
+
+        if (scope === "all" || scope === "tasks") {
+          const rows = db.prepare(
+            "SELECT * FROM tasks WHERE title LIKE ? OR description LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?"
+          ).all(term, term, term, perTable);
+          if (rows.length) { results.tasks = rows; totalFound += rows.length; }
+        }
       }
 
       return {
@@ -195,6 +301,7 @@ Returns:
           text: JSON.stringify({
             query,
             scope,
+            search_engine: useFts ? "fts5" : "like",
             total_results: totalFound,
             results,
           }, null, 2),
@@ -228,7 +335,7 @@ Returns:
       },
     },
     async ({ since, include_git }) => {
-      const db = dbCompat();
+      const db = getDb();
       const projectRoot = getProjectRoot();
 
       // Resolve "since" to an ISO timestamp
@@ -321,7 +428,7 @@ Returns:
       },
     },
     async ({ file_path, depth }) => {
-      const db = dbCompat();
+      const db = getDb();
 
       function getDeps(fp: string, dir: "up" | "down", currentDepth: number): Record<string, unknown> {
         if (currentDepth > depth) return {};
