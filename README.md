@@ -195,6 +195,30 @@ npm run build
 npm run install-hooks
 ```
 
+### Add to Your IDE — One Command
+
+Run this after building to automatically add Engram to all supported IDEs detected on your machine:
+
+```bash
+npm run install-mcp
+```
+
+This detects and updates the MCP config for **Antigravity IDE, Cursor, VS Code, Cline, and Windsurf** — no manual path editing required. Just restart your IDE after.
+
+To preview which IDEs were detected before installing:
+
+```bash
+npm run install-mcp:list
+```
+
+To add to a specific IDE only:
+
+```bash
+node scripts/install-mcp.js --ide antigravity
+node scripts/install-mcp.js --ide cursor
+node scripts/install-mcp.js --ide vscode
+```
+
 ### Verify it works
 
 ```bash
@@ -206,9 +230,17 @@ npm run inspect
 
 ## Configuration
 
-### Claude Code
+> [!TIP]
+> **Quickest way**: Run `npm run install-mcp` after building — it auto-detects your IDEs and writes the config for you. Restart your IDE after.
 
-Add to `~/.claude.json` or your project's `.claude/settings.json`:
+If you prefer to configure manually, find your IDE below and paste the config snippet.
+
+### Antigravity IDE
+
+1. Click the **`...`** menu at the top of the Agent panel
+2. Select **MCP Servers → Manage MCP Servers**
+3. Click **"View raw config"**
+4. Add the `engram` block inside `"mcpServers"`:
 
 ```json
 {
@@ -216,15 +248,19 @@ Add to `~/.claude.json` or your project's `.claude/settings.json`:
     "engram": {
       "command": "node",
       "args": ["/absolute/path/to/Engram/dist/index.js"],
-      "env": {
-        "ENGRAM_PROJECT_ROOT": "/path/to/your/project"
-      }
+      "env": {}
     }
   }
 }
 ```
 
-Or for auto-detection (recommended — Engram walks up from cwd to find the project root):
+5. Save and **restart Antigravity IDE**
+
+> Replace `/absolute/path/to/Engram/dist/index.js` with the actual path on your machine — or just run `npm run install-mcp` and it's done automatically.
+
+### Claude Code
+
+Add to `~/.claude.json` or your project's `.claude/settings.json`:
 
 ```json
 {
@@ -267,16 +303,13 @@ Create `.vscode/mcp.json` in your project:
 
 ### Visual Studio 2022/2026 Enterprise
 
-Visual Studio's MCP support is configured through the IDE:
-
-1. **Tools → Options → GitHub Copilot → MCP Servers** (or Language Server Protocol settings)
+1. **Tools → Options → GitHub Copilot → MCP Servers**
 2. Add a new MCP server entry:
    - **Name**: `engram`
    - **Command**: `node`
    - **Arguments**: `/absolute/path/to/Engram/dist/index.js`
-   - **Working Directory**: Your project root
 
-Alternatively, create a `.vs/mcp.json` in your solution root:
+Or create a `.vs/mcp.json` in your solution root:
 
 ```json
 {

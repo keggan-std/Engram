@@ -13,6 +13,8 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "install-hooks": "node dist/scripts/install-hooks.js",
+    "install-mcp": "node scripts/install-mcp.js",
+    "install-mcp:list": "node scripts/install-mcp.js --list",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
   },
   "keywords": [
