@@ -46,7 +46,35 @@ Session 1                          Session 2
 
 ---
 
-## What's New in v1.1.0
+## What's New in v1.2.0
+
+### ⏰ Scheduled Events
+Defer work to specific triggers — agents can now schedule events for the next session, a specific time, or after a task completes:
+- **5 new tools**: `schedule_event`, `get_scheduled_events`, `update_scheduled_event`, `acknowledge_event`, `check_events`
+- **4 trigger types**: `next_session`, `datetime`, `task_complete`, `manual`
+- **Recurrence**: `every_session`, `daily`, `weekly` — fire repeatedly
+- **Approval flow**: Events surface at session start → user reviews → agent executes
+- See [`docs/scheduled-events.md`](docs/scheduled-events.md) for full documentation
+
+### 🏷️ Precise Tag Filtering
+Replaced imprecise `LIKE '%tag%'` matching with `json_each()` — searching for `auth` no longer matches `authentication` or `oauth`.
+
+### 📦 Full Import/Export
+`engram_import` now includes **sessions and changes** (previously skipped) with session ID mapping for FK consistency.
+
+### 🚫 `.engramignore` Support
+Create `.engramignore` in your project root to exclude custom directories from scanning (same format as `.gitignore`).
+
+### 🔄 Auto-Scan on Session Start
+`start_session` now automatically includes a cached project snapshot — agents no longer need to call `scan_project` manually.
+
+### 📋 Git Hook Log Ingestion
+Changes from `.engram/git-changes.log` (written by the post-commit hook) are now automatically parsed and surfaced at session start.
+
+---
+
+<details>
+<summary><strong>v1.1.0 Changelog</strong></summary>
 
 ### 🚀 Native SQLite Engine (better-sqlite3)
 Replaced the in-memory sql.js (WASM) engine with **better-sqlite3** — a native, file-backed SQLite driver with Write-Ahead Logging (WAL). This means:
@@ -87,6 +115,8 @@ Per-project settings for auto-compact threshold, data retention days, and max ba
 ### 📈 Better Indexing
 Additional composite indexes for common query patterns — faster queries as data grows.
 
+</details>
+
 ---
 
 ## Features
@@ -115,6 +145,9 @@ High-performance ranked search across everything: sessions, changes, decisions, 
 ### 🗺️ Project Scanning
 Cached filesystem scanning with automatic architectural layer detection. The agent gets a structural overview without re-walking the directory tree.
 
+### ⏰ Scheduled Events
+Defer work to specific triggers — next session, a datetime, task completion, or manual check. Events fire automatically and require user approval before execution. Supports recurrence (daily, weekly, every session).
+
 ### 📊 Dependency Mapping
 Track file dependencies and dependents. Understand the impact radius of changes before making them.
 
@@ -125,7 +158,7 @@ Record major project achievements — feature completions, releases, major refac
 Create and restore database backups to any location. Save to cloud-synced folders for cross-machine portability.
 
 ### 📦 Export & Import
-Export the entire memory as portable JSON. Import into another project or share knowledge with teammates.
+Export the entire memory as portable JSON. Import into another project or share knowledge with teammates. Sessions, changes, decisions, conventions, file notes, tasks, and milestones — all included.
 
 ### 🗜️ Memory Compaction
 Automatically summarize old session data to keep the database lean while preserving important context. Now with auto-backup and age-based retention.
@@ -167,8 +200,13 @@ See total sessions, changes, decisions, most-changed files, layer distribution, 
 | `engram_restore` | Restore from a backup file | No |
 | `engram_list_backups` | List available backups | Yes |
 | `engram_export` | Export memory as JSON | Yes |
-| `engram_import` | Import memory from JSON | No |
+| `engram_import` | Import memory from JSON (full: sessions, changes, decisions, notes, etc.) | No |
 | `engram_clear` | Clear memory (auto-backup, safety confirm) | No |
+| `engram_schedule_event` | Schedule deferred work with a trigger | No |
+| `engram_get_scheduled_events` | List/filter scheduled events | Yes |
+| `engram_update_scheduled_event` | Cancel, snooze, or reschedule events | No |
+| `engram_acknowledge_event` | Approve or decline a triggered event | No |
+| `engram_check_events` | Mid-session check for triggered events | Yes |
 
 ---
 
@@ -286,30 +324,9 @@ In Cursor Settings → Features → MCP Servers, add:
 }
 ```
 
-### VS Code (with Copilot MCP support)
+### VS Code (with GitHub Copilot)
 
-Create `.vscode/mcp.json` in your project:
-
-```json
-{
-  "servers": {
-    "engram": {
-      "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"]
-    }
-  }
-}
-```
-
-### Visual Studio 2022/2026 Enterprise
-
-1. **Tools → Options → GitHub Copilot → MCP Servers**
-2. Add a new MCP server entry:
-   - **Name**: `engram`
-   - **Command**: `node`
-   - **Arguments**: `/absolute/path/to/Engram/dist/index.js`
-
-Or create a `.vs/mcp.json` in your solution root:
+Create `.vscode/mcp.json` in your project root:
 
 ```json
 {
@@ -317,14 +334,59 @@ Or create a `.vs/mcp.json` in your solution root:
     "engram": {
       "type": "stdio",
       "command": "node",
-      "args": ["/absolute/path/to/Engram/dist/index.js"],
-      "env": {
-        "ENGRAM_PROJECT_ROOT": "${solutionDir}"
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
+    }
+  }
+}
+```
+
+Or add to your user `settings.json` to make Engram available across all workspaces:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "engram": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/absolute/path/to/Engram/dist/index.js"]
       }
     }
   }
 }
 ```
+
+### Visual Studio 2022/2026
+
+Create `.vs/mcp.json` in your solution root:
+
+```json
+{
+  "servers": {
+    "engram": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
+    }
+  }
+}
+```
+
+Or create a global config at `%USERPROFILE%\.mcp.json` (makes Engram available in all solutions):
+
+```json
+{
+  "servers": {
+    "engram": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/Engram/dist/index.js"]
+    }
+  }
+}
+```
+
+> **Note:** Server names in Visual Studio must not contain spaces.
 
 ### Cline / Roo Code
 
@@ -458,6 +520,7 @@ All data is stored in `.engram/memory.db` (SQLite with WAL mode) inside your pro
 - **conventions** — Project rules and coding standards
 - **tasks** — Work items with priority, status, and assignments
 - **milestones** — Project achievements and version markers
+- **scheduled_events** — Deferred work items with trigger conditions
 - **config** — Per-project settings
 - **snapshot_cache** — Cached computed data with TTL
 - **fts_*** — FTS5 virtual tables for full-text search (auto-maintained)
@@ -503,8 +566,8 @@ You can paste this into your IDE's custom instructions:
 - **Cursor**: Settings → Rules → User Rules
 - **Claude Code**: `CLAUDE.md` or `~/.claude/CLAUDE.md`
 - **Cline**: Custom instructions field in extension settings
-- **VS Code Copilot**: `.github/copilot-instructions.md`
-- **Visual Studio**: GitHub Copilot → Custom Instructions
+- **VS Code Copilot**: `.github/copilot-instructions.md` or `.copilot-instructions.md`
+- **Visual Studio**: `.github/copilot-instructions.md` or your GitHub Copilot custom instructions settings
 
 ---
 

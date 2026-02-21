@@ -167,12 +167,6 @@ Returns:
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
-      // If superseding, mark old decision
-      if (supersedes) {
-        db.prepare("UPDATE decisions SET status = 'superseded', superseded_by = NULL WHERE id = ?")
-          .run(supersedes);
-      }
-
       const result = db.prepare(
         "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       ).run(
@@ -184,12 +178,20 @@ Returns:
         supersedes || null
       );
 
+      const newDecisionId = result.lastInsertRowid as number;
+
+      // If superseding, mark old decision with the new decision's ID
+      if (supersedes) {
+        db.prepare("UPDATE decisions SET status = 'superseded', superseded_by = ? WHERE id = ?")
+          .run(newDecisionId, supersedes);
+      }
+
       return {
         content: [{
           type: "text",
           text: JSON.stringify({
-            decision_id: result.lastInsertRowid,
-            message: `Decision #${result.lastInsertRowid} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
+            decision_id: newDecisionId,
+            message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
             decision,
           }, null, 2),
         }],
@@ -230,8 +232,8 @@ Returns:
       const params: unknown[] = [];
 
       if (status) { query += " AND status = ?"; params.push(status); }
-      if (tag) { query += " AND tags LIKE ?"; params.push(`%${tag}%`); }
-      if (file_path) { query += " AND affected_files LIKE ?"; params.push(`%${file_path}%`); }
+      if (tag) { query += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; params.push(tag); }
+      if (file_path) { query += " AND EXISTS (SELECT 1 FROM json_each(affected_files) WHERE value = ?)"; params.push(file_path); }
 
       query += " ORDER BY timestamp DESC LIMIT ?";
       params.push(limit);

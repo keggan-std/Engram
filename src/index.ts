@@ -25,6 +25,7 @@ import { registerMemoryTools } from "./tools/memory.js";
 import { registerTaskTools } from "./tools/tasks.js";
 import { registerIntelligenceTools } from "./tools/intelligence.js";
 import { registerMaintenanceTools } from "./tools/maintenance.js";
+import { registerSchedulerTools } from "./tools/scheduler.js";
 
 // ─── Initialize ───────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
   registerTaskTools(server);         // create_task, update_task, get_tasks
   registerIntelligenceTools(server); // scan_project, search, what_changed, dependency_map
   registerMaintenanceTools(server);  // stats, compact, milestones, export, import, clear
+  registerSchedulerTools(server);    // schedule_event, get/update/acknowledge events, check_events
 
   console.error(`[Engram] ${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 

@@ -133,8 +133,24 @@ Returns:
         return { isError: true, content: [{ type: "text", text: `Task #${id} not found.` }] };
       }
 
+      // If task was marked done, trigger any scheduled events waiting on it
+      let triggeredEventCount = 0;
+      if (status === "done") {
+        try {
+          const triggerResult = db.prepare(
+            `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
+             WHERE status = 'pending' AND trigger_type = 'task_complete' AND trigger_value = ?`
+          ).run(timestamp, String(id));
+          triggeredEventCount = triggerResult.changes;
+        } catch { /* scheduled_events table may not exist yet */ }
+      }
+
       const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
-      return { content: [{ type: "text", text: JSON.stringify(updated, null, 2) }] };
+      const response: Record<string, unknown> = { ...(updated as Record<string, unknown>) };
+      if (triggeredEventCount > 0) {
+        response._triggered_events = `${triggeredEventCount} scheduled event(s) triggered by this task completion. Use engram_check_events to review.`;
+      }
+      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
     }
   );
 
@@ -176,7 +192,7 @@ Returns:
       if (!include_done) { query += " AND status NOT IN ('done', 'cancelled')"; }
       if (status) { query += " AND status = ?"; params.push(status); }
       if (priority) { query += " AND priority = ?"; params.push(priority); }
-      if (tag) { query += " AND tags LIKE ?"; params.push(`%${tag}%`); }
+      if (tag) { query += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; params.push(tag); }
 
       // Sort: critical > high > medium > low, then by creation date
       query += ` ORDER BY

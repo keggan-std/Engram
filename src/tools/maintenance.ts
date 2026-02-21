@@ -7,7 +7,7 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { getDb, now, getCurrentSessionId, getProjectRoot, getDbSizeKb, getDbPath, backupDatabase } from "../database.js";
-import { TOOL_PREFIX, DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, COMPACTION_THRESHOLD_SESSIONS, MAX_BACKUP_COUNT } from "../constants.js";
+import { TOOL_PREFIX, DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, COMPACTION_THRESHOLD_SESSIONS, MAX_BACKUP_COUNT, SERVER_VERSION } from "../constants.js";
 import type { MemoryStats, CompactionResult, BackupInfo } from "../types.js";
 
 export function registerMaintenanceTools(server: McpServer): void {
@@ -534,7 +534,7 @@ Returns:
       const projectRoot = getProjectRoot();
 
       const exportData = {
-        engram_version: "1.1.0",
+        engram_version: SERVER_VERSION,
         exported_at: now(),
         project_root: projectRoot,
         sessions: db.prepare("SELECT * FROM sessions ORDER BY id").all(),
@@ -630,6 +630,40 @@ Returns:
       const db = getDb();
 
       const importTransaction = db.transaction(() => {
+        // ─── Import sessions (skip duplicates by started_at + agent_name) ───
+        const sessionIdMap = new Map<number, number>(); // old → new
+        if (Array.isArray(importData.sessions)) {
+          for (const s of importData.sessions as Array<Record<string, unknown>>) {
+            const exists = db.prepare(
+              "SELECT id FROM sessions WHERE started_at = ? AND agent_name = ?"
+            ).get(s.started_at, s.agent_name || "unknown") as { id: number } | undefined;
+            if (!exists) {
+              const result = db.prepare(
+                "INSERT INTO sessions (started_at, ended_at, summary, agent_name, project_root, tags) VALUES (?, ?, ?, ?, ?, ?)"
+              ).run(s.started_at, s.ended_at || null, s.summary || null, s.agent_name || "unknown", s.project_root || "", s.tags || null);
+              sessionIdMap.set(s.id as number, result.lastInsertRowid as number);
+            } else {
+              sessionIdMap.set(s.id as number, exists.id);
+            }
+          }
+        }
+
+        // ─── Import changes (skip duplicates by file_path + timestamp + description) ───
+        if (Array.isArray(importData.changes)) {
+          for (const c of importData.changes as Array<Record<string, unknown>>) {
+            const exists = db.prepare(
+              "SELECT id FROM changes WHERE file_path = ? AND timestamp = ? AND description = ?"
+            ).get(c.file_path, c.timestamp, c.description);
+            if (!exists) {
+              // Map old session_id to new session_id
+              const mappedSessionId = c.session_id ? (sessionIdMap.get(c.session_id as number) ?? c.session_id) : null;
+              db.prepare(
+                "INSERT INTO changes (session_id, timestamp, file_path, change_type, description, diff_summary, impact_scope) VALUES (?, ?, ?, ?, ?, ?, ?)"
+              ).run(mappedSessionId, c.timestamp, c.file_path, c.change_type, c.description, c.diff_summary || null, c.impact_scope || "local");
+            }
+          }
+        }
+
         // Import conventions (skip duplicates by rule text)
         if (Array.isArray(importData.conventions)) {
           for (const c of importData.conventions as Array<Record<string, unknown>>) {

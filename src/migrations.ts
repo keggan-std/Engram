@@ -5,20 +5,20 @@
 import type { Database as DatabaseType } from "better-sqlite3";
 
 interface Migration {
-    version: number;
-    description: string;
-    up: (db: DatabaseType) => void;
+  version: number;
+  description: string;
+  up: (db: DatabaseType) => void;
 }
 
 // ─── Migration Definitions ───────────────────────────────────────────
 
 const migrations: Migration[] = [
-    // ─── V1: Baseline Schema ───────────────────────────────────────────
-    {
-        version: 1,
-        description: "Baseline schema — sessions, changes, decisions, file_notes, conventions, tasks, milestones, snapshot_cache",
-        up: (db) => {
-            db.exec(`
+  // ─── V1: Baseline Schema ───────────────────────────────────────────
+  {
+    version: 1,
+    description: "Baseline schema — sessions, changes, decisions, file_notes, conventions, tasks, milestones, snapshot_cache",
+    up: (db) => {
+      db.exec(`
         CREATE TABLE IF NOT EXISTS sessions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           started_at TEXT NOT NULL,
@@ -111,15 +111,15 @@ const migrations: Migration[] = [
           ttl_minutes INTEGER
         );
       `);
-        },
     },
+  },
 
-    // ─── V2: FTS5 Full-Text Search ─────────────────────────────────────
-    {
-        version: 2,
-        description: "Add FTS5 virtual tables for high-performance full-text search",
-        up: (db) => {
-            db.exec(`
+  // ─── V2: FTS5 Full-Text Search ─────────────────────────────────────
+  {
+    version: 2,
+    description: "Add FTS5 virtual tables for high-performance full-text search",
+    up: (db) => {
+      db.exec(`
         -- FTS5 for session summaries
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_sessions USING fts5(
           summary,
@@ -234,8 +234,8 @@ const migrations: Migration[] = [
         END;
       `);
 
-            // Populate FTS tables from existing data
-            db.exec(`
+      // Populate FTS tables from existing data
+      db.exec(`
         INSERT OR IGNORE INTO fts_sessions(rowid, summary, tags)
           SELECT id, summary, tags FROM sessions;
         INSERT OR IGNORE INTO fts_changes(rowid, file_path, description, diff_summary)
@@ -247,15 +247,15 @@ const migrations: Migration[] = [
         INSERT OR IGNORE INTO fts_tasks(rowid, title, description, tags)
           SELECT id, title, description, tags FROM tasks;
       `);
-        },
     },
+  },
 
-    // ─── V3: Config Table ──────────────────────────────────────────────
-    {
-        version: 3,
-        description: "Add config table for user settings (retention, auto-compact, etc.)",
-        up: (db) => {
-            db.exec(`
+  // ─── V3: Config Table ──────────────────────────────────────────────
+  {
+    version: 3,
+    description: "Add config table for user settings (retention, auto-compact, etc.)",
+    up: (db) => {
+      db.exec(`
         CREATE TABLE IF NOT EXISTS config (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL,
@@ -274,51 +274,94 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_conventions_enforced ON conventions(enforced);
         CREATE INDEX IF NOT EXISTS idx_sessions_ended ON sessions(ended_at);
       `);
-        },
     },
+  },
+
+  // ─── V4: Scheduled Events ─────────────────────────────────────────
+  {
+    version: 4,
+    description: "Add scheduled_events table for deferred work and reminders",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER,
+          created_at TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          trigger_type TEXT NOT NULL DEFAULT 'next_session',
+          trigger_value TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          triggered_at TEXT,
+          acknowledged_at TEXT,
+          requires_approval INTEGER DEFAULT 1,
+          action_summary TEXT,
+          action_data TEXT,
+          priority TEXT DEFAULT 'medium',
+          tags TEXT,
+          recurrence TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_events_status ON scheduled_events(status);
+        CREATE INDEX IF NOT EXISTS idx_events_trigger ON scheduled_events(trigger_type, status);
+
+        -- FTS5 for searching events
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_events USING fts5(
+          title, description, action_summary,
+          content='scheduled_events', content_rowid='id'
+        );
+
+        -- Sync trigger
+        CREATE TRIGGER IF NOT EXISTS fts_events_insert AFTER INSERT ON scheduled_events BEGIN
+          INSERT INTO fts_events(rowid, title, description, action_summary)
+          VALUES (new.id, new.title, new.description, new.action_summary);
+        END;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
 
 export function runMigrations(db: DatabaseType): void {
-    // Ensure schema_meta table exists
-    db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  // Ensure schema_meta table exists
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 
-    // Get current version
-    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
-    const currentVersion = row ? parseInt(row.value, 10) : 0;
+  // Get current version
+  const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+  const currentVersion = row ? parseInt(row.value, 10) : 0;
 
-    // Filter migrations that need to run
-    const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+  // Filter migrations that need to run
+  const pendingMigrations = migrations.filter(m => m.version > currentVersion);
 
-    if (pendingMigrations.length === 0) {
-        return; // Already up to date
-    }
+  if (pendingMigrations.length === 0) {
+    return; // Already up to date
+  }
 
-    console.error(`[Engram] Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  console.error(`[Engram] Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
 
-    for (const migration of pendingMigrations) {
-        console.error(`[Engram]   v${migration.version}: ${migration.description}`);
+  for (const migration of pendingMigrations) {
+    console.error(`[Engram]   v${migration.version}: ${migration.description}`);
 
-        // Run migration in a transaction for safety
-        const runMigration = db.transaction(() => {
-            migration.up(db);
-            db.prepare(
-                "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
-            ).run(String(migration.version));
-        });
+    // Run migration in a transaction for safety
+    const runMigration = db.transaction(() => {
+      migration.up(db);
+      db.prepare(
+        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
+      ).run(String(migration.version));
+    });
 
-        runMigration();
-    }
+    runMigration();
+  }
 
-    console.error(`[Engram] Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  console.error(`[Engram] Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
 }
 
 export function getCurrentSchemaVersion(db: DatabaseType): number {
-    try {
-        const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
-        return row ? parseInt(row.value, 10) : 0;
-    } catch {
-        return 0;
-    }
+  try {
+    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  } catch {
+    return 0;
+  }
 }

@@ -4,10 +4,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
 import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, backupDatabase } from "../database.js";
-import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince } from "../utils.js";
-import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, COMPACTION_THRESHOLD_SESSIONS } from "../constants.js";
-import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext } from "../types.js";
+import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince, scanFileTree, detectLayer, safeJsonParse } from "../utils.js";
+import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, COMPACTION_THRESHOLD_SESSIONS, DB_DIR_NAME, MAX_FILE_TREE_DEPTH } from "../constants.js";
+import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
 
 export function registerSessionTools(server: McpServer): void {
   // ─── START SESSION ──────────────────────────────────────────────────
@@ -155,16 +157,132 @@ Returns:
         ).all() as unknown[] as TaskRow[];
       }
 
-      // Snapshot age
-      const snapshotRow = db.prepare("SELECT updated_at FROM snapshot_cache WHERE key = 'project_structure'").get() as { updated_at: string } | undefined;
-      const snapshotAge = snapshotRow ? minutesSince(snapshotRow.updated_at) : null;
+      // ─── Auto Project Scan ───────────────────────────────────
+      let projectSnapshot: ProjectSnapshot | null = null;
+      try {
+        const cached = db.prepare("SELECT * FROM snapshot_cache WHERE key = 'project_structure'").get() as { value: string; updated_at: string } | undefined;
+        const snapshotAge = cached ? minutesSince(cached.updated_at) : null;
+
+        if (cached && snapshotAge !== null && snapshotAge < SNAPSHOT_TTL_MINUTES) {
+          // Serve from cache
+          projectSnapshot = safeJsonParse<ProjectSnapshot>(cached.value, null as unknown as ProjectSnapshot);
+        } else {
+          // Stale or missing — perform a fresh scan
+          const fileTree = scanFileTree(projectRoot, MAX_FILE_TREE_DEPTH);
+          const layerDist: Record<string, number> = {};
+          for (const f of fileTree) {
+            if (f.endsWith("/")) continue;
+            const layer = detectLayer(f);
+            layerDist[layer] = (layerDist[layer] || 0) + 1;
+          }
+          const fileNotes = db.prepare("SELECT * FROM file_notes ORDER BY file_path").all();
+          const decisions = db.prepare("SELECT * FROM decisions WHERE status = 'active' ORDER BY timestamp DESC LIMIT 20").all();
+          const conventions = db.prepare("SELECT * FROM conventions WHERE enforced = 1 ORDER BY category").all();
+
+          projectSnapshot = {
+            project_root: projectRoot,
+            file_tree: fileTree,
+            total_files: fileTree.filter((f: string) => !f.endsWith("/")).length,
+            file_notes: fileNotes,
+            recent_decisions: decisions,
+            active_conventions: conventions,
+            layer_distribution: layerDist,
+            generated_at: now(),
+          } as unknown as ProjectSnapshot;
+
+          // Persist to cache
+          db.prepare(
+            "INSERT OR REPLACE INTO snapshot_cache (key, value, updated_at, ttl_minutes) VALUES ('project_structure', ?, ?, ?)"
+          ).run(JSON.stringify(projectSnapshot), now(), SNAPSHOT_TTL_MINUTES);
+        }
+      } catch { /* scan is best-effort — never block session start */ }
+
+      // ─── Ingest git-changes.log (from post-commit hook) ─────
+      let gitHookLog = "";
+      try {
+        const hookLogPath = path.join(projectRoot, DB_DIR_NAME, "git-changes.log");
+        if (fs.existsSync(hookLogPath)) {
+          const raw = fs.readFileSync(hookLogPath, "utf-8");
+          // Only include entries since last session
+          if (lastSession?.ended_at) {
+            const lines = raw.split("\n");
+            const cutoffDate = new Date(lastSession.ended_at);
+            const relevantBlocks: string[] = [];
+            let inBlock = false;
+            let blockLines: string[] = [];
+            let blockDate: Date | null = null;
+
+            for (const line of lines) {
+              if (line.startsWith("--- COMMIT")) {
+                if (inBlock && blockDate && blockDate > cutoffDate) {
+                  relevantBlocks.push(blockLines.join("\n"));
+                }
+                inBlock = true;
+                blockLines = [line];
+                blockDate = null;
+              } else if (inBlock && line.startsWith("date:")) {
+                blockLines.push(line);
+                try { blockDate = new Date(line.replace("date:", "").trim()); } catch { /* skip */ }
+              } else if (inBlock) {
+                blockLines.push(line);
+              }
+            }
+            // Flush last block
+            if (inBlock && blockDate && blockDate > cutoffDate) {
+              relevantBlocks.push(blockLines.join("\n"));
+            }
+            gitHookLog = relevantBlocks.join("\n\n");
+          } else {
+            // First session — include last 20 lines as a hint
+            gitHookLog = raw.split("\n").slice(-20).join("\n");
+          }
+        }
+      } catch { /* git-changes.log is optional */ }
+
+      // Snapshot age (for message)
+      const snapshotAge = projectSnapshot ? 0 : null;
 
       // Git context
       const gitBranch = isGitRepo(projectRoot) ? getGitBranch(projectRoot) : null;
       const gitHead = isGitRepo(projectRoot) ? getGitHead(projectRoot) : null;
 
+      // ─── Check Scheduled Event Triggers ──────────────────────────
+      let triggeredEvents: ScheduledEventRow[] = [];
+      try {
+        const timestamp = now();
+
+        // Auto-trigger 'next_session' events
+        db.prepare(
+          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
+           WHERE status = 'pending' AND trigger_type = 'next_session'`
+        ).run(timestamp);
+
+        // Auto-trigger 'datetime' events that have passed
+        db.prepare(
+          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
+           WHERE status = 'pending' AND trigger_type = 'datetime' AND trigger_value <= ?`
+        ).run(timestamp, timestamp);
+
+        // Auto-trigger 'every_session' recurring events
+        db.prepare(
+          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
+           WHERE status = 'pending' AND recurrence = 'every_session'`
+        ).run(timestamp);
+
+        // Fetch all triggered events
+        triggeredEvents = db.prepare(
+          `SELECT * FROM scheduled_events WHERE status = 'triggered'
+           ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END`
+        ).all() as unknown[] as ScheduledEventRow[];
+      } catch { /* scheduled_events table may not exist yet */ }
+
       // Build response
-      const context: SessionContext & { git?: { branch: string | null; head: string | null } } = {
+      const context: SessionContext & {
+        git?: { branch: string | null; head: string | null };
+        project_snapshot?: ProjectSnapshot | null;
+        git_hook_log?: string;
+        triggered_events?: ScheduledEventRow[];
+      } = {
         session_id: sessionId,
         previous_session: lastSession
           ? {
@@ -183,9 +301,12 @@ Returns:
         open_tasks: openTasks,
         project_snapshot_age_minutes: snapshotAge,
         git: { branch: gitBranch, head: gitHead },
+        project_snapshot: projectSnapshot,
+        git_hook_log: gitHookLog || undefined,
+        triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
         message: lastSession
-          ? `Session #${sessionId} started. Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${snapshotAge && snapshotAge > SNAPSHOT_TTL_MINUTES ? " Project snapshot is stale — consider refreshing with engram_scan_project." : ""}`
-          : `Session #${sessionId} started. This is the first session — no prior memory. Use engram_scan_project to build an initial project snapshot.`,
+          ? `Session #${sessionId} started. Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ⚡ ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}`
+          : `Session #${sessionId} started. This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 
       return {

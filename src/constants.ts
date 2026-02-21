@@ -3,13 +3,13 @@
 // ============================================================================
 
 export const SERVER_NAME = "engram-mcp-server";
-export const SERVER_VERSION = "1.1.0";
+export const SERVER_VERSION = "1.2.0";
 export const TOOL_PREFIX = "engram";
 
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;

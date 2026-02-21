@@ -92,6 +92,25 @@ export interface MilestoneRow {
   tags: string | null;           // JSON array
 }
 
+export interface ScheduledEventRow {
+  id: number;
+  session_id: number | null;
+  created_at: string;
+  title: string;
+  description: string | null;
+  trigger_type: EventTriggerType;
+  trigger_value: string | null;
+  status: EventStatus;
+  triggered_at: string | null;
+  acknowledged_at: string | null;
+  requires_approval: number;       // 0 or 1 (SQLite boolean)
+  action_summary: string | null;
+  action_data: string | null;      // JSON
+  priority: TaskPriority;
+  tags: string | null;             // JSON array
+  recurrence: EventRecurrence | null;
+}
+
 // ─── Enum Types ─────────────────────────────────────────────────────────────
 
 export type ChangeType =
@@ -161,6 +180,26 @@ export type TaskPriority =
   | "high"
   | "medium"
   | "low";
+
+export type EventTriggerType =
+  | "next_session"
+  | "datetime"
+  | "task_complete"
+  | "manual";
+
+export type EventStatus =
+  | "pending"
+  | "triggered"
+  | "acknowledged"
+  | "executed"
+  | "cancelled"
+  | "snoozed";
+
+export type EventRecurrence =
+  | "once"
+  | "every_session"
+  | "daily"
+  | "weekly";
 
 // ─── Response Types ─────────────────────────────────────────────────────────
 

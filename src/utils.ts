@@ -47,6 +47,21 @@ export function scanFileTree(
 ): string[] {
   const files: string[] = [];
 
+  // Merge .engramignore entries with the default exclusion set
+  const exclusions = new Set(EXCLUDED_DIRS);
+  try {
+    const ignorePath = path.join(rootDir, ".engramignore");
+    if (fs.existsSync(ignorePath)) {
+      const lines = fs.readFileSync(ignorePath, "utf-8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith("#")) {
+          exclusions.add(trimmed.replace(/\/$/, "")); // Strip trailing slash
+        }
+      }
+    }
+  } catch { /* .engramignore is optional */ }
+
   function walk(dir: string, depth: number): void {
     if (depth > maxDepth || files.length >= maxEntries) return;
 
@@ -65,7 +80,7 @@ export function scanFileTree(
       if (entry.name.startsWith(".") && entry.isDirectory()) continue;
 
       if (entry.isDirectory()) {
-        if (EXCLUDED_DIRS.has(entry.name)) continue;
+        if (exclusions.has(entry.name)) continue;
         const subPath = path.relative(rootDir, path.join(dir, entry.name));
         files.push(subPath + "/");
         walk(path.join(dir, entry.name), depth + 1);
