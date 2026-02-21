@@ -18,6 +18,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { initDatabase, getProjectRoot } from "./database.js";
 import { findProjectRoot } from "./utils.js";
+import { runInstaller } from "./installer.js";
 
 // Tool registrations
 import { registerSessionTools } from "./tools/sessions.js";
@@ -30,6 +31,14 @@ import { registerSchedulerTools } from "./tools/scheduler.js";
 // ─── Initialize ───────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+
+  // ─── Auto-Installer ───────────────────────────────────────────────────
+  if (args.includes("install") || args.includes("--install") || args.includes("--list")) {
+    runInstaller(args);
+    return;
+  }
+
   // Detect project root
   const projectRoot = findProjectRoot();
   console.error(`[Engram] Project root: ${projectRoot}`);

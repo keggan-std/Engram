@@ -216,9 +216,23 @@ Engram is published to the npm registry. **You do not need to download or compil
 
 As long as you have Node.js installed, your IDE will download and run the latest version of Engram automatically using `npx`.
 
-### 1. Configure Your AI Agent
+### Option 1: The Magic Installer (Zero Config)
 
-Add Engram to your agent's MCP configuration using the zero-install `npx` command:
+Run this single command in your terminal. It will automatically detect your IDEs (Cursor, VS Code, Cline, Windsurf, Antigravity) and inject the correct configuration for you:
+
+```bash
+npx -y engram-mcp-server --install
+```
+
+*(You can also run `npx -y engram-mcp-server --list` to see what IDEs it detects before installing)*
+
+Restart your IDE, and Engram is ready!
+
+---
+
+### Option 2: Manual Configuration
+
+If you prefer to configure manually, find your IDE below and paste the config snippet.
 
 #### Cline / Roo Code
 In the extension settings → MCP Servers:

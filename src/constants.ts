@@ -3,7 +3,7 @@
 // ============================================================================
 
 export const SERVER_NAME = "engram-mcp-server";
-export const SERVER_VERSION = "1.2.0";
+export const SERVER_VERSION = "1.2.1";
 export const TOOL_PREFIX = "engram";
 
 // Database
