@@ -7,3 +7,10 @@ dist/
 *.db-wal
 *.db-shm
 .agents/
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
