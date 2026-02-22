@@ -8,8 +8,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
+import { createRepositories, type Repositories } from "./repositories/index.js";
 
 let _db: DatabaseType | null = null;
+let _repos: Repositories | null = null;
 let _projectRoot: string = process.cwd();
 let _dbPath: string = "";
 
@@ -34,12 +36,20 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   // Run versioned migrations
   runMigrations(_db);
 
+  // Initialize repositories
+  _repos = createRepositories(_db);
+
   return _db;
 }
 
 export function getDb(): DatabaseType {
   if (!_db) throw new Error("Database not initialized. Call initDatabase() first.");
   return _db;
+}
+
+export function getRepos(): Repositories {
+  if (!_repos) throw new Error("Repositories not initialized. Call initDatabase() first.");
+  return _repos;
 }
 
 export function getProjectRoot(): string {
