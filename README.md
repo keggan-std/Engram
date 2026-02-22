@@ -144,17 +144,67 @@ Create `.vs/mcp.json` in your solution root:
 ```
 </details>
 
+<details>
+<summary><strong>Trae IDE</strong></summary>
+
+For Trae IDE, edit `.trae/mcp.json` in your project root:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>JetBrains (Copilot Plugin)</strong></summary>
+
+Edit `~/.config/github-copilot/intellij/mcp.json` or use the built-in Settings → MCP Server:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Cline / Roo Code</strong></summary>
+
+In the extension settings → MCP Servers:
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
+```
+</details>
+
 ---
 
 ## Features
 
 - 🧠 **Session Continuity:** Each session automatically receives the previous session's summary, changes, decision, and full project context.
-- 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history.
+- ⏰ **Scheduled Events:** You can tell Engram to postpone tasks or remind you of things. Triggers include `next_session`, `datetime`, or `task_complete`.
+- 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history. You can also set up Git hooks to auto-commit logs directly into Engram.
 - 🏗️ **Architectural Decision Records:** Logs design decisions with rationale, affected files, and tags forever.
 - 📁 **File Intelligence:** Stores per-file notes (purpose, deps, layer, complexity) preventing endless re-reads.
 - 📐 **Convention Tracking:** Records and enforces project conventions (naming, testing, styling).
-- ✅ **Task Management:** Work items persist across sessions.
-- 🔍 **Full-Text Search (FTS5):** High-performance ranked search across all memory.
+- ✅ **Task Management:** Work items persist across sessions. Ask the agent to create a task for what's pending when you end a session.
+- 🔍 **Precise Full-Text Search (FTS5):** High-performance ranked search across all memory, with precise tag filtering using `json_each()`.
 - 💾 **Backup & Restore:** `engram_backup` creates timestamped SQLite copies to any path (like Dropbox/OneDrive) for seamless cross-machine portability.
 
 ---
@@ -188,18 +238,30 @@ graph TB
 
 ## Tools Reference
 
-Engram exposes 30+ tools. Here are the core highlights:
+Engram exposes 30+ tools. Here are the core highlights of what an agent can do for you:
 
+### Core Memory Tools
 | Tool | Purpose |
 |------|---------|
-| `engram_start_session` | Begin a session, getting full context from previous work |
-| `engram_end_session` | End session, providing a summary for the next time |
-| `engram_record_change` | Record file changes with descriptions |
-| `engram_set_file_notes` | Store intelligence about a file's purpose and complexity |
-| `engram_record_decision` | Log an architectural decision and its rationale |
-| `engram_create_task` | Create a persistent work item between sessions |
-| `engram_search` | FTS5-powered full-text search across all memories |
-| `engram_backup` | Create a portable database backup |
+| `engram_start_session` | Begin a session, getting full context from previous work. |
+| `engram_end_session` | End session, providing a summary for the next time. |
+| `engram_record_change` | Record file changes with descriptions. |
+| `engram_set_file_notes` | Store intelligence about a file's purpose and complexity. |
+| `engram_record_decision` | Log an architectural decision and its rationale. |
+
+### Tasks & Scheduling
+| Tool | Purpose |
+|------|---------|
+| `engram_create_task` | Create a persistent work item between sessions. |
+| `engram_schedule_event` | Schedule deferred work with a trigger (`next_session`, `datetime`, etc). |
+| `engram_check_events` | Mid-session check for triggered events that require attention. |
+
+### Utilities
+| Tool | Purpose |
+|------|---------|
+| `engram_search` | FTS5-powered full-text search across all memories. |
+| `engram_scan_project` | Scan and cache project structure automatically. |
+| `engram_backup` | Create a database backup to any synced folder. |
 
 *(Run the agent and ask to list available tools for the complete reference).*
 
@@ -247,6 +309,9 @@ We welcome contributions!
 
 This project is licensed under the [MIT License](LICENSE).
 
+---
+
 <div align="center">
-  <em>Because your AI agent shouldn't have amnesia.</em>
+  <em>Because your AI agent shouldn't have amnesia.</em><br/>
+  <strong>Copyright &copy; 2026 Keggan Standard - Tanzania</strong>
 </div>
