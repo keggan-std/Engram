@@ -64,6 +64,18 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 Engram is published to the npm registry. **You do not need to download or compile any code.** Your IDE will download and run the latest version automatically using `npx`.
 
+### Prerequisites
+
+Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, which includes a native C++ addon. On most systems this is handled automatically via prebuilt binaries. However, if no prebuilt binary matches your platform, npm will attempt to compile from source — which requires:
+
+- **Windows:** [Node.js](https://nodejs.org) (v18+) and [Windows Build Tools](https://github.com/nodejs/node-gyp#on-windows) (Visual C++ Build Tools + Python). Install them with:
+  ```bash
+  npm install -g windows-build-tools
+  ```
+  Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
+- **Mac:** Xcode Command Line Tools (`xcode-select --install`)
+- **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
+
 ### Option 1: The Magic Installer (Interactive)
 Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
 

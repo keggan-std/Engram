@@ -8,8 +8,13 @@
     "engram": "dist/index.js",
     "engram-mcp-server": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "scripts/"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",
