@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
+import { success, error } from "../response.js";
 import type { ScheduledEventRow } from "../types.js";
 
 export function registerSchedulerTools(server: McpServer): void {
@@ -54,18 +55,11 @@ Returns:
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
-            // Validate trigger_value for specific trigger types
             if (trigger_type === "datetime" && !trigger_value) {
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: "trigger_value (ISO datetime) is required when trigger_type is 'datetime'." }],
-                };
+                return error("trigger_value (ISO datetime) is required when trigger_type is 'datetime'.");
             }
             if (trigger_type === "task_complete" && !trigger_value) {
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: "trigger_value (task ID as string) is required when trigger_type is 'task_complete'." }],
-                };
+                return error("trigger_value (task ID as string) is required when trigger_type is 'task_complete'.");
             }
 
             const result = db.prepare(
@@ -87,19 +81,14 @@ Returns:
                         trigger_type === "task_complete" ? `when task #${trigger_value} completes` :
                             "when manually checked";
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        event_id: result.lastInsertRowid,
-                        title,
-                        trigger: triggerDesc,
-                        requires_approval,
-                        recurrence: recurrence || "once",
-                        message: `Event #${result.lastInsertRowid} scheduled — will trigger on ${triggerDesc}.${requires_approval ? " User approval required before execution." : ""}`,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                event_id: Number(result.lastInsertRowid),
+                title,
+                trigger: triggerDesc,
+                requires_approval,
+                recurrence: recurrence || "once",
+                message: `Event #${result.lastInsertRowid} scheduled — will trigger on ${triggerDesc}.${requires_approval ? " User approval required before execution." : ""}`,
+            });
         }
     );
 
@@ -151,16 +140,11 @@ Returns:
             const events = db.prepare(query).all(...params) as unknown[] as ScheduledEventRow[];
             const pendingCount = (db.prepare("SELECT COUNT(*) as c FROM scheduled_events WHERE status IN ('pending', 'triggered')").get() as { c: number }).c;
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        total_active: pendingCount,
-                        returned: events.length,
-                        events,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                total_active: pendingCount,
+                returned: events.length,
+                events,
+            });
         }
     );
 
@@ -201,13 +185,11 @@ Returns:
         async ({ id, status, trigger_type, trigger_value, title, description, priority }) => {
             const db = getDb();
 
-            // Check event exists
             const existing = db.prepare("SELECT * FROM scheduled_events WHERE id = ?").get(id);
             if (!existing) {
-                return { isError: true, content: [{ type: "text", text: `Event #${id} not found.` }] };
+                return error(`Event #${id} not found.`);
             }
 
-            // Build dynamic update
             const updates: string[] = [];
             const params: unknown[] = [];
 
@@ -216,7 +198,6 @@ Returns:
                 if (status === "acknowledged") { updates.push("acknowledged_at = ?"); params.push(now()); }
                 if (status === "executed") { updates.push("acknowledged_at = COALESCE(acknowledged_at, ?)"); params.push(now()); }
                 if (status === "pending") {
-                    // Resetting — clear trigger timestamps
                     updates.push("triggered_at = NULL");
                     updates.push("acknowledged_at = NULL");
                 }
@@ -228,22 +209,17 @@ Returns:
             if (priority !== undefined) { updates.push("priority = ?"); params.push(priority); }
 
             if (updates.length === 0) {
-                return { content: [{ type: "text", text: `No changes specified for event #${id}.` }] };
+                return success({ message: `No changes specified for event #${id}.` });
             }
 
             params.push(id);
             db.prepare(`UPDATE scheduled_events SET ${updates.join(", ")} WHERE id = ?`).run(...params);
 
             const updated = db.prepare("SELECT * FROM scheduled_events WHERE id = ?").get(id) as unknown as ScheduledEventRow;
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        message: `Event #${id} updated.`,
-                        event: updated,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                message: `Event #${id} updated.`,
+                event: updated,
+            } as unknown as Record<string, unknown>);
         }
     );
 
@@ -278,7 +254,7 @@ Returns:
 
             const event = db.prepare("SELECT * FROM scheduled_events WHERE id = ?").get(id) as unknown as ScheduledEventRow | undefined;
             if (!event) {
-                return { isError: true, content: [{ type: "text", text: `Event #${id} not found.` }] };
+                return error(`Event #${id} not found.`);
             }
 
             if (approved) {
@@ -286,9 +262,7 @@ Returns:
                     "UPDATE scheduled_events SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?"
                 ).run(now(), id);
 
-                // Handle recurrence: reset recurring events to pending after acknowledgement
                 if (event.recurrence && event.recurrence !== "once") {
-                    // For recurring events, immediately clone to a new pending event
                     const nextTriggerValue = event.trigger_type === "datetime" ? calculateNextTrigger(event.recurrence, event.trigger_value) : event.trigger_value;
                     db.prepare(
                         `INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence)
@@ -302,31 +276,21 @@ Returns:
                     );
                 }
 
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            event_id: id,
-                            status: "acknowledged",
-                            message: `Event #${id} approved for execution. "${event.title}"${note ? ` — Note: ${note}` : ""}${event.recurrence && event.recurrence !== "once" ? ` (recurring: ${event.recurrence} — new pending event created)` : ""}`,
-                        }, null, 2),
-                    }],
-                };
+                return success({
+                    event_id: id,
+                    status: "acknowledged",
+                    message: `Event #${id} approved for execution. "${event.title}"${note ? ` — Note: ${note}` : ""}${event.recurrence && event.recurrence !== "once" ? ` (recurring: ${event.recurrence} — new pending event created)` : ""}`,
+                });
             } else {
                 db.prepare(
                     "UPDATE scheduled_events SET status = 'cancelled', acknowledged_at = ? WHERE id = ?"
                 ).run(now(), id);
 
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            event_id: id,
-                            status: "cancelled",
-                            message: `Event #${id} declined and cancelled. "${event.title}"${note ? ` — Reason: ${note}` : ""}`,
-                        }, null, 2),
-                    }],
-                };
+                return success({
+                    event_id: id,
+                    status: "cancelled",
+                    message: `Event #${id} declined and cancelled. "${event.title}"${note ? ` — Reason: ${note}` : ""}`,
+                });
             }
         }
     );
@@ -352,13 +316,11 @@ Returns:
             const db = getDb();
             const timestamp = now();
 
-            // Auto-trigger datetime events that have passed
             db.prepare(
                 `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
          WHERE status = 'pending' AND trigger_type = 'datetime' AND trigger_value <= ?`
             ).run(timestamp, timestamp);
 
-            // Fetch all events needing attention
             const events = db.prepare(
                 `SELECT * FROM scheduled_events
          WHERE status IN ('triggered', 'pending')
@@ -371,29 +333,21 @@ Returns:
             const triggered = events.filter(e => e.status === "triggered");
             const pending = events.filter(e => e.status === "pending");
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        triggered_count: triggered.length,
-                        pending_count: pending.length,
-                        triggered_events: triggered,
-                        pending_events: pending,
-                        message: triggered.length > 0
-                            ? `${triggered.length} event(s) triggered and awaiting action.`
-                            : "No events triggered. All clear.",
-                    }, null, 2),
-                }],
-            };
+            return success({
+                triggered_count: triggered.length,
+                pending_count: pending.length,
+                triggered_events: triggered,
+                pending_events: pending,
+                message: triggered.length > 0
+                    ? `${triggered.length} event(s) triggered and awaiting action.`
+                    : "No events triggered. All clear.",
+            });
         }
     );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Calculate the next trigger datetime for recurring events.
- */
 function calculateNextTrigger(recurrence: string, currentValue: string | null): string {
     const base = currentValue ? new Date(currentValue) : new Date();
     switch (recurrence) {
@@ -404,7 +358,6 @@ function calculateNextTrigger(recurrence: string, currentValue: string | null): 
             base.setDate(base.getDate() + 7);
             break;
         case "every_session":
-            // No datetime shift — fires on next session
             return currentValue || new Date().toISOString();
         default:
             break;

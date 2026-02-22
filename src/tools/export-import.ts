@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getDb, now, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, DB_DIR_NAME, SERVER_VERSION } from "../constants.js";
+import { success, error } from "../response.js";
 
 export function registerExportImportTools(server: McpServer): void {
     // ─── EXPORT MEMORY ──────────────────────────────────────────────────
@@ -52,23 +53,18 @@ Returns:
             const filePath = output_path || path.join(projectRoot, DB_DIR_NAME, "export.json");
             fs.writeFileSync(filePath, JSON.stringify(exportData, null, 2));
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        exported_to: filePath,
-                        counts: {
-                            sessions: (exportData.sessions as unknown[]).length,
-                            changes: (exportData.changes as unknown[]).length,
-                            decisions: (exportData.decisions as unknown[]).length,
-                            file_notes: (exportData.file_notes as unknown[]).length,
-                            conventions: (exportData.conventions as unknown[]).length,
-                            tasks: (exportData.tasks as unknown[]).length,
-                            milestones: (exportData.milestones as unknown[]).length,
-                        },
-                    }, null, 2),
-                }],
-            };
+            return success({
+                exported_to: filePath,
+                counts: {
+                    sessions: (exportData.sessions as unknown[]).length,
+                    changes: (exportData.changes as unknown[]).length,
+                    decisions: (exportData.decisions as unknown[]).length,
+                    file_notes: (exportData.file_notes as unknown[]).length,
+                    conventions: (exportData.conventions as unknown[]).length,
+                    tasks: (exportData.tasks as unknown[]).length,
+                    milestones: (exportData.milestones as unknown[]).length,
+                },
+            });
         }
     );
 
@@ -101,14 +97,14 @@ Returns:
             const filePath = path.isAbsolute(input_path) ? input_path : path.join(projectRoot, input_path);
 
             if (!fs.existsSync(filePath)) {
-                return { isError: true, content: [{ type: "text", text: `File not found: ${filePath}` }] };
+                return error(`File not found: ${filePath}`);
             }
 
             let importData: Record<string, unknown[]>;
             try {
                 importData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
             } catch (e) {
-                return { isError: true, content: [{ type: "text", text: `Invalid JSON: ${e}` }] };
+                return error(`Invalid JSON: ${e}`);
             }
 
             const counts: Record<string, number> = {};
@@ -117,16 +113,11 @@ Returns:
             }
 
             if (dry_run) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: JSON.stringify({
-                            dry_run: true,
-                            would_import: counts,
-                            message: "Run with dry_run=false to execute the import.",
-                        }, null, 2),
-                    }],
-                };
+                return success({
+                    dry_run: true,
+                    would_import: counts,
+                    message: "Run with dry_run=false to execute the import.",
+                });
             }
 
             const db = getDb();
@@ -208,12 +199,7 @@ Returns:
 
             importTransaction();
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({ imported: counts, message: "Import complete. Duplicates were skipped." }, null, 2),
-                }],
-            };
+            return success({ imported: counts, message: "Import complete. Duplicates were skipped." });
         }
     );
 }

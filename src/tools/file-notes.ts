@@ -4,9 +4,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId } from "../database.js";
+import { now, getCurrentSessionId, getRepos } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
-import type { FileNoteRow } from "../types.js";
+import { normalizePath } from "../utils.js";
+import { success } from "../response.js";
 
 export function registerFileNoteTools(server: McpServer): void {
     server.registerTool(
@@ -43,46 +44,67 @@ Returns:
             },
         },
         async ({ file_path, purpose, dependencies, dependents, layer, complexity, notes }) => {
-            const db = getDb();
+            const repos = getRepos();
+            const timestamp = now();
+            const sessionId = getCurrentSessionId();
+            const fp = normalizePath(file_path);
+
+            repos.fileNotes.upsert(fp, timestamp, sessionId, {
+                purpose, dependencies, dependents, layer, complexity, notes,
+            });
+
+            return success({ message: `File notes saved for ${fp}.` });
+        }
+    );
+
+    // ─── BATCH SET FILE NOTES ────────────────────────────────────────
+    server.registerTool(
+        `${TOOL_PREFIX}_set_file_notes_batch`,
+        {
+            title: "Set File Notes (Batch)",
+            description: `Store persistent notes for multiple files in a single call. Atomic — either all succeed or none. Ideal after analyzing multiple files.
+
+Args:
+  - files (array, 1-100): Array of file note objects, each with:
+    - file_path (string): Relative path to the file
+    - purpose (string, optional): What this file does
+    - dependencies (array, optional): Files this depends on
+    - dependents (array, optional): Files that depend on this
+    - layer (string, optional): Architectural layer
+    - complexity (string, optional): Complexity level
+    - notes (string, optional): Important context
+
+Returns:
+  Confirmation with count.`,
+            inputSchema: {
+                files: z.array(z.object({
+                    file_path: z.string().describe("Relative path to the file"),
+                    purpose: z.string().optional(),
+                    dependencies: z.array(z.string()).optional(),
+                    dependents: z.array(z.string()).optional(),
+                    layer: z.enum(["ui", "viewmodel", "domain", "data", "network", "database", "di", "util", "test", "config", "build", "other"]).optional(),
+                    complexity: z.enum(["trivial", "simple", "moderate", "complex", "critical"]).optional(),
+                    notes: z.string().optional(),
+                })).min(1).max(100).describe("Array of file note entries"),
+            },
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+        },
+        async ({ files }) => {
+            const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
-            db.prepare(`
-        INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(file_path) DO UPDATE SET
-          purpose = COALESCE(?, purpose),
-          dependencies = COALESCE(?, dependencies),
-          dependents = COALESCE(?, dependents),
-          layer = COALESCE(?, layer),
-          last_reviewed = ?,
-          last_modified_session = COALESCE(?, last_modified_session),
-          notes = COALESCE(?, notes),
-          complexity = COALESCE(?, complexity)
-      `).run(
-                file_path,
-                purpose || null,
-                dependencies ? JSON.stringify(dependencies) : null,
-                dependents ? JSON.stringify(dependents) : null,
-                layer || null,
-                timestamp,
-                sessionId,
-                notes || null,
-                complexity || null,
-                // Update values
-                purpose || null,
-                dependencies ? JSON.stringify(dependencies) : null,
-                dependents ? JSON.stringify(dependents) : null,
-                layer || null,
-                timestamp,
-                sessionId,
-                notes || null,
-                complexity || null,
-            );
+            const count = repos.fileNotes.upsertBatch(files, timestamp, sessionId);
 
-            return {
-                content: [{ type: "text", text: `File notes saved for ${file_path}.` }],
-            };
+            return success({
+                message: `Batch saved ${count} file note(s).`,
+                count,
+            });
         }
     );
 
@@ -112,21 +134,15 @@ Returns:
             },
         },
         async ({ file_path, layer, complexity }) => {
-            const db = getDb();
+            const repos = getRepos();
 
             if (file_path) {
-                const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(file_path);
-                return { content: [{ type: "text", text: JSON.stringify(note || { message: "No notes found for this file." }, null, 2) }] };
+                const note = repos.fileNotes.getByPath(file_path);
+                return success(note ? (note as unknown as Record<string, unknown>) : { message: "No notes found for this file." });
             }
 
-            let query = "SELECT * FROM file_notes WHERE 1=1";
-            const params: unknown[] = [];
-            if (layer) { query += " AND layer = ?"; params.push(layer); }
-            if (complexity) { query += " AND complexity = ?"; params.push(complexity); }
-            query += " ORDER BY file_path";
-
-            const notes = db.prepare(query).all(...params) as unknown[] as FileNoteRow[];
-            return { content: [{ type: "text", text: JSON.stringify({ count: notes.length, files: notes }, null, 2) }] };
+            const notes = repos.fileNotes.getFiltered({ layer, complexity });
+            return success({ count: notes.length, files: notes });
         }
     );
 }

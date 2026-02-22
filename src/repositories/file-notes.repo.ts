@@ -4,6 +4,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { FileNoteRow } from "../types.js";
+import { normalizePath } from "../utils.js";
 
 export class FileNotesRepo {
     constructor(private db: DatabaseType) { }
@@ -21,8 +22,9 @@ export class FileNotesRepo {
             notes?: string | null;
         }
     ): void {
-        const deps = data.dependencies ? JSON.stringify(data.dependencies) : null;
-        const depnts = data.dependents ? JSON.stringify(data.dependents) : null;
+        const normalizedPath = normalizePath(filePath);
+        const deps = data.dependencies ? JSON.stringify(data.dependencies.map(d => normalizePath(d))) : null;
+        const depnts = data.dependents ? JSON.stringify(data.dependents.map(d => normalizePath(d))) : null;
 
         this.db.prepare(`
       INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity)
@@ -37,7 +39,7 @@ export class FileNotesRepo {
         notes = COALESCE(?, notes),
         complexity = COALESCE(?, complexity)
     `).run(
-            filePath,
+            normalizedPath,
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
             data.notes || null, data.complexity || null,
@@ -48,10 +50,39 @@ export class FileNotesRepo {
         );
     }
 
+    upsertBatch(
+        entries: Array<{
+            file_path: string;
+            purpose?: string | null;
+            dependencies?: string[] | null;
+            dependents?: string[] | null;
+            layer?: string | null;
+            complexity?: string | null;
+            notes?: string | null;
+        }>,
+        timestamp: string,
+        sessionId: number | null
+    ): number {
+        const tx = this.db.transaction(() => {
+            for (const entry of entries) {
+                this.upsert(entry.file_path, timestamp, sessionId, {
+                    purpose: entry.purpose,
+                    dependencies: entry.dependencies,
+                    dependents: entry.dependents,
+                    layer: entry.layer,
+                    complexity: entry.complexity,
+                    notes: entry.notes,
+                });
+            }
+        });
+        tx();
+        return entries.length;
+    }
+
     getByPath(filePath: string): FileNoteRow | null {
         return (this.db.prepare(
             "SELECT * FROM file_notes WHERE file_path = ?"
-        ).get(filePath) as FileNoteRow | undefined) ?? null;
+        ).get(normalizePath(filePath)) as FileNoteRow | undefined) ?? null;
     }
 
     getFiltered(filters: { layer?: string; complexity?: string }): FileNoteRow[] {

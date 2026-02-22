@@ -9,6 +9,7 @@ import * as path from "path";
 import { getDb, now, getProjectRoot, getDbPath, backupDatabase } from "../database.js";
 import { TOOL_PREFIX, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT } from "../constants.js";
 import { log } from "../logger.js";
+import { success, error } from "../response.js";
 import type { BackupInfo } from "../types.js";
 
 export function registerBackupTools(server: McpServer): void {
@@ -49,7 +50,7 @@ Returns:
                 dbVersion = vRow ? parseInt(vRow.value, 10) : 0;
             } catch { /* skip */ }
 
-            const info: BackupInfo = {
+            const info: BackupInfo & { pruned?: number } = {
                 path: backupPath,
                 size_kb: sizeKb,
                 created_at: now(),
@@ -73,20 +74,15 @@ Returns:
                         for (const f of toDelete) {
                             fs.unlinkSync(f.path);
                         }
-                        (info as BackupInfo & { pruned: number }).pruned = toDelete.length;
+                        info.pruned = toDelete.length;
                     }
                 } catch { /* skip pruning */ }
             }
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        ...info,
-                        message: `Backup created successfully at ${backupPath} (${sizeKb} KB).`,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                ...info,
+                message: `Backup created successfully at ${backupPath} (${sizeKb} KB).`,
+            });
         }
     );
 
@@ -116,17 +112,14 @@ Returns:
         },
         async ({ input_path, confirm }) => {
             if (confirm !== "yes-restore") {
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: 'Safety check: set confirm to "yes-restore" to proceed.' }],
-                };
+                return error('Safety check: set confirm to "yes-restore" to proceed.');
             }
 
             const projectRoot = getProjectRoot();
             const inputPath = path.isAbsolute(input_path) ? input_path : path.join(projectRoot, input_path);
 
             if (!fs.existsSync(inputPath)) {
-                return { isError: true, content: [{ type: "text", text: `Backup file not found: ${inputPath}` }] };
+                return error(`Backup file not found: ${inputPath}`);
             }
 
             let safetyBackupPath = "";
@@ -134,32 +127,21 @@ Returns:
                 safetyBackupPath = backupDatabase();
                 log.info(`Safety backup created before restore: ${safetyBackupPath}`);
             } catch (e) {
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: `Failed to create safety backup before restore: ${e}. Aborting.` }],
-                };
+                return error(`Failed to create safety backup before restore: ${e}. Aborting.`);
             }
 
             const dbPath = getDbPath();
             try {
                 fs.copyFileSync(inputPath, dbPath);
             } catch (e) {
-                return {
-                    isError: true,
-                    content: [{ type: "text", text: `Failed to restore: ${e}. Your previous database is backed up at ${safetyBackupPath}.` }],
-                };
+                return error(`Failed to restore: ${e}. Your previous database is backed up at ${safetyBackupPath}.`);
             }
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        restored_from: inputPath,
-                        safety_backup: safetyBackupPath,
-                        message: "Database restored successfully. Please RESTART the MCP server to load the restored database. A safety backup of the previous database was created.",
-                    }, null, 2),
-                }],
-            };
+            return success({
+                restored_from: inputPath,
+                safety_backup: safetyBackupPath,
+                message: "Database restored successfully. Please RESTART the MCP server to load the restored database. A safety backup of the previous database was created.",
+            });
         }
     );
 
@@ -184,9 +166,7 @@ Returns:
             const backupDir = path.join(getProjectRoot(), DB_DIR_NAME, BACKUP_DIR_NAME);
 
             if (!fs.existsSync(backupDir)) {
-                return {
-                    content: [{ type: "text", text: JSON.stringify({ backups: [], message: "No backups found." }, null, 2) }],
-                };
+                return success({ backups: [], message: "No backups found." });
             }
 
             const files = fs.readdirSync(backupDir)
@@ -203,16 +183,11 @@ Returns:
                 })
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        backup_directory: backupDir,
-                        count: files.length,
-                        backups: files,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                backup_directory: backupDir,
+                count: files.length,
+                backups: files,
+            });
         }
     );
 }

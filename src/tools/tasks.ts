@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
+import { success, error } from "../response.js";
 import type { TaskRow } from "../types.js";
 
 export function registerTaskTools(server: McpServer): void {
@@ -60,15 +61,10 @@ Returns:
         blocked_by ? JSON.stringify(blocked_by) : null,
       );
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            task_id: result.lastInsertRowid,
-            message: `Task #${result.lastInsertRowid} created: "${title}" [${priority}/${status}]`,
-          }, null, 2),
-        }],
-      };
+      return success({
+        task_id: Number(result.lastInsertRowid),
+        message: `Task #${result.lastInsertRowid} created: "${title}" [${priority}/${status}]`,
+      });
     }
   );
 
@@ -130,7 +126,7 @@ Returns:
       const result = db.prepare(`UPDATE tasks SET ${updates.join(", ")} WHERE id = ?`).run(...params);
 
       if (result.changes === 0) {
-        return { isError: true, content: [{ type: "text", text: `Task #${id} not found.` }] };
+        return error(`Task #${id} not found.`);
       }
 
       // If task was marked done, trigger any scheduled events waiting on it
@@ -145,12 +141,11 @@ Returns:
         } catch { /* scheduled_events table may not exist yet */ }
       }
 
-      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
-      const response: Record<string, unknown> = { ...(updated as Record<string, unknown>) };
+      const updated = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Record<string, unknown>;
       if (triggeredEventCount > 0) {
-        response._triggered_events = `${triggeredEventCount} scheduled event(s) triggered by this task completion. Use engram_check_events to review.`;
+        updated._triggered_events = `${triggeredEventCount} scheduled event(s) triggered by this task completion. Use engram_check_events to review.`;
       }
-      return { content: [{ type: "text", text: JSON.stringify(response, null, 2) }] };
+      return success(updated);
     }
   );
 
@@ -194,7 +189,6 @@ Returns:
       if (priority) { query += " AND priority = ?"; params.push(priority); }
       if (tag) { query += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; params.push(tag); }
 
-      // Sort: critical > high > medium > low, then by creation date
       query += ` ORDER BY
         CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END,
         created_at ASC
@@ -204,12 +198,7 @@ Returns:
       const tasks = db.prepare(query).all(...params) as unknown[] as TaskRow[];
       const openCount = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status NOT IN ('done','cancelled')").get() as { c: number }).c;
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ total_open: openCount, returned: tasks.length, tasks }, null, 2),
-        }],
-      };
+      return success({ total_open: openCount, returned: tasks.length, tasks });
     }
   );
 }
