@@ -96,6 +96,25 @@ claude mcp add-json --scope=user engram '{"type":"stdio","command":"cmd","args":
 </details>
 
 <details>
+<summary><strong>Claude Desktop</strong></summary>
+
+Add to your `claude_desktop_config.json`:
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-mcp-server"]
+    }
+  }
+}
+```
+</details>
+
+<details>
 <summary><strong>VS Code (GitHub Copilot)</strong></summary>
 
 Create `.vscode/mcp.json` in your project root, or add to your global user `settings.json`:
