@@ -9,9 +9,14 @@
 export function detectCurrentIde(): string | null {
     const env = process.env;
 
+    // ─── Explicit IDE signals ────────────────────────────────────────
     if (env.ANTIGRAVITY_EDITOR_APP_ROOT) return "antigravity";
     if (env.WINDSURF_PROFILE) return "windsurf";
 
+    // Claude Code sets its own env vars
+    if (env.CLAUDE_CODE || env.CLAUDE_CLI) return "claudecode";
+
+    // ─── VS Code family detection ────────────────────────────────────
     if (env.TERM_PROGRAM === "vscode" || env.VSCODE_IPC_HOOK || env.VSCODE_CWD) {
         const cwdLower = (env.VSCODE_CWD || "").toLowerCase();
         if (cwdLower.includes("antigravity")) return "antigravity";
@@ -20,11 +25,14 @@ export function detectCurrentIde(): string | null {
 
         const pathLower = (env.PATH || "").toLowerCase();
         if (pathLower.includes("antigravity")) return "antigravity";
-        if (pathLower.includes("cursor\\cli")) return "cursor";
+        if (pathLower.includes("cursor")) return "cursor";
         if (pathLower.includes("windsurf")) return "windsurf";
 
         return "vscode";
     }
+
+    // ─── JetBrains detection ─────────────────────────────────────────
+    if (env.JETBRAINS_IDE || env.TERMINAL_EMULATOR?.includes("JetBrains")) return "jetbrains";
 
     return null;
 }

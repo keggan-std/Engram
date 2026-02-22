@@ -4,18 +4,26 @@
 
 import fs from "fs";
 import path from "path";
+import type { IdeDefinition } from "./ide-configs.js";
 
 /**
- * Generate the Engram server entry for a given config format.
+ * Generate the Engram server entry tailored to a specific IDE's requirements.
  */
-export function makeEngramEntry(format: string) {
-    const entry = {
-        command: "npx",
-        args: ["-y", "engram-mcp-server"],
-    };
+export function makeEngramEntry(ide: IdeDefinition): Record<string, any> {
+    const entry: Record<string, any> = {};
 
-    if (format === "servers") {
-        return { type: "stdio", ...entry };
+    // Some IDEs require explicit "type": "stdio"
+    if (ide.requiresType) {
+        entry.type = "stdio";
+    }
+
+    // Windows cmd /c wrapper for npx (npx is a .cmd on Windows)
+    if (ide.requiresCmdWrapper) {
+        entry.command = "cmd";
+        entry.args = ["/c", "npx", "-y", "engram-mcp-server"];
+    } else {
+        entry.command = "npx";
+        entry.args = ["-y", "engram-mcp-server"];
     }
 
     return entry;
@@ -42,15 +50,16 @@ export function writeJson(filePath: string, data: any): void {
 
 /**
  * Add or update the Engram entry in a config file.
+ * Uses the IDE's configKey ("mcpServers" or "servers") to write the correct JSON structure.
  * Returns: "added", "updated", or "exists".
  */
-export function addToConfig(configPath: string, format: string): "added" | "updated" | "exists" {
+export function addToConfig(configPath: string, ide: IdeDefinition): "added" | "updated" | "exists" {
     let config: Record<string, any> = readJson(configPath) || {};
-    const key = format;
+    const key = ide.configKey;
 
     if (!config[key]) config[key] = {};
 
-    const newEntry = makeEngramEntry(format);
+    const newEntry = makeEngramEntry(ide);
 
     if (config[key].engram) {
         if (JSON.stringify(config[key].engram) === JSON.stringify(newEntry)) {
@@ -64,4 +73,26 @@ export function addToConfig(configPath: string, format: string): "added" | "upda
     config[key].engram = newEntry;
     writeJson(configPath, config);
     return "added";
+}
+
+/**
+ * Remove the Engram entry from a config file.
+ * Returns true if the entry was found and removed, false if not present.
+ */
+export function removeFromConfig(configPath: string, ide: IdeDefinition): boolean {
+    const config = readJson(configPath);
+    if (!config) return false;
+
+    const key = ide.configKey;
+    if (!config[key]?.engram) return false;
+
+    delete config[key].engram;
+
+    // Clean up empty wrapper key
+    if (Object.keys(config[key]).length === 0) {
+        delete config[key];
+    }
+
+    writeJson(configPath, config);
+    return true;
 }
