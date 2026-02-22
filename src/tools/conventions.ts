@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
+import { success, error } from "../response.js";
 import type { ConventionRow } from "../types.js";
 
 export function registerConventionTools(server: McpServer): void {
@@ -43,16 +44,11 @@ Returns:
                 "INSERT INTO conventions (session_id, timestamp, category, rule, examples) VALUES (?, ?, ?, ?, ?)"
             ).run(sessionId, timestamp, category, rule, examples ? JSON.stringify(examples) : null);
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        convention_id: result.lastInsertRowid,
-                        message: `Convention #${result.lastInsertRowid} added to [${category}].`,
-                        rule,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                convention_id: Number(result.lastInsertRowid),
+                message: `Convention #${result.lastInsertRowid} added to [${category}].`,
+                rule,
+            });
         }
     );
 
@@ -96,12 +92,7 @@ Returns:
                 grouped[c.category].push(c);
             }
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({ total: conventions.length, by_category: grouped }, null, 2),
-                }],
-            };
+            return success({ total: conventions.length, by_category: grouped });
         }
     );
 
@@ -132,9 +123,9 @@ Returns:
             const db = getDb();
             const result = db.prepare("UPDATE conventions SET enforced = ? WHERE id = ?").run(enforced ? 1 : 0, id);
             if (result.changes === 0) {
-                return { isError: true, content: [{ type: "text", text: `Convention #${id} not found.` }] };
+                return error(`Convention #${id} not found.`);
             }
-            return { content: [{ type: "text", text: `Convention #${id} ${enforced ? "enabled" : "disabled"}.` }] };
+            return success({ message: `Convention #${id} ${enforced ? "enabled" : "disabled"}.` });
         }
     );
 }

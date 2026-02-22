@@ -4,13 +4,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import * as fs from "fs";
-import * as path from "path";
-import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, backupDatabase } from "../database.js";
-import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince, scanFileTree, detectLayer, safeJsonParse } from "../utils.js";
-import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, COMPACTION_THRESHOLD_SESSIONS, DB_DIR_NAME, MAX_FILE_TREE_DEPTH } from "../constants.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
+import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS } from "../constants.js";
 import { log } from "../logger.js";
-import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
+import { truncate } from "../utils.js";
+import { success, error } from "../response.js";
+import type { SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
 
 export function registerSessionTools(server: McpServer): void {
   // ─── START SESSION ──────────────────────────────────────────────────
@@ -23,12 +22,14 @@ export function registerSessionTools(server: McpServer): void {
 Args:
   - agent_name (string, optional): Identifier for the agent (e.g., "copilot", "claude-code", "cursor")
   - resume_task (string, optional): If resuming a specific task, provide its title to auto-focus context
+  - verbosity ("full" | "summary" | "minimal", optional): Controls response size. "minimal" returns counts only (~90% fewer tokens), "summary" returns truncated recent items (~60-80% fewer tokens), "full" returns everything including file_tree. Default: "summary".
 
 Returns:
   SessionContext object with previous session info, changes, decisions, conventions, and open tasks.`,
       inputSchema: {
         agent_name: z.string().default("unknown").describe("Name of the agent starting the session"),
         resume_task: z.string().optional().describe("Title of a task to resume, for focused context"),
+        verbosity: z.enum(["full", "summary", "minimal"]).default("summary").describe("Response detail level: full, summary, or minimal"),
       },
       annotations: {
         readOnlyHint: false,
@@ -37,247 +38,137 @@ Returns:
         openWorldHint: false,
       },
     },
-    async ({ agent_name, resume_task }) => {
-      const db = getDb();
+    async ({ agent_name, resume_task, verbosity }) => {
+      const repos = getRepos();
+      const services = getServices();
       const projectRoot = getProjectRoot();
       const timestamp = now();
 
       // Check for an already-open session and close it
       const openSession = getCurrentSessionId();
       if (openSession) {
-        db.prepare("UPDATE sessions SET ended_at = ?, summary = ? WHERE id = ?")
-          .run(timestamp, "(auto-closed: new session started)", openSession);
+        repos.sessions.autoClose(openSession, timestamp);
       }
 
       // Get previous session context
       const lastSession = getLastCompletedSession();
 
       // Create new session
-      const result = db.prepare(
-        "INSERT INTO sessions (started_at, agent_name, project_root) VALUES (?, ?, ?)"
-      ).run(timestamp, agent_name, projectRoot);
-      const sessionId = result.lastInsertRowid as number;
+      const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
 
-      // ─── Auto-compaction ────────────────────────────────────
+      // ─── Auto-compaction via service ────────────────────────
       let autoCompacted = false;
       try {
-        // Check config for threshold (fallback to constant)
-        let threshold = COMPACTION_THRESHOLD_SESSIONS;
-        try {
-          const configRow = db.prepare("SELECT value FROM config WHERE key = 'compact_threshold'").get() as { value: string } | undefined;
-          if (configRow) threshold = parseInt(configRow.value, 10);
-        } catch { /* config table may not exist yet */ }
-
-        const totalSessions = (db.prepare("SELECT COUNT(*) as c FROM sessions WHERE ended_at IS NOT NULL").get() as { c: number }).c;
-        if (totalSessions > threshold) {
-          // Check if auto_compact is enabled
-          let autoCompactEnabled = true;
-          try {
-            const autoRow = db.prepare("SELECT value FROM config WHERE key = 'auto_compact'").get() as { value: string } | undefined;
-            if (autoRow) autoCompactEnabled = autoRow.value === 'true';
-          } catch { /* default to enabled */ }
-
-          if (autoCompactEnabled) {
-            log.info(`Auto-compacting: ${totalSessions} sessions exceed threshold of ${threshold}`);
-            try { backupDatabase(); } catch { /* best effort */ }
-
-            // Compact: keep recent sessions, summarize old changes
-            const cutoff = db.prepare(
-              "SELECT id FROM sessions ORDER BY id DESC LIMIT 1 OFFSET ?"
-            ).get(threshold) as { id: number } | undefined;
-
-            if (cutoff) {
-              const doCompact = db.transaction(() => {
-                const oldSessions = db.prepare(
-                  "SELECT id FROM sessions WHERE id <= ? AND ended_at IS NOT NULL"
-                ).all(cutoff.id) as Array<{ id: number }>;
-
-                for (const s of oldSessions) {
-                  const changes = db.prepare(
-                    "SELECT change_type, file_path, description FROM changes WHERE session_id = ? AND file_path != '(compacted)'"
-                  ).all(s.id) as Array<{ change_type: string; file_path: string; description: string }>;
-
-                  if (changes.length > 0) {
-                    const summary = changes.map(c => `[${c.change_type}] ${c.file_path}`).join("; ");
-                    db.prepare(
-                      "INSERT INTO changes (session_id, timestamp, file_path, change_type, description, impact_scope) VALUES (?, ?, ?, ?, ?, ?)"
-                    ).run(s.id, now(), "(compacted)", "modified", `Compacted ${changes.length} changes: ${summary.slice(0, 2000)}`, "global");
-                  }
-                  db.prepare("DELETE FROM changes WHERE session_id = ? AND file_path != '(compacted)'").run(s.id);
-                }
-              });
-              doCompact();
-              autoCompacted = true;
-              log.info("Auto-compaction complete.");
-            }
-          }
-        }
+        autoCompacted = services.compaction.autoCompact(COMPACTION_THRESHOLD_SESSIONS);
       } catch (e) {
         log.warn(`Auto-compaction skipped: ${e}`);
       }
 
       // Gather changes since last session
-      let recordedChanges: ChangeRow[] = [];
-      let gitLog = "";
+      let recordedChanges = lastSession?.ended_at
+        ? repos.changes.getSince(lastSession.ended_at)
+        : [];
 
-      if (lastSession?.ended_at) {
-        recordedChanges = db.prepare(
-          "SELECT * FROM changes WHERE timestamp > ? ORDER BY timestamp"
-        ).all(lastSession.ended_at) as unknown[] as ChangeRow[];
+      // Git context via service
+      const gitBranch = services.git.getBranch();
+      const gitHead = services.git.getHead();
+      const gitLog = lastSession?.ended_at && services.git.isRepo()
+        ? services.git.getLogSince(lastSession.ended_at)
+        : "";
 
-        if (isGitRepo(projectRoot)) {
-          gitLog = getGitLogSince(projectRoot, lastSession.ended_at);
-        }
-      }
+      // Active decisions, conventions, open tasks
+      const activeDecisions = repos.decisions.getActive(20);
+      const activeConventions = repos.conventions.getActive();
 
-      // Active decisions
-      const activeDecisions = db.prepare(
-        "SELECT * FROM decisions WHERE status = 'active' ORDER BY timestamp DESC LIMIT 20"
-      ).all() as unknown[] as DecisionRow[];
+      const openTasks = repos.tasks.getOpen(15, resume_task || undefined);
 
-      // Active conventions
-      const activeConventions = db.prepare(
-        "SELECT * FROM conventions WHERE enforced = 1 ORDER BY category, id"
-      ).all() as unknown[] as ConventionRow[];
-
-      // Open tasks
-      let openTasks: TaskRow[];
-      if (resume_task) {
-        openTasks = db.prepare(
-          "SELECT * FROM tasks WHERE status NOT IN ('done', 'cancelled') AND title LIKE ? ORDER BY priority, created_at"
-        ).all(`%${resume_task}%`) as unknown[] as TaskRow[];
-        // If specific task not found, return all open tasks
-        if (openTasks.length === 0) {
-          openTasks = db.prepare(
-            "SELECT * FROM tasks WHERE status NOT IN ('done', 'cancelled') ORDER BY priority, created_at"
-          ).all() as unknown[] as TaskRow[];
-        }
-      } else {
-        openTasks = db.prepare(
-          "SELECT * FROM tasks WHERE status NOT IN ('done', 'cancelled') ORDER BY priority, created_at LIMIT 15"
-        ).all() as unknown[] as TaskRow[];
-      }
-
-      // ─── Auto Project Scan ───────────────────────────────────
+      // ─── Project snapshot via service ───────────────────────
       let projectSnapshot: ProjectSnapshot | null = null;
-      try {
-        const cached = db.prepare("SELECT * FROM snapshot_cache WHERE key = 'project_structure'").get() as { value: string; updated_at: string } | undefined;
-        const snapshotAge = cached ? minutesSince(cached.updated_at) : null;
+      if (verbosity === "full") {
+        try {
+          projectSnapshot = services.scan.getOrRefresh(projectRoot);
+        } catch { /* scan is best-effort */ }
+      }
 
-        if (cached && snapshotAge !== null && snapshotAge < SNAPSHOT_TTL_MINUTES) {
-          // Serve from cache
-          projectSnapshot = safeJsonParse<ProjectSnapshot>(cached.value, null as unknown as ProjectSnapshot);
-        } else {
-          // Stale or missing — perform a fresh scan
-          const fileTree = scanFileTree(projectRoot, MAX_FILE_TREE_DEPTH);
-          const layerDist: Record<string, number> = {};
-          for (const f of fileTree) {
-            if (f.endsWith("/")) continue;
-            const layer = detectLayer(f);
-            layerDist[layer] = (layerDist[layer] || 0) + 1;
-          }
-          const fileNotes = db.prepare("SELECT * FROM file_notes ORDER BY file_path").all();
-          const decisions = db.prepare("SELECT * FROM decisions WHERE status = 'active' ORDER BY timestamp DESC LIMIT 20").all();
-          const conventions = db.prepare("SELECT * FROM conventions WHERE enforced = 1 ORDER BY category").all();
+      // ─── Git hook log via service ──────────────────────────
+      const gitHookLog = services.git.parseHookLog(lastSession?.ended_at);
 
-          projectSnapshot = {
-            project_root: projectRoot,
-            file_tree: fileTree,
-            total_files: fileTree.filter((f: string) => !f.endsWith("/")).length,
-            file_notes: fileNotes,
-            recent_decisions: decisions,
-            active_conventions: conventions,
-            layer_distribution: layerDist,
-            generated_at: now(),
-          } as unknown as ProjectSnapshot;
-
-          // Persist to cache
-          db.prepare(
-            "INSERT OR REPLACE INTO snapshot_cache (key, value, updated_at, ttl_minutes) VALUES ('project_structure', ?, ?, ?)"
-          ).run(JSON.stringify(projectSnapshot), now(), SNAPSHOT_TTL_MINUTES);
-        }
-      } catch { /* scan is best-effort — never block session start */ }
-
-      // ─── Ingest git-changes.log (from post-commit hook) ─────
-      let gitHookLog = "";
-      try {
-        const hookLogPath = path.join(projectRoot, DB_DIR_NAME, "git-changes.log");
-        if (fs.existsSync(hookLogPath)) {
-          const raw = fs.readFileSync(hookLogPath, "utf-8");
-          // Only include entries since last session
-          if (lastSession?.ended_at) {
-            const lines = raw.split("\n");
-            const cutoffDate = new Date(lastSession.ended_at);
-            const relevantBlocks: string[] = [];
-            let inBlock = false;
-            let blockLines: string[] = [];
-            let blockDate: Date | null = null;
-
-            for (const line of lines) {
-              if (line.startsWith("--- COMMIT")) {
-                if (inBlock && blockDate && blockDate > cutoffDate) {
-                  relevantBlocks.push(blockLines.join("\n"));
-                }
-                inBlock = true;
-                blockLines = [line];
-                blockDate = null;
-              } else if (inBlock && line.startsWith("date:")) {
-                blockLines.push(line);
-                try { blockDate = new Date(line.replace("date:", "").trim()); } catch { /* skip */ }
-              } else if (inBlock) {
-                blockLines.push(line);
-              }
-            }
-            // Flush last block
-            if (inBlock && blockDate && blockDate > cutoffDate) {
-              relevantBlocks.push(blockLines.join("\n"));
-            }
-            gitHookLog = relevantBlocks.join("\n\n");
-          } else {
-            // First session — include last 20 lines as a hint
-            gitHookLog = raw.split("\n").slice(-20).join("\n");
-          }
-        }
-      } catch { /* git-changes.log is optional */ }
-
-      // Snapshot age (for message)
-      const snapshotAge = projectSnapshot ? 0 : null;
-
-      // Git context
-      const gitBranch = isGitRepo(projectRoot) ? getGitBranch(projectRoot) : null;
-      const gitHead = isGitRepo(projectRoot) ? getGitHead(projectRoot) : null;
-
-      // ─── Check Scheduled Event Triggers ──────────────────────────
+      // ─── Trigger scheduled events via service ──────────────
       let triggeredEvents: ScheduledEventRow[] = [];
       try {
-        const timestamp = now();
-
-        // Auto-trigger 'next_session' events
-        db.prepare(
-          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
-           WHERE status = 'pending' AND trigger_type = 'next_session'`
-        ).run(timestamp);
-
-        // Auto-trigger 'datetime' events that have passed
-        db.prepare(
-          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
-           WHERE status = 'pending' AND trigger_type = 'datetime' AND trigger_value <= ?`
-        ).run(timestamp, timestamp);
-
-        // Auto-trigger 'every_session' recurring events
-        db.prepare(
-          `UPDATE scheduled_events SET status = 'triggered', triggered_at = ?
-           WHERE status = 'pending' AND recurrence = 'every_session'`
-        ).run(timestamp);
-
-        // Fetch all triggered events
-        triggeredEvents = db.prepare(
-          `SELECT * FROM scheduled_events WHERE status = 'triggered'
-           ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END`
-        ).all() as unknown[] as ScheduledEventRow[];
+        triggeredEvents = services.events.triggerSessionEvents();
       } catch { /* scheduled_events table may not exist yet */ }
 
-      // Build response
+      // ─── Build response based on verbosity ─────────────────
+      if (verbosity === "minimal") {
+        return success({
+          session_id: sessionId,
+          verbosity: "minimal",
+          previous_session: lastSession
+            ? { id: lastSession.id, summary: lastSession.summary, ended_at: lastSession.ended_at, agent: lastSession.agent_name }
+            : null,
+          counts: {
+            changes_since_last: recordedChanges.length,
+            active_decisions: activeDecisions.length,
+            active_conventions: activeConventions.length,
+            open_tasks: openTasks.length,
+            triggered_events: triggeredEvents.length,
+            total_files: repos.fileNotes.countAll(),
+          },
+          git: { branch: gitBranch, head: gitHead },
+          auto_compacted: autoCompacted,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.`,
+        });
+      }
+
+      if (verbosity === "summary") {
+        return success({
+          session_id: sessionId,
+          verbosity: "summary",
+          previous_session: lastSession
+            ? { id: lastSession.id, summary: lastSession.summary, ended_at: lastSession.ended_at, agent: lastSession.agent_name }
+            : null,
+          changes_since_last: {
+            count: recordedChanges.length,
+            recent: recordedChanges.slice(0, 5).map(c => ({
+              file_path: c.file_path,
+              change_type: c.change_type,
+              description: truncate(c.description, 120),
+              timestamp: c.timestamp,
+            })),
+            git_log: gitLog ? truncate(gitLog, 500) : "",
+          },
+          active_decisions: activeDecisions.slice(0, 5).map(d => ({
+            id: d.id,
+            decision: truncate(d.decision, 120),
+            status: d.status,
+            tags: d.tags,
+          })),
+          active_conventions: activeConventions.map(c => ({
+            id: c.id,
+            category: c.category,
+            rule: truncate(c.rule, 100),
+          })),
+          open_tasks: openTasks.slice(0, 5).map(t => ({
+            id: t.id,
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+          })),
+          triggered_events: triggeredEvents.length > 0
+            ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority }))
+            : undefined,
+          git: { branch: gitBranch, head: gitHead },
+          git_hook_log: gitHookLog || undefined,
+          total_file_notes: repos.fileNotes.countAll(),
+          auto_compacted: autoCompacted,
+          message: lastSession
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}`
+            : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
+        });
+      }
+
+      // ─── verbosity === "full" ──────────────────────────────
       const context: SessionContext & {
         git?: { branch: string | null; head: string | null };
         project_snapshot?: ProjectSnapshot | null;
@@ -300,19 +191,17 @@ Returns:
         active_decisions: activeDecisions,
         active_conventions: activeConventions,
         open_tasks: openTasks,
-        project_snapshot_age_minutes: snapshotAge,
+        project_snapshot_age_minutes: projectSnapshot ? 0 : null,
         git: { branch: gitBranch, head: gitHead },
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
         message: lastSession
-          ? `Session #${sessionId} started. Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ⚡ ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}`
-          : `Session #${sessionId} started. This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}`
+          : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 
-      return {
-        content: [{ type: "text", text: JSON.stringify(context, null, 2) }],
-      };
+      return success(context as unknown as Record<string, unknown>);
     }
   );
 
@@ -341,40 +230,31 @@ Returns:
       },
     },
     async ({ summary, tags }) => {
-      const db = getDb();
+      const repos = getRepos();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
       if (!sessionId) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "No active session to end. Start one with engram_start_session first." }],
-        };
+        return error("No active session to end. Start one with engram_start_session first.");
       }
 
       // Get session stats before closing
-      const changeCount = (db.prepare("SELECT COUNT(*) as c FROM changes WHERE session_id = ?").get(sessionId) as { c: number }).c;
-      const decisionCount = (db.prepare("SELECT COUNT(*) as c FROM decisions WHERE session_id = ?").get(sessionId) as { c: number }).c;
-      const tasksDone = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE session_id = ? AND status = 'done'").get(sessionId) as { c: number }).c;
+      const changeCount = repos.changes.countBySession(sessionId);
+      const decisionCount = repos.sessions.countBySession(sessionId, "decisions");
+      const tasksDone = repos.tasks.countDoneInSession(sessionId);
 
       // Close the session
-      db.prepare("UPDATE sessions SET ended_at = ?, summary = ?, tags = ? WHERE id = ?")
-        .run(timestamp, summary, tags ? JSON.stringify(tags) : null, sessionId);
+      repos.sessions.close(sessionId, timestamp, summary, tags);
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            message: `Session #${sessionId} ended successfully.`,
-            stats: {
-              changes_recorded: changeCount,
-              decisions_made: decisionCount,
-              tasks_completed: tasksDone,
-            },
-            summary,
-          }, null, 2),
-        }],
-      };
+      return success({
+        message: `Session #${sessionId} ended successfully.`,
+        stats: {
+          changes_recorded: changeCount,
+          decisions_made: decisionCount,
+          tasks_completed: tasksDone,
+        },
+        summary,
+      });
     }
   );
 
@@ -405,27 +285,12 @@ Returns:
       },
     },
     async ({ limit, agent_name, offset }) => {
-      const db = getDb();
+      const repos = getRepos();
 
-      let sessions;
-      if (agent_name) {
-        sessions = db.prepare(
-          "SELECT * FROM sessions WHERE agent_name = ? ORDER BY id DESC LIMIT ? OFFSET ?"
-        ).all(agent_name, limit, offset);
-      } else {
-        sessions = db.prepare(
-          "SELECT * FROM sessions ORDER BY id DESC LIMIT ? OFFSET ?"
-        ).all(limit, offset);
-      }
+      const sessions = repos.sessions.getHistory(limit, offset, agent_name);
+      const total = repos.sessions.countAll();
 
-      const total = (db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c;
-
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ sessions, total, has_more: offset + limit < total }, null, 2),
-        }],
-      };
+      return success({ sessions, total, has_more: offset + limit < total });
     }
   );
 }

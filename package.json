@@ -1,6 +1,6 @@
 {
   "name": "engram-mcp-server",
-  "version": "1.2.6",
+  "version": "1.3.0",
   "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
   "type": "module",
   "main": "dist/index.js",
@@ -8,13 +8,18 @@
     "engram": "dist/index.js",
     "engram-mcp-server": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "scripts/"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepack": "npm run clean && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist",
+    "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
     "install-hooks": "node dist/scripts/install-hooks.js",
     "install-mcp": "node scripts/install-mcp.js",
     "install-mcp:list": "node scripts/install-mcp.js --list",
@@ -40,6 +45,9 @@
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "prebuild-install": "7.1.3"
   },
   "engines": {
     "node": ">=18.0.0"

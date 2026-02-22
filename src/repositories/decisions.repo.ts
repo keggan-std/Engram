@@ -69,6 +69,54 @@ export class DecisionsRepo {
         ).all(`%${filePath}%`) as DecisionRow[];
     }
 
+    createBatch(
+        decisions: Array<{
+            decision: string;
+            rationale?: string | null;
+            affected_files?: string[] | null;
+            tags?: string[] | null;
+            status?: string;
+        }>,
+        sessionId: number | null,
+        timestamp: string
+    ): number[] {
+        const ids: number[] = [];
+        const tx = this.db.transaction(() => {
+            for (const d of decisions) {
+                const result = this.db.prepare(
+                    "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                ).run(
+                    sessionId, timestamp, d.decision,
+                    d.rationale || null,
+                    d.affected_files ? JSON.stringify(d.affected_files) : null,
+                    d.tags ? JSON.stringify(d.tags) : null,
+                    d.status || "active",
+                    null
+                );
+                ids.push(result.lastInsertRowid as number);
+            }
+        });
+        tx();
+        return ids;
+    }
+
+    findSimilar(decisionText: string, limit: number = 5): DecisionRow[] {
+        const words = decisionText
+            .split(/\s+/)
+            .filter(w => w.length > 3)
+            .slice(0, 5);
+
+        if (words.length === 0) return [];
+
+        const conditions = words.map(() => "decision LIKE ?");
+        const params: unknown[] = words.map(w => `%${w}%`);
+        params.push(limit);
+
+        return this.db.prepare(
+            `SELECT * FROM decisions WHERE status = 'active' AND (${conditions.join(" OR ")}) ORDER BY timestamp DESC LIMIT ?`
+        ).all(...params) as DecisionRow[];
+    }
+
     countAll(): number {
         return (this.db.prepare("SELECT COUNT(*) as c FROM decisions").get() as { c: number }).c;
     }

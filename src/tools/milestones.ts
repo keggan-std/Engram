@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
+import { success } from "../response.js";
 
 export function registerMilestoneTools(server: McpServer): void {
     server.registerTool(
@@ -44,15 +45,10 @@ Returns:
                 "INSERT INTO milestones (session_id, timestamp, title, description, version, tags) VALUES (?, ?, ?, ?, ?, ?)"
             ).run(sessionId, timestamp, title, description || null, version || null, tags ? JSON.stringify(tags) : null);
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        milestone_id: result.lastInsertRowid,
-                        message: `Milestone #${result.lastInsertRowid} recorded: "${title}"${version ? ` (v${version})` : ""}`,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                milestone_id: Number(result.lastInsertRowid),
+                message: `Milestone #${result.lastInsertRowid} recorded: "${title}"${version ? ` (v${version})` : ""}`,
+            });
         }
     );
 
@@ -80,7 +76,7 @@ Returns:
         async ({ limit }) => {
             const db = getDb();
             const milestones = db.prepare("SELECT * FROM milestones ORDER BY timestamp DESC LIMIT ?").all(limit);
-            return { content: [{ type: "text", text: JSON.stringify({ milestones }, null, 2) }] };
+            return success({ milestones });
         }
     );
 }

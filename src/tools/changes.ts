@@ -4,9 +4,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId } from "../database.js";
+import { now, getCurrentSessionId, getRepos } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
-import type { ChangeRow, DecisionRow, FileNoteRow } from "../types.js";
+import { normalizePath } from "../utils.js";
+import { success } from "../response.js";
 
 export function registerChangeTools(server: McpServer): void {
     server.registerTool(
@@ -42,34 +43,21 @@ Returns:
             },
         },
         async ({ changes }) => {
-            const db = getDb();
+            const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
-            const insert = db.prepare(
-                "INSERT INTO changes (session_id, timestamp, file_path, change_type, description, diff_summary, impact_scope) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            );
+            const normalized = changes.map(c => ({
+                ...c,
+                file_path: normalizePath(c.file_path),
+            }));
 
-            const transaction = db.transaction(() => {
-                for (const c of changes) {
-                    insert.run(sessionId, timestamp, c.file_path, c.change_type, c.description, c.diff_summary || null, c.impact_scope);
+            repos.changes.recordBulk(normalized, sessionId, timestamp);
 
-                    if (sessionId) {
-                        db.prepare(
-                            "UPDATE file_notes SET last_modified_session = ? WHERE file_path = ?"
-                        ).run(sessionId, c.file_path);
-                    }
-                }
+            return success({
+                message: `Recorded ${changes.length} change(s) in session #${sessionId ?? "none"}.`,
+                count: changes.length,
             });
-
-            transaction();
-
-            return {
-                content: [{
-                    type: "text",
-                    text: `Recorded ${changes.length} change(s) in session #${sessionId ?? "none"}.`,
-                }],
-            };
         }
     );
 
@@ -97,28 +85,20 @@ Returns:
             },
         },
         async ({ file_path, limit }) => {
-            const db = getDb();
+            const repos = getRepos();
+            const fp = normalizePath(file_path);
 
-            const notes = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(file_path) as unknown as FileNoteRow | undefined;
-            const changes = db.prepare(
-                "SELECT * FROM changes WHERE file_path = ? ORDER BY timestamp DESC LIMIT ?"
-            ).all(file_path, limit) as unknown[] as ChangeRow[];
-            const decisions = db.prepare(
-                "SELECT * FROM decisions WHERE affected_files LIKE ? AND status = 'active' ORDER BY timestamp DESC"
-            ).all(`%${file_path}%`) as unknown[] as DecisionRow[];
+            const notes = repos.fileNotes.getByPath(fp);
+            const changes = repos.changes.getByFile(fp, limit);
+            const decisions = repos.decisions.getByFile(fp);
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        file_path,
-                        notes: notes || null,
-                        change_count: changes.length,
-                        changes,
-                        related_decisions: decisions,
-                    }, null, 2),
-                }],
-            };
+            return success({
+                file_path: fp,
+                notes: notes || null,
+                change_count: changes.length,
+                changes,
+                related_decisions: decisions,
+            });
         }
     );
 }

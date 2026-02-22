@@ -6,14 +6,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, MAX_SEARCH_RESULTS } from "../constants.js";
-import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse } from "../utils.js";
+import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse, normalizePath } from "../utils.js";
+import { success } from "../response.js";
 import type { FileNoteRow, DecisionRow, ConventionRow, ChangeRow, ProjectSnapshot } from "../types.js";
 
 // ─── FTS5 Helpers ────────────────────────────────────────────────────
 
-/**
- * Check if FTS5 tables exist (migration v2 applied).
- */
 function hasFts(db: ReturnType<typeof getDb>): boolean {
   try {
     const row = db.prepare(
@@ -25,10 +23,6 @@ function hasFts(db: ReturnType<typeof getDb>): boolean {
   }
 }
 
-/**
- * Escape a user query for FTS5 MATCH syntax.
- * Wraps each word in quotes to avoid syntax errors from special chars.
- */
 function ftsEscape(query: string): string {
   return query
     .split(/\s+/)
@@ -56,7 +50,7 @@ Returns:
         max_depth: z.number().int().min(1).max(10).default(5).describe("Max directory depth"),
       },
       annotations: {
-        readOnlyHint: false, // It writes to cache
+        readOnlyHint: false,
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false,
@@ -74,15 +68,10 @@ Returns:
           if (age < SNAPSHOT_TTL_MINUTES) {
             const snapshot = safeJsonParse<ProjectSnapshot>(cached.value, null as unknown as ProjectSnapshot);
             if (snapshot) {
-              return {
-                content: [{
-                  type: "text",
-                  text: JSON.stringify({
-                    ...snapshot,
-                    _cache_status: `fresh (${age}min old, TTL: ${SNAPSHOT_TTL_MINUTES}min)`,
-                  }, null, 2),
-                }],
-              };
+              return success({
+                ...snapshot,
+                _cache_status: `fresh (${age}min old, TTL: ${SNAPSHOT_TTL_MINUTES}min)`,
+              } as unknown as Record<string, unknown>);
             }
           }
         }
@@ -90,26 +79,22 @@ Returns:
 
       // Perform full scan
       const fileTree = scanFileTree(projectRoot, max_depth);
-
-      // Auto-detect layers for each file
       const layerDist: Record<string, number> = {};
       for (const f of fileTree) {
-        if (f.endsWith("/")) continue; // Skip directories
+        if (f.endsWith("/")) continue;
         const layer = detectLayer(f);
         layerDist[layer] = (layerDist[layer] || 0) + 1;
       }
 
-      // Fetch stored intelligence
       const fileNotes = db.prepare("SELECT * FROM file_notes ORDER BY file_path").all() as unknown[] as FileNoteRow[];
       const activeDecisions = db.prepare("SELECT * FROM decisions WHERE status = 'active' ORDER BY timestamp DESC LIMIT 20").all() as unknown[] as DecisionRow[];
       const activeConventions = db.prepare("SELECT * FROM conventions WHERE enforced = 1 ORDER BY category").all() as unknown[] as ConventionRow[];
 
-      // Git info
       let gitInfo: { branch: string; head: string; is_clean: boolean } | null = null;
       if (isGitRepo(projectRoot)) {
         const branch = getGitBranch(projectRoot);
         const head = getGitHead(projectRoot);
-        gitInfo = { branch, head, is_clean: true }; // Simplified
+        gitInfo = { branch, head, is_clean: true };
       }
 
       const snapshot: ProjectSnapshot & { git?: typeof gitInfo } = {
@@ -124,29 +109,23 @@ Returns:
         git: gitInfo,
       };
 
-      // Cache the snapshot
       db.prepare(
         "INSERT OR REPLACE INTO snapshot_cache (key, value, updated_at, ttl_minutes) VALUES ('project_structure', ?, ?, ?)"
       ).run(JSON.stringify(snapshot), now(), SNAPSHOT_TTL_MINUTES);
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            ...snapshot,
-            _cache_status: "freshly scanned",
-          }, null, 2),
-        }],
-      };
+      return success({
+        ...snapshot,
+        _cache_status: "freshly scanned",
+      } as unknown as Record<string, unknown>);
     }
   );
 
-  // ─── SEARCH MEMORY (FTS5-powered) ──────────────────────────────────
+  // ─── SEARCH MEMORY (FTS5-powered, unified ranking) ────────────────
   server.registerTool(
     `${TOOL_PREFIX}_search`,
     {
       title: "Search Memory",
-      description: `Full-text search across ALL memory: sessions, changes, decisions, file notes, conventions, and tasks. Uses FTS5 for high-performance ranked results when available, falls back to LIKE for compatibility.
+      description: `Full-text search across ALL memory: sessions, changes, decisions, file notes, conventions, and tasks. Uses FTS5 for high-performance ranked results when available, falls back to LIKE for compatibility. Results are ranked by relevance across all tables (not split evenly).
 
 Args:
   - query (string): Search term(s)
@@ -170,12 +149,12 @@ Returns:
     async ({ query, scope, limit }) => {
       const db = getDb();
       const useFts = hasFts(db);
-      const results: Record<string, unknown[]> = {};
-      let totalFound = 0;
-      const perTable = Math.ceil(limit / 6);
+      const oversample = Math.min(limit * 2, MAX_SEARCH_RESULTS);
+
+      // Collect all results with rank into a single pool
+      const pool: Array<{ table: string; rank: number; data: unknown }> = [];
 
       if (useFts) {
-        // ─── FTS5 Path (fast, ranked) ────────────────────────────
         const ftsQuery = ftsEscape(query);
 
         if (scope === "all" || scope === "sessions") {
@@ -185,9 +164,9 @@ Returns:
                JOIN sessions s ON s.id = f.rowid
                WHERE fts_sessions MATCH ?
                ORDER BY rank LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.sessions = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "sessions", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
 
         if (scope === "all" || scope === "changes") {
@@ -197,9 +176,9 @@ Returns:
                JOIN changes c ON c.id = f.rowid
                WHERE fts_changes MATCH ?
                ORDER BY rank LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.changes = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "changes", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
 
         if (scope === "all" || scope === "decisions") {
@@ -209,20 +188,21 @@ Returns:
                JOIN decisions d ON d.id = f.rowid
                WHERE fts_decisions MATCH ?
                ORDER BY rank LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.decisions = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "decisions", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
 
         if (scope === "all" || scope === "file_notes") {
           try {
             const rows = db.prepare(
-              `SELECT * FROM file_notes WHERE file_path IN (
-                 SELECT file_path FROM fts_file_notes WHERE fts_file_notes MATCH ?
-               ) LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.file_notes = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+              `SELECT fn.*, f.rank FROM fts_file_notes f
+               JOIN file_notes fn ON fn.file_path = f.file_path
+               WHERE fts_file_notes MATCH ?
+               ORDER BY f.rank LIMIT ?`
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "file_notes", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
 
         if (scope === "all" || scope === "conventions") {
@@ -232,9 +212,9 @@ Returns:
                JOIN conventions c ON c.id = f.rowid
                WHERE fts_conventions MATCH ?
                ORDER BY rank LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.conventions = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "conventions", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
 
         if (scope === "all" || scope === "tasks") {
@@ -244,69 +224,75 @@ Returns:
                JOIN tasks t ON t.id = f.rowid
                WHERE fts_tasks MATCH ?
                ORDER BY rank LIMIT ?`
-            ).all(ftsQuery, perTable);
-            if (rows.length) { results.tasks = rows; totalFound += rows.length; }
-          } catch { /* FTS match failed, skip */ }
+            ).all(ftsQuery, oversample) as Array<Record<string, unknown>>;
+            for (const r of rows) pool.push({ table: "tasks", rank: r.rank as number, data: r });
+          } catch { /* skip */ }
         }
       } else {
-        // ─── LIKE Fallback (slow but compatible) ─────────────────
+        // ─── LIKE Fallback (rank = 0 for all) ──────────────────
         const term = `%${query}%`;
 
         if (scope === "all" || scope === "sessions") {
           const rows = db.prepare(
             "SELECT * FROM sessions WHERE summary LIKE ? OR tags LIKE ? ORDER BY id DESC LIMIT ?"
-          ).all(term, term, perTable);
-          if (rows.length) { results.sessions = rows; totalFound += rows.length; }
+          ).all(term, term, oversample);
+          for (const r of rows) pool.push({ table: "sessions", rank: 0, data: r });
         }
 
         if (scope === "all" || scope === "changes") {
           const rows = db.prepare(
             "SELECT * FROM changes WHERE description LIKE ? OR file_path LIKE ? OR diff_summary LIKE ? ORDER BY timestamp DESC LIMIT ?"
-          ).all(term, term, term, perTable);
-          if (rows.length) { results.changes = rows; totalFound += rows.length; }
+          ).all(term, term, term, oversample);
+          for (const r of rows) pool.push({ table: "changes", rank: 0, data: r });
         }
 
         if (scope === "all" || scope === "decisions") {
           const rows = db.prepare(
             "SELECT * FROM decisions WHERE decision LIKE ? OR rationale LIKE ? OR tags LIKE ? ORDER BY timestamp DESC LIMIT ?"
-          ).all(term, term, term, perTable);
-          if (rows.length) { results.decisions = rows; totalFound += rows.length; }
+          ).all(term, term, term, oversample);
+          for (const r of rows) pool.push({ table: "decisions", rank: 0, data: r });
         }
 
         if (scope === "all" || scope === "file_notes") {
           const rows = db.prepare(
             "SELECT * FROM file_notes WHERE file_path LIKE ? OR purpose LIKE ? OR notes LIKE ? LIMIT ?"
-          ).all(term, term, term, perTable);
-          if (rows.length) { results.file_notes = rows; totalFound += rows.length; }
+          ).all(term, term, term, oversample);
+          for (const r of rows) pool.push({ table: "file_notes", rank: 0, data: r });
         }
 
         if (scope === "all" || scope === "conventions") {
           const rows = db.prepare(
             "SELECT * FROM conventions WHERE rule LIKE ? OR examples LIKE ? LIMIT ?"
-          ).all(term, term, perTable);
-          if (rows.length) { results.conventions = rows; totalFound += rows.length; }
+          ).all(term, term, oversample);
+          for (const r of rows) pool.push({ table: "conventions", rank: 0, data: r });
         }
 
         if (scope === "all" || scope === "tasks") {
           const rows = db.prepare(
             "SELECT * FROM tasks WHERE title LIKE ? OR description LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?"
-          ).all(term, term, term, perTable);
-          if (rows.length) { results.tasks = rows; totalFound += rows.length; }
+          ).all(term, term, term, oversample);
+          for (const r of rows) pool.push({ table: "tasks", rank: 0, data: r });
         }
       }
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            query,
-            scope,
-            search_engine: useFts ? "fts5" : "like",
-            total_results: totalFound,
-            results,
-          }, null, 2),
-        }],
-      };
+      // Sort by rank (FTS5 rank is negative — more negative = better match)
+      pool.sort((a, b) => a.rank - b.rank);
+
+      // Take top `limit` and group by table
+      const top = pool.slice(0, limit);
+      const results: Record<string, unknown[]> = {};
+      for (const item of top) {
+        if (!results[item.table]) results[item.table] = [];
+        results[item.table].push(item.data);
+      }
+
+      return success({
+        query,
+        scope,
+        search_engine: useFts ? "fts5" : "like",
+        total_results: top.length,
+        results,
+      });
     }
   );
 
@@ -338,14 +324,11 @@ Returns:
       const db = getDb();
       const projectRoot = getProjectRoot();
 
-      // Resolve "since" to an ISO timestamp
       let sinceTimestamp: string;
       if (!since) {
-        // Default to last session end
         const last = db.prepare("SELECT ended_at FROM sessions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1").get() as { ended_at: string } | undefined;
         sinceTimestamp = last?.ended_at || new Date(Date.now() - 86400000).toISOString();
       } else if (/^\d+[hdm]$/.test(since)) {
-        // Relative time
         const match = since.match(/^(\d+)([hdm])$/);
         if (match) {
           const amount = parseInt(match[1]);
@@ -359,17 +342,14 @@ Returns:
         sinceTimestamp = since;
       }
 
-      // Agent-recorded changes
       const agentChanges = db.prepare(
         "SELECT * FROM changes WHERE timestamp > ? ORDER BY timestamp DESC"
       ).all(sinceTimestamp) as unknown[] as ChangeRow[];
 
-      // Decisions made since
       const newDecisions = db.prepare(
         "SELECT * FROM decisions WHERE timestamp > ? ORDER BY timestamp DESC"
       ).all(sinceTimestamp) as unknown[] as DecisionRow[];
 
-      // Git changes
       let gitLog = "";
       let gitFilesChanged: string[] = [];
       if (include_git && isGitRepo(projectRoot)) {
@@ -377,29 +357,23 @@ Returns:
         gitFilesChanged = getGitFilesChanged(projectRoot, sinceTimestamp);
       }
 
-      // Files only in git (not recorded by agent)
       const recordedFiles = new Set(agentChanges.map(c => c.file_path));
       const unrecordedGitChanges = gitFilesChanged.filter(f => !recordedFiles.has(f));
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            since: sinceTimestamp,
-            agent_recorded: {
-              count: agentChanges.length,
-              changes: agentChanges,
-            },
-            new_decisions: newDecisions,
-            git: include_git ? {
-              log: gitLog,
-              files_changed: gitFilesChanged.length,
-              unrecorded_changes: unrecordedGitChanges,
-            } : null,
-            summary: `${agentChanges.length} recorded changes, ${newDecisions.length} new decisions, ${gitFilesChanged.length} git file changes (${unrecordedGitChanges.length} unrecorded) since ${sinceTimestamp}.`,
-          }, null, 2),
-        }],
-      };
+      return success({
+        since: sinceTimestamp,
+        agent_recorded: {
+          count: agentChanges.length,
+          changes: agentChanges,
+        },
+        new_decisions: newDecisions,
+        git: include_git ? {
+          log: gitLog,
+          files_changed: gitFilesChanged.length,
+          unrecorded_changes: unrecordedGitChanges,
+        } : null,
+        summary: `${agentChanges.length} recorded changes, ${newDecisions.length} new decisions, ${gitFilesChanged.length} git file changes (${unrecordedGitChanges.length} unrecorded) since ${sinceTimestamp}.`,
+      });
     }
   );
 
@@ -429,11 +403,12 @@ Returns:
     },
     async ({ file_path, depth }) => {
       const db = getDb();
+      const fp = normalizePath(file_path);
 
-      function getDeps(fp: string, dir: "up" | "down", currentDepth: number): Record<string, unknown> {
+      function getDeps(filePath: string, dir: "up" | "down", currentDepth: number): Record<string, unknown> {
         if (currentDepth > depth) return {};
 
-        const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(fp) as unknown as FileNoteRow | undefined;
+        const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(normalizePath(filePath)) as unknown as FileNoteRow | undefined;
         if (!note) return {};
 
         const field = dir === "up" ? "dependencies" : "dependents";
@@ -446,24 +421,19 @@ Returns:
         return result;
       }
 
-      const upstream = getDeps(file_path, "up", 1);
-      const downstream = getDeps(file_path, "down", 1);
+      const upstream = getDeps(fp, "up", 1);
+      const downstream = getDeps(fp, "down", 1);
 
-      const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(file_path) as unknown as FileNoteRow | undefined;
+      const note = db.prepare("SELECT * FROM file_notes WHERE file_path = ?").get(fp) as unknown as FileNoteRow | undefined;
 
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            file_path,
-            purpose: note?.purpose || "(no notes recorded)",
-            layer: note?.layer || detectLayer(file_path),
-            complexity: note?.complexity || "unknown",
-            depends_on: upstream,
-            depended_by: downstream,
-          }, null, 2),
-        }],
-      };
+      return success({
+        file_path: fp,
+        purpose: note?.purpose || "(no notes recorded)",
+        layer: note?.layer || detectLayer(fp),
+        complexity: note?.complexity || "unknown",
+        depends_on: upstream,
+        depended_by: downstream,
+      });
     }
   );
 }

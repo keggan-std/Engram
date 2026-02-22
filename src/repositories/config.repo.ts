@@ -40,4 +40,14 @@ export class ConfigRepo {
             "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, ?)"
         ).run(key, value, timestamp);
     }
+
+    getAll(): Array<{ key: string; value: string; updated_at: string }> {
+        try {
+            return this.db.prepare(
+                "SELECT key, value, updated_at FROM config ORDER BY key"
+            ).all() as Array<{ key: string; value: string; updated_at: string }>;
+        } catch {
+            return [];
+        }
+    }
 }

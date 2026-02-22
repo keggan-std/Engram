@@ -6,6 +6,7 @@
  * Standard MCP tool response types.
  */
 interface McpToolResponse {
+    [key: string]: unknown;
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
 }

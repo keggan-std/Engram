@@ -19,7 +19,7 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.2.0+](#-whats-new-in-v120)
+- [✨ What's New in v1.3.0](#-whats-new-in-v130)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
@@ -50,19 +50,35 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ---
 
-## ✨ What's New in v1.2.0+
+## ✨ What's New in v1.3.0
 
-- **Universal IDE Installer:** Radically improved `npx` installer supporting 10+ IDEs automatically including Claude Code, VS Code, Visual Studio 2022/2026, Trae IDE, JetBrains, Cursor, and Windsurf.
-- **Windows Reliability:** Full Windows `cmd /c` wrapper support ensures the `stdio` MCP protocol starts correctly across all environments.
-- **Modular Service Architecture:** Rebuilt from the ground up for stability, moving away from monolithic files into 22+ dedicated repos and services.
-- **Vitest Integrity:** Backed by 39+ automated tests verifying configuration generation, IDE detection, and data repositories.
-- **Scheduled Events:** Agents can now defer work to specific triggers (`next_session`, `datetime`, `task_complete`) with daily or weekly recurrence.
+- **Session Verbosity Control:** `engram_start_session` now accepts a `verbosity` parameter (`"full"` | `"summary"` | `"minimal"`). Use `"minimal"` for ~90% fewer tokens or `"summary"` (default) for ~60–80% fewer — critical for large projects where context bloat slows agents down.
+- **New `engram_config` Tool:** Read and update Engram's runtime configuration directly from your agent — control `auto_compact`, `compact_threshold`, `retention_days`, and `max_backups` without touching any files.
+- **New `engram_health` Tool:** On-demand database health check covering integrity, schema version, FTS5 availability, WAL mode status, and per-table row counts.
+- **Batch Operations:** `engram_record_decision` and `engram_set_file_notes` now support batch input — document multiple decisions or file notes in a single atomic transaction.
+- **Path Normalization:** File paths are now normalized on write (backslashes → forward slashes, `./` prefix stripped, duplicate slashes collapsed). Cross-platform lookups finally work consistently on Windows.
+- **Similar Decision Detection:** When recording a decision, Engram automatically checks for semantically similar existing decisions and surfaces them as a warning — reducing duplicate entries.
+- **Unified Response Helpers:** All tools now use shared `success()` / `error()` response builders, giving consistent, predictable MCP output shapes across the entire API.
+- **Services Layer:** Internal service classes (`CompactionService`, `EventTriggerService`, `GitService`, `ProjectScanService`) are now fully wired and injected — tools delegate to services rather than executing raw SQL inline.
+- **Expanded Test Suite:** Added batch-operation tests (`tests/repositories/batch.test.ts`) and unit tests for `normalizePath` and the repository layer (`tests/unit/`). Test count now exceeds 50.
 
 ---
 
 ## Installation
 
 Engram is published to the npm registry. **You do not need to download or compile any code.** Your IDE will download and run the latest version automatically using `npx`.
+
+### Prerequisites
+
+Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, which includes a native C++ addon. On most systems this is handled automatically via prebuilt binaries. However, if no prebuilt binary matches your platform, npm will attempt to compile from source — which requires:
+
+- **Windows:** [Node.js](https://nodejs.org) (v18+) and [Windows Build Tools](https://github.com/nodejs/node-gyp#on-windows) (Visual C++ Build Tools + Python). Install them with:
+  ```bash
+  npm install -g windows-build-tools
+  ```
+  Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
+- **Mac:** Xcode Command Line Tools (`xcode-select --install`)
+- **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
 
 ### Option 1: The Magic Installer (Interactive)
 Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
@@ -81,7 +97,18 @@ npx -y engram-mcp-server install --ide vscode --yes
 npx -y engram-mcp-server install --remove --ide claudecode
 ```
 
-### Option 2: Manual Configuration
+### Option 2: Global Install (Windows Fallback)
+
+If `npx -y engram-mcp-server --install` fails on Windows, install globally first then run the installer:
+
+```bash
+npm install -g engram-mcp-server
+engram install --ide <your-ide>
+```
+
+> **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
+
+### Option 3: Manual Configuration
 
 If you prefer to configure manually, find your IDE below:
 
@@ -281,6 +308,8 @@ Engram exposes 30+ tools. Here are the core highlights of what an agent can do f
 | `engram_search` | FTS5-powered full-text search across all memories. |
 | `engram_scan_project` | Scan and cache project structure automatically. |
 | `engram_backup` | Create a database backup to any synced folder. |
+| `engram_config` | Read or update runtime configuration values. |
+| `engram_health` | Run database health checks and report diagnostics. |
 
 *(Run the agent and ask to list available tools for the complete reference).*
 

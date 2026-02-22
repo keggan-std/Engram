@@ -9,9 +9,18 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService } from "./services/index.js";
+
+export interface Services {
+  compaction: CompactionService;
+  scan: ProjectScanService;
+  git: GitService;
+  events: EventTriggerService;
+}
 
 let _db: DatabaseType | null = null;
 let _repos: Repositories | null = null;
+let _services: Services | null = null;
 let _projectRoot: string = process.cwd();
 let _dbPath: string = "";
 
@@ -39,6 +48,14 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   // Initialize repositories
   _repos = createRepositories(_db);
 
+  // Initialize services
+  _services = {
+    compaction: new CompactionService(_db, _repos),
+    scan: new ProjectScanService(_repos),
+    git: new GitService(projectRoot),
+    events: new EventTriggerService(_repos),
+  };
+
   return _db;
 }
 
@@ -50,6 +67,11 @@ export function getDb(): DatabaseType {
 export function getRepos(): Repositories {
   if (!_repos) throw new Error("Repositories not initialized. Call initDatabase() first.");
   return _repos;
+}
+
+export function getServices(): Services {
+  if (!_services) throw new Error("Services not initialized. Call initDatabase() first.");
+  return _services;
 }
 
 export function getProjectRoot(): string {

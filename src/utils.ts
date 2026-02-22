@@ -15,6 +15,28 @@ import {
 import type { ArchLayer } from "./types.js";
 
 /**
+ * Normalize a file path for consistent storage as a database key.
+ * 1. Replace backslashes with forward slashes
+ * 2. If absolute and projectRoot provided, convert to relative
+ * 3. Strip leading ./
+ * 4. Collapse consecutive /
+ * 5. Strip trailing /
+ */
+export function normalizePath(filePath: string, projectRoot?: string): string {
+  let p = filePath.replace(/\\/g, "/");
+
+  if (projectRoot && path.isAbsolute(p)) {
+    p = path.relative(projectRoot, p).replace(/\\/g, "/");
+  }
+
+  p = p.replace(/^\.\//, "");
+  p = p.replace(/\/+/g, "/");
+  p = p.replace(/\/$/, "");
+
+  return p;
+}
+
+/**
  * Auto-detect the project root by walking up from cwd looking for marker files.
  */
 export function findProjectRoot(startDir?: string): string {

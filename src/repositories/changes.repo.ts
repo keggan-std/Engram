@@ -4,6 +4,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { ChangeRow } from "../types.js";
+import { normalizePath } from "../utils.js";
 
 export class ChangesRepo {
     constructor(private db: DatabaseType) { }
@@ -25,12 +26,13 @@ export class ChangesRepo {
 
         const tx = this.db.transaction(() => {
             for (const c of changes) {
-                insert.run(sessionId, timestamp, c.file_path, c.change_type, c.description, c.diff_summary || null, c.impact_scope);
+                const fp = normalizePath(c.file_path);
+                insert.run(sessionId, timestamp, fp, c.change_type, c.description, c.diff_summary || null, c.impact_scope);
 
                 if (sessionId) {
                     this.db.prepare(
                         "UPDATE file_notes SET last_modified_session = ? WHERE file_path = ?"
-                    ).run(sessionId, c.file_path);
+                    ).run(sessionId, fp);
                 }
             }
         });
@@ -42,7 +44,7 @@ export class ChangesRepo {
     getByFile(filePath: string, limit: number): ChangeRow[] {
         return this.db.prepare(
             "SELECT * FROM changes WHERE file_path = ? ORDER BY timestamp DESC LIMIT ?"
-        ).all(filePath, limit) as ChangeRow[];
+        ).all(normalizePath(filePath), limit) as ChangeRow[];
     }
 
     getSince(timestamp: string): ChangeRow[] {

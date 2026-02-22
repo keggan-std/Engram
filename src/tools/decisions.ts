@@ -4,9 +4,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId } from "../database.js";
+import { now, getCurrentSessionId, getRepos } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
-import type { DecisionRow } from "../types.js";
+import { success, error } from "../response.js";
 
 export function registerDecisionTools(server: McpServer): void {
     server.registerTool(
@@ -24,7 +24,7 @@ Args:
   - supersedes (number, optional): ID of a previous decision this replaces
 
 Returns:
-  Decision ID and confirmation.`,
+  Decision ID and confirmation. May include a warning if similar decisions exist.`,
             inputSchema: {
                 decision: z.string().min(5).describe("The decision that was made"),
                 rationale: z.string().optional().describe("Why — context, tradeoffs, alternatives considered"),
@@ -41,38 +41,85 @@ Returns:
             },
         },
         async ({ decision, rationale, affected_files, tags, status, supersedes }) => {
-            const db = getDb();
+            const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
-            const result = db.prepare(
-                "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-            ).run(
-                sessionId, timestamp, decision,
-                rationale || null,
-                affected_files ? JSON.stringify(affected_files) : null,
-                tags ? JSON.stringify(tags) : null,
-                status,
-                supersedes || null
+            const newDecisionId = repos.decisions.create(
+                sessionId, timestamp, decision, rationale, affected_files, tags, status, supersedes
             );
 
-            const newDecisionId = result.lastInsertRowid as number;
-
             if (supersedes) {
-                db.prepare("UPDATE decisions SET status = 'superseded', superseded_by = ? WHERE id = ?")
-                    .run(newDecisionId, supersedes);
+                repos.decisions.supersede(supersedes, newDecisionId);
             }
 
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({
-                        decision_id: newDecisionId,
-                        message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
-                        decision,
-                    }, null, 2),
-                }],
+            // Check for similar existing decisions (deduplication signal)
+            const response: Record<string, unknown> = {
+                decision_id: newDecisionId,
+                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
+                decision,
             };
+
+            const similar = repos.decisions.findSimilar(decision, 5)
+                .filter(d => d.id !== newDecisionId);
+            if (similar.length > 0) {
+                response.warning = `Found ${similar.length} similar active decision(s). Review for potential duplicates.`;
+                response.similar_decisions = similar.map(d => ({
+                    id: d.id,
+                    decision: d.decision,
+                    status: d.status,
+                    timestamp: d.timestamp,
+                }));
+            }
+
+            return success(response);
+        }
+    );
+
+    // ─── BATCH RECORD DECISIONS ──────────────────────────────────────
+    server.registerTool(
+        `${TOOL_PREFIX}_record_decisions_batch`,
+        {
+            title: "Record Decisions (Batch)",
+            description: `Record multiple architectural decisions in a single atomic call.
+
+Args:
+  - decisions (array, 1-50): Array of decision objects, each with:
+    - decision (string): The decision that was made
+    - rationale (string, optional): Why
+    - affected_files (array, optional): Impacted files
+    - tags (array, optional): Tags
+    - status (string, optional): "active" | "experimental" (default: "active")
+
+Returns:
+  Array of decision IDs.`,
+            inputSchema: {
+                decisions: z.array(z.object({
+                    decision: z.string().min(5).describe("The decision"),
+                    rationale: z.string().optional(),
+                    affected_files: z.array(z.string()).optional(),
+                    tags: z.array(z.string()).optional(),
+                    status: z.enum(["active", "experimental"]).default("active"),
+                })).min(1).max(50).describe("Array of decisions to record"),
+            },
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: false,
+            },
+        },
+        async ({ decisions }) => {
+            const repos = getRepos();
+            const timestamp = now();
+            const sessionId = getCurrentSessionId();
+
+            const ids = repos.decisions.createBatch(decisions, sessionId, timestamp);
+
+            return success({
+                message: `Recorded ${ids.length} decision(s).`,
+                decision_ids: ids,
+            });
         }
     );
 
@@ -104,25 +151,9 @@ Returns:
             },
         },
         async ({ status, tag, file_path, limit }) => {
-            const db = getDb();
-            let query = "SELECT * FROM decisions WHERE 1=1";
-            const params: unknown[] = [];
-
-            if (status) { query += " AND status = ?"; params.push(status); }
-            if (tag) { query += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; params.push(tag); }
-            if (file_path) { query += " AND EXISTS (SELECT 1 FROM json_each(affected_files) WHERE value = ?)"; params.push(file_path); }
-
-            query += " ORDER BY timestamp DESC LIMIT ?";
-            params.push(limit);
-
-            const decisions = db.prepare(query).all(...params) as unknown[] as DecisionRow[];
-
-            return {
-                content: [{
-                    type: "text",
-                    text: JSON.stringify({ count: decisions.length, decisions }, null, 2),
-                }],
-            };
+            const repos = getRepos();
+            const decisions = repos.decisions.getFiltered({ status, tag, file_path, limit });
+            return success({ count: decisions.length, decisions });
         }
     );
 
@@ -150,12 +181,12 @@ Returns:
             },
         },
         async ({ id, status }) => {
-            const db = getDb();
-            const result = db.prepare("UPDATE decisions SET status = ? WHERE id = ?").run(status, id);
-            if (result.changes === 0) {
-                return { isError: true, content: [{ type: "text", text: `Decision #${id} not found.` }] };
+            const repos = getRepos();
+            const changes = repos.decisions.updateStatus(id, status);
+            if (changes === 0) {
+                return error(`Decision #${id} not found.`);
             }
-            return { content: [{ type: "text", text: `Decision #${id} status updated to "${status}".` }] };
+            return success({ message: `Decision #${id} status updated to "${status}".` });
         }
     );
 }
