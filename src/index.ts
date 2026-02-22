@@ -17,6 +17,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { initDatabase, getProjectRoot } from "./database.js";
+import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer.js";
 
@@ -41,11 +42,11 @@ async function main(): Promise<void> {
 
   // Detect project root
   const projectRoot = findProjectRoot();
-  console.error(`[Engram] Project root: ${projectRoot}`);
+  log.info(`Project root: ${projectRoot}`);
 
   // Initialize database
   initDatabase(projectRoot);
-  console.error(`[Engram] Database initialized at ${projectRoot}/.engram/memory.db`);
+  log.info(`Database initialized at ${projectRoot}/.engram/memory.db`);
 
   // Create MCP server
   const server = new McpServer({
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
   registerMaintenanceTools(server);  // stats, compact, milestones, export, import, clear
   registerSchedulerTools(server);    // schedule_event, get/update/acknowledge events, check_events
 
-  console.error(`[Engram] ${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
+  log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 
   // ─── Connect Transport ───────────────────────────────────────────
 
@@ -71,10 +72,10 @@ async function main(): Promise<void> {
   if (transportType === "stdio") {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("[Engram] Running on stdio transport. Ready.");
+    log.info("Running on stdio transport. Ready.");
   } else {
     // Future: HTTP transport support
-    console.error(`[Engram] Unknown transport: ${transportType}. Falling back to stdio.`);
+    log.warn(`Unknown transport: ${transportType}. Falling back to stdio.`);
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }
@@ -83,6 +84,6 @@ async function main(): Promise<void> {
 // ─── Run ──────────────────────────────────────────────────────────────
 
 main().catch((error: Error) => {
-  console.error("[Engram] Fatal error:", error.message);
+  log.error("Fatal error", { message: error.message });
   process.exit(1);
 });

@@ -3,6 +3,7 @@
 // ============================================================================
 
 import type { Database as DatabaseType } from "better-sqlite3";
+import { log } from "./logger.js";
 
 interface Migration {
   version: number;
@@ -338,10 +339,10 @@ export function runMigrations(db: DatabaseType): void {
     return; // Already up to date
   }
 
-  console.error(`[Engram] Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  log.info(`Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
 
   for (const migration of pendingMigrations) {
-    console.error(`[Engram]   v${migration.version}: ${migration.description}`);
+    log.info(`  v${migration.version}: ${migration.description}`);
 
     // Run migration in a transaction for safety
     const runMigration = db.transaction(() => {
@@ -354,7 +355,7 @@ export function runMigrations(db: DatabaseType): void {
     runMigration();
   }
 
-  console.error(`[Engram] Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  log.info(`Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
 }
 
 export function getCurrentSchemaVersion(db: DatabaseType): number {

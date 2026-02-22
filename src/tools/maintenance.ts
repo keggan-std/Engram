@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getDb, now, getCurrentSessionId, getProjectRoot, getDbSizeKb, getDbPath, backupDatabase } from "../database.js";
 import { TOOL_PREFIX, DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, COMPACTION_THRESHOLD_SESSIONS, MAX_BACKUP_COUNT, SERVER_VERSION } from "../constants.js";
+import { log } from "../logger.js";
 import type { MemoryStats, CompactionResult, BackupInfo } from "../types.js";
 
 export function registerMaintenanceTools(server: McpServer): void {
@@ -166,9 +167,9 @@ Returns:
       let backupPath = "";
       try {
         backupPath = backupDatabase();
-        console.error(`[Engram] Auto-backup created before compaction: ${backupPath}`);
+        log.info(`Auto-backup created before compaction: ${backupPath}`);
       } catch (e) {
-        console.error(`[Engram] Warning: failed to create backup before compaction: ${e}`);
+        log.warn(`Failed to create backup before compaction: ${e}`);
       }
 
       // Execute compaction in a transaction
@@ -345,7 +346,7 @@ Returns:
       let safetyBackupPath = "";
       try {
         safetyBackupPath = backupDatabase();
-        console.error(`[Engram] Safety backup created before restore: ${safetyBackupPath}`);
+        log.info(`Safety backup created before restore: ${safetyBackupPath}`);
       } catch (e) {
         return {
           isError: true,
@@ -758,9 +759,9 @@ Returns:
       let backupPath = "";
       try {
         backupPath = backupDatabase();
-        console.error(`[Engram] Auto-backup created before clear: ${backupPath}`);
+        log.info(`Auto-backup created before clear: ${backupPath}`);
       } catch (e) {
-        console.error(`[Engram] Warning: failed to create backup before clear: ${e}`);
+        log.warn(`Failed to create backup before clear: ${e}`);
       }
 
       const db = getDb();

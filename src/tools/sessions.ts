@@ -9,6 +9,7 @@ import * as path from "path";
 import { getDb, now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getDbSizeKb, backupDatabase } from "../database.js";
 import { getGitLogSince, getGitBranch, getGitHead, isGitRepo, minutesSince, scanFileTree, detectLayer, safeJsonParse } from "../utils.js";
 import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, COMPACTION_THRESHOLD_SESSIONS, DB_DIR_NAME, MAX_FILE_TREE_DEPTH } from "../constants.js";
+import { log } from "../logger.js";
 import type { ChangeRow, DecisionRow, ConventionRow, TaskRow, SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
 
 export function registerSessionTools(server: McpServer): void {
@@ -77,7 +78,7 @@ Returns:
           } catch { /* default to enabled */ }
 
           if (autoCompactEnabled) {
-            console.error(`[Engram] Auto-compacting: ${totalSessions} sessions exceed threshold of ${threshold}`);
+            log.info(`Auto-compacting: ${totalSessions} sessions exceed threshold of ${threshold}`);
             try { backupDatabase(); } catch { /* best effort */ }
 
             // Compact: keep recent sessions, summarize old changes
@@ -107,12 +108,12 @@ Returns:
               });
               doCompact();
               autoCompacted = true;
-              console.error(`[Engram] Auto-compaction complete.`);
+              log.info("Auto-compaction complete.");
             }
           }
         }
       } catch (e) {
-        console.error(`[Engram] Auto-compaction skipped: ${e}`);
+        log.warn(`Auto-compaction skipped: ${e}`);
       }
 
       // Gather changes since last session
