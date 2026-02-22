@@ -1,165 +1,13 @@
+// ============================================================================
+// Engram MCP Server — Installer Orchestrator
+// ============================================================================
+
 import fs from "fs";
 import path from "path";
-import os from "os";
 import readline from "readline";
-
-const HOME = os.homedir();
-const APPDATA = process.env.APPDATA || path.join(HOME, ".config");
-
-interface IdeDefinition {
-    name: string;
-    format: "mcpServers" | "servers";
-    scopes: {
-        global?: string[];
-        localDirs?: string[]; // e.g. [".vs", ".vscode"] - appended to a user-provided solution path
-    };
-}
-
-const IDE_CONFIGS: Record<string, IdeDefinition> = {
-    antigravity: {
-        name: "Antigravity IDE",
-        format: "mcpServers",
-        scopes: {
-            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
-        },
-    },
-    cursor: {
-        name: "Cursor",
-        format: "mcpServers",
-        scopes: {
-            global: [
-                path.join(HOME, ".cursor", "mcp.json"),
-                path.join(APPDATA, "Cursor", "mcp.json"),
-            ],
-            localDirs: [".cursor"],
-        },
-    },
-    vscode: {
-        name: "VS Code (Copilot)",
-        format: "mcpServers",
-        scopes: {
-            global: [
-                path.join(APPDATA, "Code", "User", "mcp.json"),
-                path.join(HOME, ".vscode", "mcp.json"),
-            ],
-            localDirs: ["", ".vscode"], // "" means root of workspace, .vscode is fallback
-        },
-    },
-    cline: {
-        name: "Cline / Roo Code",
-        format: "mcpServers",
-        scopes: {
-            global: [
-                path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-                path.join(HOME, ".cline", "mcp_settings.json"),
-            ],
-        },
-    },
-    windsurf: {
-        name: "Windsurf",
-        format: "mcpServers",
-        scopes: {
-            global: [
-                path.join(HOME, ".codeium", "windsurf", "mcp_config.json"),
-                path.join(APPDATA, "Windsurf", "mcp.json"),
-            ],
-        },
-    },
-    visualstudio: {
-        name: "Visual Studio 2022/2026",
-        format: "mcpServers",
-        scopes: {
-            global: [path.join(HOME, ".mcp.json")],
-            localDirs: ["", ".vs"], // "" means root of solution (e.g. SolutionDir/.mcp.json)
-        },
-    },
-};
-
-// ─── Engram Entry ────────────────────────────────────────────────────
-
-function makeEngramEntry(format: string) {
-    const entry = {
-        command: "npx",
-        args: ["-y", "engram-mcp-server"],
-    };
-
-    if (format === "servers") {
-        // VS Code uses a slightly different shape
-        return { type: "stdio", ...entry };
-    }
-
-    return entry;
-}
-
-// ─── Config Manipulation ─────────────────────────────────────────────
-
-function readJson(filePath: string) {
-    try {
-        return JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    } catch {
-        return null;
-    }
-}
-
-function writeJson(filePath: string, data: any) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
-}
-
-function addToConfig(configPath: string, format: string) {
-    let config: Record<string, any> = readJson(configPath) || {};
-    const key = format; // "mcpServers" or "servers"
-
-    if (!config[key]) config[key] = {};
-
-    const newEntry = makeEngramEntry(format);
-
-    if (config[key].engram) {
-        // Already exists — check if it's identical
-        if (JSON.stringify(config[key].engram) === JSON.stringify(newEntry)) {
-            return "exists";
-        }
-
-        // Exists but different (e.g. old local path) — update to use npx
-        config[key].engram = newEntry;
-        writeJson(configPath, config);
-        return "updated";
-    }
-
-    config[key].engram = newEntry;
-    writeJson(configPath, config);
-    return "added";
-}
-
-// ─── Environment Detection ──────────────────────────────────────────
-
-function detectCurrentIde(): string | null {
-    const env = process.env;
-
-    // Explicit hints usually present in extension hosts or integrated terminals
-    if (env.ANTIGRAVITY_EDITOR_APP_ROOT) return "antigravity";
-    if (env.WINDSURF_PROFILE) return "windsurf";
-
-    // VS Code forks share TERM_PROGRAM="vscode", but we can distinguish them by checking VSCODE_CWD or path
-    if (env.TERM_PROGRAM === "vscode" || env.VSCODE_IPC_HOOK || env.VSCODE_CWD) {
-        const cwdLower = (env.VSCODE_CWD || "").toLowerCase();
-        if (cwdLower.includes("antigravity")) return "antigravity";
-        if (cwdLower.includes("cursor")) return "cursor";
-        if (cwdLower.includes("windsurf")) return "windsurf";
-
-        // Final fallback: check PATH but ONLY for the specific IDE execution paths, not generically
-        const pathLower = (env.PATH || "").toLowerCase();
-        if (pathLower.includes("antigravity")) return "antigravity";
-        if (pathLower.includes("cursor\\cli")) return "cursor"; // more specific to avoid false positives
-        if (pathLower.includes("windsurf")) return "windsurf";
-
-        return "vscode";
-    }
-
-    return null;
-}
-
-// ─── Main ────────────────────────────────────────────────────────────
+import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
+import { addToConfig } from "./config-writer.js";
+import { detectCurrentIde } from "./ide-detector.js";
 
 async function askQuestion(query: string): Promise<string> {
     const rl = readline.createInterface({
@@ -186,7 +34,6 @@ export async function runInstaller(args: string[]) {
         process.exit(0);
     }
 
-    // Specific IDE requested via CLI flag?
     const ideFlagIdx = args.indexOf("--ide");
     if (ideFlagIdx >= 0 && args[ideFlagIdx + 1]) {
         const targetIde = args[ideFlagIdx + 1];
@@ -200,7 +47,6 @@ export async function runInstaller(args: string[]) {
 
     console.log("\n🧠 Engram MCP Installer\n");
 
-    // Auto-detect environment if it's run without specific args
     const currentIde = detectCurrentIde();
 
     if (currentIde && IDE_CONFIGS[currentIde]) {
@@ -211,10 +57,9 @@ export async function runInstaller(args: string[]) {
             await performInstallationInteractive({ [currentIde]: IDE_CONFIGS[currentIde] });
             return;
         }
-        console.log(""); // Skip to menu
+        console.log("");
     }
 
-    // Interactive Menu
     console.log("Where would you like to configure the Engram MCP server?\n");
 
     const ideKeys = Object.keys(IDE_CONFIGS);
@@ -240,7 +85,7 @@ export async function runInstaller(args: string[]) {
     let idesToProcess: Record<string, any> = {};
 
     if (choice === allOpt) {
-        idesToProcess = IDE_CONFIGS; // All
+        idesToProcess = IDE_CONFIGS;
     } else if (choice === customOpt) {
         const customPath = await askQuestion("Enter the absolute path to your MCP config JSON file: ");
         if (!customPath.trim()) {
@@ -251,7 +96,7 @@ export async function runInstaller(args: string[]) {
             custom: {
                 name: "Custom Path",
                 paths: [customPath.trim()],
-                format: "mcpServers" // Safe default for unknown IDEs
+                format: "mcpServers"
             }
         };
     } else if (choice >= 1 && choice <= ideKeys.length) {
@@ -265,7 +110,6 @@ export async function runInstaller(args: string[]) {
     await performInstallationInteractive(idesToProcess);
 }
 
-// Interactive wizard to resolve specific config paths for the selected IDEs
 async function performInstallationInteractive(idesToProcess: Record<string, IdeDefinition | any>) {
     let resolvedConfigs: { name: string; path: string; format: string }[] = [];
 
@@ -302,12 +146,10 @@ async function performInstallationInteractive(idesToProcess: Record<string, IdeD
                 continue;
             }
 
-            // For Visual studio, it's .vs/mcp.json or .mcp.json at root. We'll use the first defined localDir.
             const localDirPrefix = ide.scopes.localDirs![0];
 
             let configFileName = "mcp.json";
             if (localDirPrefix === "") {
-                // If the config is at the absolute root of the workspace, it's virtually always hidden (.mcp.json)
                 configFileName = ".mcp.json";
             }
 
@@ -349,7 +191,6 @@ async function performInstallation(configs: { name: string; path: string; format
     if (configs.length === 0) {
         console.log("\n   No target configurations resolved.");
     } else if (installed === 0) {
-        // Technically they could all just be "already exists"
         console.log("\n✅ Done! No new changes were needed.");
     } else {
         console.log(`\n✅ Done! Engram configured in ${installed} IDE scope(s).`);

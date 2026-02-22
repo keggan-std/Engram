@@ -19,7 +19,7 @@ import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
 import { initDatabase, getProjectRoot } from "./database.js";
 import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
-import { runInstaller } from "./installer.js";
+import { runInstaller } from "./installer/index.js";
 
 // Tool registrations
 import { registerSessionTools } from "./tools/sessions.js";
