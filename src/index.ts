@@ -23,10 +23,17 @@ import { runInstaller } from "./installer.js";
 
 // Tool registrations
 import { registerSessionTools } from "./tools/sessions.js";
-import { registerMemoryTools } from "./tools/memory.js";
+import { registerChangeTools } from "./tools/changes.js";
+import { registerDecisionTools } from "./tools/decisions.js";
+import { registerFileNoteTools } from "./tools/file-notes.js";
+import { registerConventionTools } from "./tools/conventions.js";
 import { registerTaskTools } from "./tools/tasks.js";
 import { registerIntelligenceTools } from "./tools/intelligence.js";
-import { registerMaintenanceTools } from "./tools/maintenance.js";
+import { registerStatsTools } from "./tools/stats.js";
+import { registerBackupTools } from "./tools/backup.js";
+import { registerMilestoneTools } from "./tools/milestones.js";
+import { registerExportImportTools } from "./tools/export-import.js";
+import { registerCompactionTools } from "./tools/compaction.js";
 import { registerSchedulerTools } from "./tools/scheduler.js";
 
 // ─── Initialize ───────────────────────────────────────────────────────
@@ -56,12 +63,19 @@ async function main(): Promise<void> {
 
   // ─── Register All Tools ──────────────────────────────────────────
 
-  registerSessionTools(server);      // start_session, end_session, get_session_history
-  registerMemoryTools(server);       // record_change, record_decision, file_notes, conventions
-  registerTaskTools(server);         // create_task, update_task, get_tasks
-  registerIntelligenceTools(server); // scan_project, search, what_changed, dependency_map
-  registerMaintenanceTools(server);  // stats, compact, milestones, export, import, clear
-  registerSchedulerTools(server);    // schedule_event, get/update/acknowledge events, check_events
+  registerSessionTools(server);       // start_session, end_session, get_session_history
+  registerChangeTools(server);        // record_change, get_file_history
+  registerDecisionTools(server);      // record_decision, get_decisions, update_decision
+  registerFileNoteTools(server);      // set_file_notes, get_file_notes
+  registerConventionTools(server);    // add_convention, get_conventions, toggle_convention
+  registerTaskTools(server);          // create_task, update_task, get_tasks
+  registerIntelligenceTools(server);  // scan_project, search, what_changed, dependency_map
+  registerStatsTools(server);         // stats
+  registerBackupTools(server);        // backup, restore, list_backups
+  registerMilestoneTools(server);     // record_milestone, get_milestones
+  registerExportImportTools(server);  // export, import
+  registerCompactionTools(server);    // compact, clear
+  registerSchedulerTools(server);     // schedule_event, get/update/acknowledge events, check_events
 
   log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 
