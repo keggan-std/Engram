@@ -5,14 +5,25 @@
 import fs from "fs";
 import path from "path";
 import readline from "readline";
+import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
-import { addToConfig, removeFromConfig, makeEngramEntry } from "./config-writer.js";
+import { addToConfig, removeFromConfig, makeEngramEntry, readJson } from "./config-writer.js";
 import { detectCurrentIde } from "./ide-detector.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function isTTY(): boolean {
     return !!(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+function getVersion(): string {
+    try {
+        const __dirname = path.dirname(fileURLToPath(import.meta.url));
+        const pkgPath = path.resolve(__dirname, "../../package.json");
+        return JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version;
+    } catch {
+        return "unknown";
+    }
 }
 
 async function askQuestion(query: string): Promise<string> {
@@ -37,20 +48,71 @@ async function askQuestion(query: string): Promise<string> {
 export async function runInstaller(args: string[]) {
     const nonInteractive = args.includes("--yes") || args.includes("-y") || !isTTY();
 
+    // ─── --version ───────────────────────────────────────────────────
+    if (args.includes("--version") || args.includes("-v")) {
+        console.log(`engram-mcp-server v${getVersion()}`);
+        process.exit(0);
+    }
+
+    // ─── --help ──────────────────────────────────────────────────────
+    if (args.includes("--help") || args.includes("-h")) {
+        const ideNames = Object.keys(IDE_CONFIGS).join(", ");
+        console.log(`
+Engram MCP Installer v${getVersion()}
+
+Usage:
+  engram install [options]
+  npx -y engram-mcp-server install [options]
+
+Options:
+  --ide <name>    Install for a specific IDE
+  --yes, -y       Non-interactive mode (requires --ide if no IDE is detected)
+  --remove        Remove Engram from an IDE config (requires --ide)
+  --list          Show all supported IDEs and their detection/install status
+  --version       Show version number
+  --help, -h      Show this help
+
+Supported IDEs:
+  ${ideNames}
+
+Examples:
+  engram install                               Auto-detect IDE, install interactively
+  engram install --ide vscode                  Install for VS Code
+  engram install --ide claudecode --yes        Non-interactive install for Claude Code
+  engram install --remove --ide cursor         Remove Engram from Cursor
+  engram install --list                        Show IDE detection and install status
+`);
+        process.exit(0);
+    }
+
     // ─── --list ──────────────────────────────────────────────────────
     if (args.includes("--list")) {
         console.log("\nEngram can be auto-installed into these IDEs:\n");
         for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-            let found = false;
+            let detected = false;
+            let installed = false;
+
             if (ide.scopes.global) {
-                found = !!ide.scopes.global.find(p => fs.existsSync(p) || fs.existsSync(path.dirname(p)));
+                const foundPath = ide.scopes.global.find(p => fs.existsSync(p));
+                if (foundPath) {
+                    detected = true;
+                    const config = readJson(foundPath);
+                    if (config?.[ide.configKey]?.engram) installed = true;
+                } else if (ide.scopes.global.find(p => fs.existsSync(path.dirname(p)))) {
+                    detected = true;
+                }
             }
+
             const scopeLabel = ide.scopes.localDirs ? " (Global / Local)" : " (Global)";
-            const statusLabel = found ? "✅ detected" : "❌ not found";
-            console.log(`  ${id.padEnd(15)} ${ide.name}${scopeLabel} ${statusLabel}`);
+            const statusLabel = installed
+                ? "✅ installed"
+                : detected
+                    ? "⬜ detected, not installed"
+                    : "❌ not found";
+
+            console.log(`  ${id.padEnd(15)} ${ide.name}${scopeLabel}  ${statusLabel}`);
         }
 
-        // Also show the correct JSON for manual install
         console.log("\n  For manual setup, the Engram entry looks like:");
         console.log(`  ${JSON.stringify(makeEngramEntry(IDE_CONFIGS.cursor), null, 2).replace(/\n/g, "\n  ")}`);
         process.exit(0);
@@ -120,8 +182,12 @@ export async function runInstaller(args: string[]) {
         }
         console.log("");
     } else if (nonInteractive) {
-        console.error("Could not auto-detect IDE. Use --ide <name> for non-interactive install.");
-        console.error(`Available: ${Object.keys(IDE_CONFIGS).join(", ")}`);
+        console.error("❌ Could not auto-detect your IDE in non-interactive mode.");
+        console.error("\n   Specify your IDE with --ide <name>. Examples:");
+        for (const key of Object.keys(IDE_CONFIGS)) {
+            console.error(`     engram install --ide ${key}`);
+        }
+        console.error("\n   Run 'engram install --list' to see detection status.");
         process.exit(1);
     }
 
@@ -185,8 +251,11 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
     // Show CLI hint for IDEs that support native CLI install
     if (ide.scopes.cli) {
         const entryJson = JSON.stringify(makeEngramEntry(ide));
+        const quotedEntry = process.platform === "win32"
+            ? `"${entryJson.replace(/"/g, '\\"')}"`
+            : `'${entryJson}'`;
         console.log(`\n💡 ${ide.name} also supports native CLI install:`);
-        console.log(`   ${ide.scopes.cli} --scope=user engram '${entryJson}'`);
+        console.log(`   ${ide.scopes.cli} --scope=user engram ${quotedEntry}`);
     }
 
     let targetScope = "global";

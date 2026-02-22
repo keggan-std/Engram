@@ -2,8 +2,15 @@
 // Engram MCP Server — Constants
 // ============================================================================
 
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import path from "path";
+
+const _pkgPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../package.json");
+const _pkg = JSON.parse(readFileSync(_pkgPath, "utf-8"));
+
 export const SERVER_NAME = "engram-mcp-server";
-export const SERVER_VERSION = "1.2.5";
+export const SERVER_VERSION: string = _pkg.version;
 export const TOOL_PREFIX = "engram";
 
 // Database

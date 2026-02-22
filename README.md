@@ -93,7 +93,18 @@ npx -y engram-mcp-server install --ide vscode --yes
 npx -y engram-mcp-server install --remove --ide claudecode
 ```
 
-### Option 2: Manual Configuration
+### Option 2: Global Install (Windows Fallback)
+
+If `npx -y engram-mcp-server --install` fails on Windows, install globally first then run the installer:
+
+```bash
+npm install -g engram-mcp-server
+engram install --ide <your-ide>
+```
+
+> **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
+
+### Option 3: Manual Configuration
 
 If you prefer to configure manually, find your IDE below:
 

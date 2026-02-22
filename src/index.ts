@@ -42,7 +42,15 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   // ─── Auto-Installer ───────────────────────────────────────────────────
-  if (args.includes("install") || args.includes("--install") || args.includes("--list")) {
+  if (
+    args.includes("install") ||
+    args.includes("--install") ||
+    args.includes("--list") ||
+    args.includes("--help") ||
+    args.includes("-h") ||
+    args.includes("--version") ||
+    args.includes("-v")
+  ) {
     runInstaller(args);
     return;
   }

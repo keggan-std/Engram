@@ -1,0 +1,7 @@
+# Source maps — not needed by end users
+dist/**/*.js.map
+dist/**/*.d.ts.map
+
+# Stale build artifacts from old tsconfig (rootDir was "." instead of "src")
+dist/src/
+dist/tests/
