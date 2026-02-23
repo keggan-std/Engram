@@ -5,9 +5,8 @@
 import fs from "fs";
 import path from "path";
 import readline from "readline";
-import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
-import { addToConfig, removeFromConfig, makeEngramEntry, readJson } from "./config-writer.js";
+import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion } from "./config-writer.js";
 import { detectCurrentIde } from "./ide-detector.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -16,15 +15,7 @@ function isTTY(): boolean {
     return !!(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function getVersion(): string {
-    try {
-        const __dirname = path.dirname(fileURLToPath(import.meta.url));
-        const pkgPath = path.resolve(__dirname, "../../package.json");
-        return JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version;
-    } catch {
-        return "unknown";
-    }
-}
+// Version reading is handled by getInstallerVersion() from config-writer.ts
 
 async function askQuestion(query: string): Promise<string> {
     if (!isTTY()) {
@@ -50,7 +41,7 @@ export async function runInstaller(args: string[]) {
 
     // ─── --version ───────────────────────────────────────────────────
     if (args.includes("--version") || args.includes("-v")) {
-        console.log(`engram-mcp-server v${getVersion()}`);
+        console.log(`engram-mcp-server v${getInstallerVersion()}`);
         process.exit(0);
     }
 
@@ -58,7 +49,7 @@ export async function runInstaller(args: string[]) {
     if (args.includes("--help") || args.includes("-h")) {
         const ideNames = Object.keys(IDE_CONFIGS).join(", ");
         console.log(`
-Engram MCP Installer v${getVersion()}
+Engram MCP Installer v${getInstallerVersion()}
 
 Usage:
   engram install [options]
@@ -69,6 +60,7 @@ Options:
   --yes, -y       Non-interactive mode (requires --ide if no IDE is detected)
   --remove        Remove Engram from an IDE config (requires --ide)
   --list          Show all supported IDEs and their detection/install status
+  --check         Show installed version per IDE and latest available on npm
   --version       Show version number
   --help, -h      Show this help
 
@@ -115,6 +107,73 @@ Examples:
 
         console.log("\n  For manual setup, the Engram entry looks like:");
         console.log(`  ${JSON.stringify(makeEngramEntry(IDE_CONFIGS.cursor), null, 2).replace(/\n/g, "\n  ")}`);
+        process.exit(0);
+    }
+
+    // ─── --check ─────────────────────────────────────────────────────
+    if (args.includes("--check")) {
+        const currentVersion = getInstallerVersion();
+        console.log(`\nEngram Version Check\n`);
+        console.log(`  Running version : v${currentVersion}`);
+        console.log(`\n  IDE Configurations:\n`);
+
+        for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
+            if (!ide.scopes.global) continue;
+            const foundPath = ide.scopes.global.find(p => fs.existsSync(p));
+            if (!foundPath) {
+                console.log(`  ${id.padEnd(14)} (not detected)`);
+                continue;
+            }
+            const config = readJson(foundPath);
+            const entry = config?.[ide.configKey]?.engram;
+            if (!entry) {
+                console.log(`  ${id.padEnd(14)} ${foundPath}`);
+                console.log(`  ${"".padEnd(14)} Not installed`);
+            } else {
+                const installedVersion: string = entry._engram_version || "unknown (pre-tracking)";
+                const isMatch = installedVersion === currentVersion;
+                const statusIcon = isMatch ? "✅" : "⬆";
+                const statusLabel = isMatch ? "up to date" : `update available (v${currentVersion})`;
+                console.log(`  ${id.padEnd(14)} ${foundPath}`);
+                console.log(`  ${"".padEnd(14)} Installed: v${installedVersion}  ${statusIcon} ${statusLabel}`);
+            }
+            console.log();
+        }
+
+        // Fetch npm latest for comparison
+        process.stdout.write("  npm latest      : checking...");
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5_000);
+            const res = await fetch("https://registry.npmjs.org/engram-mcp-server/latest", {
+                signal: controller.signal,
+                headers: { "User-Agent": "engram-mcp-server" },
+            });
+            clearTimeout(timer);
+            if (res.ok) {
+                const data = await res.json() as Record<string, unknown>;
+                const npmLatest = data["version"] as string;
+                const semverCmp = (a: string, b: string) => {
+                    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+                    for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d; }
+                    return 0;
+                };
+                const cmp = semverCmp(currentVersion, npmLatest);
+                const label = cmp === 0
+                    ? "✅ up to date"
+                    : cmp > 0
+                        ? `⚡ running pre-release (v${currentVersion} > npm v${npmLatest})`
+                        : `⬆  npm has v${npmLatest} — run: npx -y engram-mcp-server install`;
+                process.stdout.write(`\r  npm latest      : v${npmLatest}  ${label}\n`);
+            } else {
+                process.stdout.write(`\r  npm latest      : (registry unreachable)\n`);
+            }
+        } catch {
+            process.stdout.write(`\r  npm latest      : (network error — check manually)\n`);
+        }
+
+        console.log(`\n  To update: npx -y engram-mcp-server install`);
+        console.log(`  Releases : https://github.com/keggan-std/Engram/releases\n`);
         process.exit(0);
     }
 
@@ -301,15 +360,22 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
 async function installToPath(configPath: string, ide: IdeDefinition) {
     try {
         const result = addToConfig(configPath, ide);
+        const currentVersion = getInstallerVersion();
         console.log(`\n   ✅ ${ide.name}`);
-        console.log(`      Config: ${configPath}`);
+        console.log(`      Config : ${configPath}`);
 
         let statusText = "";
-        if (result === "added") statusText = "Engram added successfully";
-        else if (result === "updated") statusText = "Engram config updated (was outdated)";
-        else if (result === "exists") statusText = "Engram already installed and up to date";
+        if (result === "added") {
+            statusText = `Engram v${currentVersion} installed successfully`;
+        } else if (result === "upgraded") {
+            statusText = `Upgraded to v${currentVersion}`;
+        } else if (result === "legacy-upgraded") {
+            statusText = `Found existing install (version unknown — pre-tracking era). Stamped as v${currentVersion}`;
+        } else if (result === "exists") {
+            statusText = `Already installed at v${currentVersion} — nothing to do`;
+        }
 
-        console.log(`      Status: ${statusText}`);
+        console.log(`      Status : ${statusText}`);
     } catch (e: any) {
         console.log(`\n   ⚠️  ${ide.name}`);
         console.log(`      Could not write to: ${configPath}`);

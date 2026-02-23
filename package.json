@@ -1,6 +1,6 @@
 {
   "name": "engram-mcp-server",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
   "type": "module",
   "main": "dist/index.js",
@@ -12,9 +12,14 @@
     "dist/",
     "scripts/"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keggan-std/Engram"
+  },
+  "releaseNotes": "### v1.4.0 — Versioned Installs, Auto-Update & Update CLI\n\n- Version-tracked installer entries (_engram_version stamp) with 4 install states: added, exists, upgraded, legacy-upgraded\n- Background auto-update check (fire-and-forget, opt-out, 24h throttle)\n- Update notifications in engram_start_session with changelog included\n- User-controlled update flow: update, skip version, postpone (7d/2w/1m), or disable\n- Two-source changelog delivery: npm registry primary, GitHub Releases API fallback\n- New --check CLI flag: per-IDE version display + npm latest comparison\n- engram_stats now includes server_version, update_status, auto_update_check\n- engram_config: 4 new update keys including duration parsing for remind_after\n- Pre-publish inject-release-notes.js script for single-HTTP-call changelog delivery\n\nFull changelog: https://github.com/keggan-std/Engram/releases/tag/v1.4.0",
   "scripts": {
     "build": "tsc",
-    "prepack": "npm run clean && npm run build",
+    "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node dist/index.js",

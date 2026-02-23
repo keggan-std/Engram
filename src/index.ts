@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     args.includes("install") ||
     args.includes("--install") ||
     args.includes("--list") ||
+    args.includes("--check") ||
     args.includes("--help") ||
     args.includes("-h") ||
     args.includes("--version") ||
@@ -101,6 +102,14 @@ async function main(): Promise<void> {
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }
+
+  // ─── Schedule background update check ───────────────────────────
+  // Fire-and-forget — never blocks startup or any tool call.
+  // Results are stored in the config repo and surfaced on the next engram_start_session.
+  try {
+    const { getServices } = await import("./database.js");
+    getServices().update.scheduleCheck();
+  } catch { /* update check is best-effort */ }
 }
 
 // ─── Run ──────────────────────────────────────────────────────────────

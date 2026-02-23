@@ -99,6 +99,9 @@ Returns:
         triggeredEvents = services.events.triggerSessionEvents();
       } catch { /* scheduled_events table may not exist yet */ }
 
+      // ─── Update notification (once per process) ────────────
+      const updateNotification = services.update.getNotification();
+
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
         return success({
@@ -117,7 +120,8 @@ Returns:
           },
           git: { branch: gitBranch, head: gitHead },
           auto_compacted: autoCompacted,
-          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.`,
+          update_available: updateNotification ?? undefined,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
         });
       }
 
@@ -162,8 +166,9 @@ Returns:
           git_hook_log: gitHookLog || undefined,
           total_file_notes: repos.fileNotes.countAll(),
           auto_compacted: autoCompacted,
+          update_available: updateNotification ?? undefined,
           message: lastSession
-            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}`
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
             : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
         });
       }
@@ -174,6 +179,7 @@ Returns:
         project_snapshot?: ProjectSnapshot | null;
         git_hook_log?: string;
         triggered_events?: ScheduledEventRow[];
+        update_available?: typeof updateNotification;
       } = {
         session_id: sessionId,
         previous_session: lastSession
@@ -196,8 +202,9 @@ Returns:
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
+        update_available: updateNotification ?? undefined,
         message: lastSession
-          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}`
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
           : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 

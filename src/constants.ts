@@ -77,6 +77,21 @@ export const PROJECT_MARKERS = [
   "composer.json",
 ];
 
+// Update check
+export const NPM_REGISTRY_URL = "https://registry.npmjs.org/engram-mcp-server/latest";
+export const GITHUB_REPO = "keggan-std/Engram";
+export const GITHUB_RELEASES_URL = "https://github.com/keggan-std/Engram/releases";
+export const GITHUB_RELEASES_API_URL = "https://api.github.com/repos/keggan-std/Engram/releases/latest";
+
+// Config keys — update management
+export const CFG_AUTO_UPDATE_CHECK = "auto_update_check";
+export const CFG_AUTO_UPDATE_LAST_CHECK = "auto_update_last_check";
+export const CFG_AUTO_UPDATE_AVAILABLE = "auto_update_available";
+export const CFG_AUTO_UPDATE_CHANGELOG = "auto_update_changelog";
+export const CFG_AUTO_UPDATE_SKIP_VERSION = "auto_update_skip_version";
+export const CFG_AUTO_UPDATE_REMIND_AFTER = "auto_update_remind_after";
+export const CFG_AUTO_UPDATE_NOTIFY_LEVEL = "auto_update_notify_level"; // "major" | "minor" | "patch"
+
 // Architecture layer detection patterns
 export const LAYER_PATTERNS: Record<string, RegExp[]> = {
   ui: [/\/(ui|views?|screens?|pages?|components?|widgets?)\//i, /\.(jsx|tsx|vue|svelte)$/],

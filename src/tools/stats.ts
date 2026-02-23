@@ -5,10 +5,30 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, getDbSizeKb, getRepos, now, getCurrentSessionId } from "../database.js";
-import { TOOL_PREFIX, DB_VERSION } from "../constants.js";
+import {
+    TOOL_PREFIX,
+    DB_VERSION,
+    SERVER_VERSION,
+    GITHUB_RELEASES_URL,
+    CFG_AUTO_UPDATE_CHECK,
+    CFG_AUTO_UPDATE_LAST_CHECK,
+    CFG_AUTO_UPDATE_AVAILABLE,
+    CFG_AUTO_UPDATE_SKIP_VERSION,
+    CFG_AUTO_UPDATE_REMIND_AFTER,
+    CFG_AUTO_UPDATE_NOTIFY_LEVEL,
+} from "../constants.js";
 import { success, error } from "../response.js";
 
-const KNOWN_CONFIG_KEYS = new Set(["auto_compact", "compact_threshold", "retention_days", "max_backups"]);
+const KNOWN_CONFIG_KEYS = new Set([
+    "auto_compact",
+    "compact_threshold",
+    "retention_days",
+    "max_backups",
+    CFG_AUTO_UPDATE_CHECK,
+    CFG_AUTO_UPDATE_SKIP_VERSION,
+    CFG_AUTO_UPDATE_REMIND_AFTER,
+    CFG_AUTO_UPDATE_NOTIFY_LEVEL,
+]);
 
 export function registerStatsTools(server: McpServer): void {
     // ─── STATS ────────────────────────────────────────────────────────
@@ -56,7 +76,18 @@ Returns:
                 schemaVersion = vRow ? parseInt(vRow.value, 10) : 0;
             } catch { /* no schema_meta */ }
 
+            const repos = getRepos();
+            const updateAvailable = repos.config.get(CFG_AUTO_UPDATE_AVAILABLE) || null;
+            const lastCheck = repos.config.get(CFG_AUTO_UPDATE_LAST_CHECK) || null;
+            const autoUpdateEnabled = repos.config.getBool(CFG_AUTO_UPDATE_CHECK, true);
+
             return success({
+                server_version: SERVER_VERSION,
+                update_status: updateAvailable
+                    ? { available: true, version: updateAvailable, releases_url: GITHUB_RELEASES_URL }
+                    : { available: false },
+                auto_update_check: autoUpdateEnabled ? "enabled" : "disabled",
+                last_update_check: lastCheck,
                 total_sessions: count("sessions"),
                 total_changes: count("changes"),
                 total_decisions: count("decisions"),
@@ -81,12 +112,22 @@ Returns:
         `${TOOL_PREFIX}_config`,
         {
             title: "Config Management",
-            description: `Read or update Engram configuration values. Known keys: auto_compact (true/false), compact_threshold (number), retention_days (number), max_backups (number).
+            description: `Read or update Engram configuration values.
+
+Known keys:
+  auto_compact           (true/false)   — enable/disable auto-compaction
+  compact_threshold      (number)       — sessions before auto-compact triggers
+  retention_days         (number)       — days to retain old session data
+  max_backups            (number)       — max number of backup files to keep
+  auto_update_check      (true/false)   — enable/disable background update checks (default: true)
+  auto_update_skip_version (string)     — skip notifications for this specific version
+  auto_update_remind_after (string)     — snooze updates: ISO date or duration like "7d", "2w", "1m"
+  auto_update_notify_level (string)     — "major", "minor" (default), or "patch"
 
 Args:
   - action: "get" (read all config) or "set" (update a key)
   - key (string, optional): Config key to update (required for "set")
-  - value (string, optional): New value (required for "set")
+  - value (string, optional): New value (required for "set"). For auto_update_remind_after, accepts "7d", "2w", "1m", or an ISO date string.
 
 Returns:
   Current config values or confirmation of update.`,
@@ -118,11 +159,25 @@ Returns:
                 return error(`Unknown config key: "${key}". Known keys: ${[...KNOWN_CONFIG_KEYS].join(", ")}`);
             }
 
-            repos.config.set(key, value, now());
+            // Parse duration shorthand for auto_update_remind_after (e.g. "7d", "2w", "1m")
+            let storedValue = value;
+            if (key === CFG_AUTO_UPDATE_REMIND_AFTER && /^\d+[dwm]$/.test(value.trim())) {
+                const match = value.trim().match(/^(\d+)([dwm])$/);
+                if (match) {
+                    const amount = parseInt(match[1]!, 10);
+                    const unit = match[2]!;
+                    const ms = unit === "d" ? amount * 86_400_000
+                        : unit === "w" ? amount * 7 * 86_400_000
+                        : amount * 30 * 86_400_000;
+                    storedValue = new Date(Date.now() + ms).toISOString();
+                }
+            }
+
+            repos.config.set(key, storedValue, now());
             return success({
-                message: `Config "${key}" updated to "${value}".`,
+                message: `Config "${key}" updated to "${storedValue}".`,
                 key,
-                value,
+                value: storedValue,
             });
         }
     );
