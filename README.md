@@ -330,72 +330,73 @@ Engram exposes 30+ tools. Here are the core highlights of what an agent can do f
 
 ## Using with AI Agents
 
-Add the following to your agent's system prompt or custom instructions (Cursor Rules, `.github/copilot-instructions.md`, `CLAUDE.md`, etc.). The goal is to ensure the agent consults Engram *before* doing work — not just after — which is where most of the token and time savings come from.
+Add the following to your agent's system prompt or custom instructions — Cursor Rules, `.github/copilot-instructions.md`, `CLAUDE.md`, or whichever file your IDE reads. The goal is to make the agent consult Engram **before** doing work, not just after. That's where most of the token and time savings come from.
 
-```text
-You have access to Engram, a persistent memory MCP server. It stores everything learned about this project across all sessions: file notes, architectural decisions, conventions, tasks, and change history. Use it to avoid re-reading files you have already analysed, re-debating settled decisions, and re-discovering known context.
+> You have access to **Engram**, a persistent memory MCP server. It stores everything learned about this project across all sessions: file notes, architectural decisions, conventions, tasks, and change history. Use it to avoid re-reading files already analysed, re-debating settled decisions, and re-discovering known context.
 
-## ━━━ SESSION START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-ALWAYS call `engram_start_session` first — before reading any file or taking any action. Act on everything it returns:
+### 🟢 Session Start
 
-*   **`previous_session.summary`**: Read this immediately. Do not re-explore what is already known.
-*   **`active_decisions`**: These are binding. Follow them; do not re-debate them. To change one, supersede it with a new `engram_record_decision` call.
-*   **`active_conventions`**: Enforce these in every file you touch this session.
-*   **`open_tasks`**: These are pending work items. Ask the user which to focus on if unclear.
-*   **`update_available` (if set)**: Immediately tell the user:
-    > "Engram v{available_version} is available (you have {installed_version}). Changes: {changelog}. Would you like to update, skip this version, or postpone?"
-    
-    Then act on their choice:
-    *   **Update**: instruct them to run: `npx -y engram-mcp-server install`
-    *   **Skip**: `engram_config action=set key=auto_update_skip_version value={version}`
-    *   **Postpone 7d**: `engram_config action=set key=auto_update_remind_after value=7d`
-    *   **Disable**: `engram_config action=set key=auto_update_check value=false`
+**Always call `engram_start_session` first** — before reading any file or taking any action. Act on everything it returns:
 
-## ━━━ BEFORE READING OR REVIEWING ANY FILE ━━━━━━━━━━━━━━━━━━━
+| Field | What to do |
+|-------|-----------|
+| `previous_session.summary` | Read immediately. Do not re-explore what is already known. |
+| `active_decisions` | Binding. Follow them; do not re-debate. To change one, supersede it with a new `engram_record_decision` call. |
+| `active_conventions` | Enforce in every file you touch this session. |
+| `open_tasks` | Pending work items. Ask the user which to focus on if unclear. |
+| `update_available` | Tell the user: *"Engram v{available_version} is available (you have {installed_version}). Changes: {changelog}. Update, skip, or postpone?"* — then act on their choice. |
 
-ALWAYS check Engram before opening a file:
+If `update_available` is set, respond to the user's choice:
+- **Update** → `npx -y engram-mcp-server install`
+- **Skip** → `engram_config action=set key=auto_update_skip_version value={version}`
+- **Postpone** → `engram_config action=set key=auto_update_remind_after value=7d`
+- **Disable** → `engram_config action=set key=auto_update_check value=false`
 
-```javascript
+---
+
+### 📂 Before Reading Any File
+
+Always check Engram before opening a file:
+
+```js
 engram_get_file_notes({ file_paths: ["path/to/file.ts"] })
 ```
 
-*   **If notes EXIST**:
-    Use the stored purpose, dependencies, layer, and complexity to answer questions or orient yourself WITHOUT reading the file. Only open the file when you need the actual source code for editing or a detailed line-by-line analysis.
+- **Notes exist** → Use stored purpose, dependencies, layer, and complexity. Only open the file if you need the actual source for editing or line-by-line analysis.
+- **No notes** → Read the file, then immediately call `engram_set_file_notes` with `file_path`, `purpose`, `dependencies`, `dependents`, `layer`, `complexity`, `notes`. Batch multiple files in one call.
+- **Notes stale** → (evidence the file changed significantly — e.g. git log) Re-read and update.
 
-*   **If notes DO NOT EXIST**:
-    1.  Read the file.
-    2.  Immediately call `engram_set_file_notes` with: `file_path`, `purpose`, `dependencies`, `dependents`, `layer`, `complexity`, `notes`.
-    3.  For multiple files reviewed in one pass, batch them in a single call.
+> **Rule:** Never read a file already analysed in a previous session without checking Engram first.
 
-*   **If notes are STALE** (you see evidence the file changed significantly since the notes were last recorded — e.g., from git log or change history):
-    Re-read the file and update the notes.
+---
 
-**Rule:** Never read a file you have already analysed in a previous session without first checking whether Engram already knows it.
-
-## ━━━ BEFORE MAKING ANY DESIGN DECISION ━━━━━━━━━━━━━━━━━━━━━━
+### 🏛️ Before Making Any Design Decision
 
 Before choosing an implementation approach, search for an existing decision:
 
-```javascript
+```js
 engram_search({ query: "relevant keywords", scope: "decisions" })
 ```
 
-*   **If a matching decision EXISTS**: follow it.
-*   **If you believe it should change**: explain why, then supersede it:
-    ```javascript
-    engram_record_decision({ decision: "...", supersedes: <id> })
-    ```
-*   **If NO decision exists**: make the call and record it:
-    ```javascript
-    engram_record_decision({ decision, rationale, affected_files, tags })
-    ```
+- **Decision exists** → Follow it.
+- **Should change** → Explain why, then supersede:
+  ```js
+  engram_record_decision({ decision: "...", supersedes: <id> })
+  ```
+- **No decision exists** → Make the call and record it:
+  ```js
+  engram_record_decision({ decision, rationale, affected_files, tags })
+  ```
 
-## ━━━ WHEN MODIFYING FILES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
+
+### ✏️ When Modifying Files
 
 After every meaningful change, record it. Batch where possible:
 
-```javascript
+```js
 engram_record_change({ changes: [{
   file_path,
   change_type,   // created | modified | refactored | deleted | renamed | moved | config_changed
@@ -404,33 +405,38 @@ engram_record_change({ changes: [{
 }]})
 ```
 
-## ━━━ WHEN YOU DON'T KNOW SOMETHING ━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-Before asking the user, search Engram first. The user may have already explained this to a previous session:
+### 🔍 When You Don't Know Something
 
-*   `engram_search({ query: "keywords" })`       ← general search
-*   `engram_scan_project()`                      ← project structure questions
-*   `engram_get_decisions()`                     ← architecture / approach questions
-*   `engram_get_conventions()`                   ← style / pattern questions
-*   `engram_get_file_notes({ file_paths: [] })`  ← what is known about specific files
+Search Engram before asking the user — they may have already explained it to a previous session:
 
-## ━━━ SESSION END ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```js
+engram_search({ query: "keywords" })          // general search
+engram_scan_project()                         // project structure questions
+engram_get_decisions()                        // architecture / approach questions
+engram_get_conventions()                      // style / pattern questions
+engram_get_file_notes({ file_paths: [...] })  // what is known about specific files
+```
+
+---
+
+### 🔴 Session End
 
 Before ending every session:
 
-1.  Record all file changes not yet recorded (`engram_record_change`).
-2.  Create tasks for anything incomplete or blocked:
-    ```javascript
-    engram_create_task({ title, description, priority })
-    ```
-3.  Call `engram_end_session` with a summary that includes:
-    *   Exactly what was done — file names, function names, specific changes made
-    *   What is pending or blocked, and why
-    *   Any new patterns, gotchas, or constraints discovered this session
-    *   Which tasks were completed or partially done
+1. Record all file changes not yet recorded (`engram_record_change`).
+2. Create tasks for anything incomplete or blocked:
+   ```js
+   engram_create_task({ title, description, priority })
+   ```
+3. Call `engram_end_session` with a summary that includes:
+   - Exactly what was done — file names, function names, specific changes
+   - What is pending or blocked, and why
+   - Any new patterns, gotchas, or constraints discovered
+   - Which tasks were completed or partially done
 
 A precise summary is what allows the next session to start immediately without re-reading files or re-asking the user for context.
-```
 
 ---
 
