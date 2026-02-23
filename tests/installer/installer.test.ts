@@ -115,9 +115,9 @@ describe("addToConfig", () => {
         expect(result).toBe("exists");
     });
 
-    it("should return 'updated' when entry differs", () => {
-        const configPath = path.join(tmpDir, "update.json");
-        // Write an old-style entry
+    it("should return 'legacy-upgraded' when entry exists without _engram_version stamp", () => {
+        const configPath = path.join(tmpDir, "legacy.json");
+        // Write an old-style entry with no _engram_version (pre-tracking era)
         fs.writeFileSync(configPath, JSON.stringify({
             mcpServers: {
                 engram: { command: "node", args: ["old-path/index.js"] }
@@ -125,10 +125,26 @@ describe("addToConfig", () => {
         }));
 
         const result = addToConfig(configPath, IDE_CONFIGS.cursor);
-        expect(result).toBe("updated");
+        expect(result).toBe("legacy-upgraded");
 
         const written = readJson(configPath);
         expect(written!.mcpServers.engram.command).toBe("npx");
+    });
+
+    it("should return 'upgraded' when entry exists with an older _engram_version stamp", () => {
+        const configPath = path.join(tmpDir, "upgrade.json");
+        // Write an entry stamped with a known older version
+        fs.writeFileSync(configPath, JSON.stringify({
+            mcpServers: {
+                engram: { command: "npx", args: ["-y", "engram-mcp-server"], _engram_version: "0.0.1" }
+            }
+        }));
+
+        const result = addToConfig(configPath, IDE_CONFIGS.cursor);
+        expect(result).toBe("upgraded");
+
+        const written = readJson(configPath);
+        expect(written!.mcpServers.engram._engram_version).not.toBe("0.0.1");
     });
 });
 
@@ -179,8 +195,10 @@ describe("IDE Config Definitions", () => {
         expect(IDE_CONFIGS.claudecode.requiresType).toBe(true);
     });
 
-    it("Visual Studio should use 'mcpServers' configKey", () => {
-        expect(IDE_CONFIGS.visualstudio.configKey).toBe("mcpServers");
+    it("Visual Studio should use 'servers' configKey", () => {
+        // Confirmed: VS uses "servers" key, not "mcpServers".
+        // Source: https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
+        expect(IDE_CONFIGS.visualstudio.configKey).toBe("servers");
     });
 
     it("all IDEs should have a name", () => {

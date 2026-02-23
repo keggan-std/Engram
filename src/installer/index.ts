@@ -5,9 +5,10 @@
 import fs from "fs";
 import path from "path";
 import readline from "readline";
+import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion } from "./config-writer.js";
-import { detectCurrentIde } from "./ide-detector.js";
+import { detectCurrentIde, detectInstalledIdes } from "./ide-detector.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -37,6 +38,22 @@ async function askQuestion(query: string): Promise<string> {
 // ─── Main Entry Point ────────────────────────────────────────────────
 
 export async function runInstaller(args: string[]) {
+    // Detect if npx resolved to the local source directory instead of the npm package.
+    // When the CWD's package.json name matches "engram-mcp-server" and the running
+    // binary is inside that same directory, the version shown reflects the local build.
+    try {
+        const __dir = path.dirname(fileURLToPath(import.meta.url));
+        const runningRoot = path.resolve(__dir, "../..");
+        if (path.resolve(process.cwd()) === runningRoot) {
+            const cwdPkg = readJson(path.join(process.cwd(), "package.json"));
+            if (cwdPkg?.name === "engram-mcp-server") {
+                console.warn("\n⚠️  Running from the engram source directory.");
+                console.warn("   Version shown reflects the local build — not the published npm package.");
+                console.warn("   For an accurate check: npm install -g engram-mcp-server@latest && engram --check\n");
+            }
+        }
+    } catch { /* ignore — detection is best-effort */ }
+
     const nonInteractive = args.includes("--yes") || args.includes("-y") || !isTTY();
 
     // ─── --version ───────────────────────────────────────────────────
@@ -113,8 +130,44 @@ Examples:
     // ─── --check ─────────────────────────────────────────────────────
     if (args.includes("--check")) {
         const currentVersion = getInstallerVersion();
-        console.log(`\nEngram Version Check\n`);
-        console.log(`  Running version : v${currentVersion}`);
+
+        const semverCmp = (a: string, b: string): number => {
+            const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+            for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d; }
+            return 0;
+        };
+
+        // Fetch npm latest FIRST — it is the authoritative reference for all comparisons.
+        process.stdout.write(`\nEngram Version Check\n\n  npm latest      : checking...`);
+        let npmLatest: string | null = null;
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5_000);
+            const res = await fetch("https://registry.npmjs.org/engram-mcp-server/latest", {
+                signal: controller.signal,
+                headers: { "User-Agent": "engram-mcp-server" },
+            });
+            clearTimeout(timer);
+            if (res.ok) {
+                const data = await res.json() as Record<string, unknown>;
+                npmLatest = data["version"] as string;
+                const cmp = semverCmp(currentVersion, npmLatest);
+                const runningLabel = cmp === 0
+                    ? "✅ up to date"
+                    : cmp > 0
+                        ? `⚡ running pre-release (v${currentVersion} > npm v${npmLatest})`
+                        : `⬆  update available`;
+                process.stdout.write(`\r  npm latest      : v${npmLatest}\n`);
+                console.log(`  Running version : v${currentVersion}  ${runningLabel}`);
+            } else {
+                process.stdout.write(`\r  npm latest      : (registry unreachable)\n`);
+                console.log(`  Running version : v${currentVersion}`);
+            }
+        } catch {
+            process.stdout.write(`\r  npm latest      : (network error — check manually)\n`);
+            console.log(`  Running version : v${currentVersion}`);
+        }
+
         console.log(`\n  IDE Configurations:\n`);
 
         for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
@@ -131,48 +184,23 @@ Examples:
                 console.log(`  ${"".padEnd(14)} Not installed`);
             } else {
                 const installedVersion: string = entry._engram_version || "unknown (pre-tracking)";
-                const isMatch = installedVersion === currentVersion;
-                const statusIcon = isMatch ? "✅" : "⬆";
-                const statusLabel = isMatch ? "up to date" : `update available (v${currentVersion})`;
+                // Compare the IDE config version against npm latest (the authoritative reference).
+                // Fall back to the running version only when the registry was unreachable.
+                const reference = npmLatest ?? currentVersion;
+                const cmp = installedVersion === "unknown (pre-tracking)" ? -1 : semverCmp(installedVersion, reference);
+                const statusIcon = cmp >= 0 ? "✅" : "⬆";
+                const statusLabel = cmp >= 0
+                    ? "up to date"
+                    : npmLatest
+                        ? `update available — run: npx -y engram-mcp-server install`
+                        : `behind running version (v${currentVersion})`;
                 console.log(`  ${id.padEnd(14)} ${foundPath}`);
                 console.log(`  ${"".padEnd(14)} Installed: v${installedVersion}  ${statusIcon} ${statusLabel}`);
             }
             console.log();
         }
 
-        // Fetch npm latest for comparison
-        process.stdout.write("  npm latest      : checking...");
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5_000);
-            const res = await fetch("https://registry.npmjs.org/engram-mcp-server/latest", {
-                signal: controller.signal,
-                headers: { "User-Agent": "engram-mcp-server" },
-            });
-            clearTimeout(timer);
-            if (res.ok) {
-                const data = await res.json() as Record<string, unknown>;
-                const npmLatest = data["version"] as string;
-                const semverCmp = (a: string, b: string) => {
-                    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
-                    for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d; }
-                    return 0;
-                };
-                const cmp = semverCmp(currentVersion, npmLatest);
-                const label = cmp === 0
-                    ? "✅ up to date"
-                    : cmp > 0
-                        ? `⚡ running pre-release (v${currentVersion} > npm v${npmLatest})`
-                        : `⬆  npm has v${npmLatest} — run: npx -y engram-mcp-server install`;
-                process.stdout.write(`\r  npm latest      : v${npmLatest}  ${label}\n`);
-            } else {
-                process.stdout.write(`\r  npm latest      : (registry unreachable)\n`);
-            }
-        } catch {
-            process.stdout.write(`\r  npm latest      : (network error — check manually)\n`);
-        }
-
-        console.log(`\n  To update: npx -y engram-mcp-server install`);
+        console.log(`  To update: npx -y engram-mcp-server install`);
         console.log(`  Releases : https://github.com/keggan-std/Engram/releases\n`);
         process.exit(0);
     }
@@ -224,25 +252,53 @@ Examples:
     console.log("\n🧠 Engram MCP Installer\n");
 
     const currentIde = detectCurrentIde();
+    // Filesystem scan — finds all IDEs installed on this machine regardless of
+    // which one launched the terminal.  Most devs run VS Code, Cursor, Claude Code
+    // and others side-by-side; we should install to all of them in one pass.
+    const allDetected = detectInstalledIdes();
+    const otherDetected = allDetected.filter(id => id !== currentIde);
 
     if (currentIde && IDE_CONFIGS[currentIde]) {
         console.log(`🔍 Detected environment: ${IDE_CONFIGS[currentIde].name}`);
 
+        if (otherDetected.length > 0) {
+            console.log(`   Also found  : ${otherDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
+        }
+
         if (nonInteractive) {
-            // Auto-install for detected IDE
+            // Install to current IDE first, then all other detected IDEs automatically.
             await performInstallationForIde(currentIde, IDE_CONFIGS[currentIde], true);
+            for (const id of otherDetected) {
+                await performInstallationForIde(id, IDE_CONFIGS[id], true);
+            }
             return;
         }
 
-        const ans = await askQuestion("   Install Engram for this IDE? [Y/n]: ");
+        const targetIds = [currentIde, ...otherDetected];
+        const targetNames = targetIds.map(id => IDE_CONFIGS[id].name).join(", ");
+        const prompt = otherDetected.length > 0
+            ? `   Install Engram for all ${targetIds.length} IDEs (${targetNames})? [Y/n]: `
+            : `   Install Engram for this IDE? [Y/n]: `;
+
+        const ans = await askQuestion(prompt);
         if (ans.trim().toLowerCase() !== 'n') {
-            await performInstallationForIde(currentIde, IDE_CONFIGS[currentIde], false);
+            for (const id of targetIds) {
+                await performInstallationForIde(id, IDE_CONFIGS[id], false);
+            }
             return;
         }
         console.log("");
     } else if (nonInteractive) {
-        console.error("❌ Could not auto-detect your IDE in non-interactive mode.");
-        console.error("\n   Specify your IDE with --ide <name>. Examples:");
+        // No terminal env var match — fall back to filesystem scan.
+        if (allDetected.length > 0) {
+            console.log(`🔍 Found ${allDetected.length} installed IDE(s): ${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
+            for (const id of allDetected) {
+                await performInstallationForIde(id, IDE_CONFIGS[id], true);
+            }
+            return;
+        }
+        console.error("❌ No IDEs detected on this machine.");
+        console.error("\n   Specify your IDE manually with --ide <name>. Examples:");
         for (const key of Object.keys(IDE_CONFIGS)) {
             console.error(`     engram install --ide ${key}`);
         }
@@ -261,7 +317,12 @@ Examples:
     const allOpt = ideKeys.length + 1;
     const customOpt = ideKeys.length + 2;
 
-    console.log(`  ${allOpt}. Install to ALL detected IDEs`);
+    // Show which IDEs were actually found on this machine so the user knows
+    // what "ALL detected" will cover before they pick that option.
+    const allOptLabel = allDetected.length > 0
+        ? `Install to ALL detected IDEs (${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")})`
+        : `Install to ALL IDEs (none detected — will attempt all)`;
+    console.log(`  ${allOpt}. ${allOptLabel}`);
     console.log(`  ${customOpt}. Custom config path...`);
     console.log(`  0. Cancel`);
 
@@ -274,8 +335,10 @@ Examples:
     }
 
     if (choice === allOpt) {
-        for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-            await performInstallationForIde(id, ide, true);
+        // Prefer detected IDEs; fall back to all if none found.
+        const targets = allDetected.length > 0 ? allDetected : Object.keys(IDE_CONFIGS);
+        for (const id of targets) {
+            await performInstallationForIde(id, IDE_CONFIGS[id], true);
         }
     } else if (choice === customOpt) {
         const customPath = await askQuestion("Enter the absolute path to your MCP config JSON file: ");
@@ -307,6 +370,16 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
     const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
     const supportsGlobal = ide.scopes?.global && ide.scopes.global.length > 0;
 
+    // JetBrains: the global config path is community-sourced and not confirmed by official docs.
+    // Official JetBrains MCP config is managed via Settings | Tools | AI Assistant | Model Context Protocol.
+    // We attempt the file path as a best-effort fallback; a warning ensures users know to verify.
+    if (id === "jetbrains") {
+        console.log(`\n⚠️  ${ide.name} — Note: The global config path used here is community-sourced and`);
+        console.log(`   not confirmed in official JetBrains documentation.`);
+        console.log(`   Recommended: configure MCP via Settings › Tools › AI Assistant › Model Context Protocol.`);
+        console.log(`   The file-based install below is attempted as a best-effort fallback.\n`);
+    }
+
     // Show CLI hint for IDEs that support native CLI install
     if (ide.scopes.cli) {
         const entryJson = JSON.stringify(makeEngramEntry(ide));
@@ -314,7 +387,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             ? `"${entryJson.replace(/"/g, '\\"')}"`
             : `'${entryJson}'`;
         console.log(`\n💡 ${ide.name} also supports native CLI install:`);
-        console.log(`   ${ide.scopes.cli} --scope=user engram ${quotedEntry}`);
+        console.log(`   ${ide.scopes.cli} engram ${quotedEntry} --scope user`);
     }
 
     let targetScope = "global";
