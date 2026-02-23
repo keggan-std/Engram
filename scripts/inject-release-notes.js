@@ -23,7 +23,8 @@ const PACKAGE_JSON_PATH = path.join(ROOT, "package.json");
 // ─── Read files ──────────────────────────────────────────────────────
 
 const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf-8"));
-const notes = fs.readFileSync(RELEASE_NOTES_PATH, "utf-8");
+// Normalize CRLF → LF so the injected string is clean regardless of OS
+const notes = fs.readFileSync(RELEASE_NOTES_PATH, "utf-8").replace(/\r\n/g, "\n");
 
 // ─── Extract the latest version section ──────────────────────────────
 // The file starts with the latest version heading (# vX.Y.Z — ...).
