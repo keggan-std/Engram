@@ -5,9 +5,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
-import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS } from "../constants.js";
+import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
-import { truncate } from "../utils.js";
+import { truncate, ftsEscape } from "../utils.js";
 import { success, error } from "../response.js";
 import type { SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
 
@@ -23,6 +23,7 @@ Args:
   - agent_name (string, optional): Identifier for the agent (e.g., "copilot", "claude-code", "cursor")
   - resume_task (string, optional): If resuming a specific task, provide its title to auto-focus context
   - verbosity ("full" | "summary" | "minimal", optional): Controls response size. "minimal" returns counts only (~90% fewer tokens), "summary" returns truncated recent items (~60-80% fewer tokens), "full" returns everything including file_tree. Default: "summary".
+  - focus (string, optional): Topic or keywords to focus context on (e.g., "auth", "installer refactor"). When provided, decisions, tasks, and changes are FTS-ranked and filtered to the top-15 most relevant items per category. Use engram_search for broader queries outside the focus. Conventions are always returned in full regardless of focus.
 
 Returns:
   SessionContext object with previous session info, changes, decisions, conventions, and open tasks.`,
@@ -30,6 +31,7 @@ Returns:
         agent_name: z.string().default("unknown").describe("Name of the agent starting the session"),
         resume_task: z.string().optional().describe("Title of a task to resume, for focused context"),
         verbosity: z.enum(["full", "summary", "minimal"]).default("summary").describe("Response detail level: full, summary, or minimal"),
+        focus: z.string().optional().describe("Topic/keywords to filter context to (e.g. 'auth', 'installer refactor'). Returns top-15 FTS-ranked items per category."),
       },
       annotations: {
         readOnlyHint: false,
@@ -38,7 +40,7 @@ Returns:
         openWorldHint: false,
       },
     },
-    async ({ agent_name, resume_task, verbosity }) => {
+    async ({ agent_name, resume_task, verbosity, focus }) => {
       const repos = getRepos();
       const services = getServices();
       const projectRoot = getProjectRoot();
@@ -76,11 +78,54 @@ Returns:
         ? services.git.getLogSince(lastSession.ended_at)
         : "";
 
-      // Active decisions, conventions, open tasks
-      const activeDecisions = repos.decisions.getActive(20);
-      const activeConventions = repos.conventions.getActive();
+      // ─── Focus filtering ─────────────────────────────────────
+      // When a focus query is provided, rank decisions/tasks/changes by FTS relevance
+      // and return only the top-N most relevant per category. Conventions are always
+      // returned in full — they're short and always relevant to any work.
+      let focusInfo: import("../types.js").SessionFocusInfo | undefined;
 
-      const openTasks = repos.tasks.getOpen(15, resume_task || undefined);
+      let activeDecisions = repos.decisions.getActive(20);
+      const activeConventions = repos.conventions.getActive();
+      let openTasks = repos.tasks.getOpen(15, resume_task || undefined);
+
+      if (focus && focus.trim().length > 0) {
+        const ftsQuery = ftsEscape(focus);
+        const totalDecisions = activeDecisions.length;
+        const totalTasks = openTasks.length;
+        const totalChanges = recordedChanges.length;
+
+        try {
+          activeDecisions = repos.decisions.getActiveFocused(ftsQuery, FOCUS_MAX_ITEMS_PER_CATEGORY);
+        } catch { /* FTS unavailable — keep full list */ }
+
+        try {
+          openTasks = repos.tasks.getOpenFocused(ftsQuery, FOCUS_MAX_ITEMS_PER_CATEGORY);
+        } catch { /* FTS unavailable — keep full list */ }
+
+        // Filter changes in-memory: keep if any focus word appears in path, description, or diff
+        const focusWords = focus.toLowerCase().split(/\s+/).filter(Boolean);
+        const focusedChanges = recordedChanges.filter(c =>
+          focusWords.some(w =>
+            c.file_path.toLowerCase().includes(w) ||
+            c.description.toLowerCase().includes(w) ||
+            (c.diff_summary ?? "").toLowerCase().includes(w)
+          )
+        );
+        // Only apply the filter if it returned something — avoids empty context on weak matches
+        if (focusedChanges.length > 0) {
+          recordedChanges = focusedChanges;
+        }
+
+        focusInfo = {
+          query: focus,
+          decisions_returned: activeDecisions.length,
+          tasks_returned: openTasks.length,
+          changes_returned: recordedChanges.length,
+          note: `Context filtered to focus "${focus}". Full memory available via engram_search.`,
+        };
+
+        log.info(`Focus "${focus}": ${totalDecisions}→${activeDecisions.length} decisions, ${totalTasks}→${openTasks.length} tasks, ${totalChanges}→${recordedChanges.length} changes`);
+      }
 
       // ─── Project snapshot via service ───────────────────────
       let projectSnapshot: ProjectSnapshot | null = null;
@@ -120,8 +165,9 @@ Returns:
           },
           git: { branch: gitBranch, head: gitHead },
           auto_compacted: autoCompacted,
+          focus: focusInfo,
           update_available: updateNotification ?? undefined,
-          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
         });
       }
 
@@ -166,9 +212,10 @@ Returns:
           git_hook_log: gitHookLog || undefined,
           total_file_notes: repos.fileNotes.countAll(),
           auto_compacted: autoCompacted,
+          focus: focusInfo,
           update_available: updateNotification ?? undefined,
           message: lastSession
-            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
             : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
         });
       }
@@ -198,13 +245,14 @@ Returns:
         active_conventions: activeConventions,
         open_tasks: openTasks,
         project_snapshot_age_minutes: projectSnapshot ? 0 : null,
+        focus: focusInfo,
         git: { branch: gitBranch, head: gitHead },
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
         update_available: updateNotification ?? undefined,
         message: lastSession
-          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
           : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 

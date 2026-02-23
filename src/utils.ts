@@ -236,3 +236,33 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 3) + "...";
 }
+
+/**
+ * Escape a query string for safe use in SQLite FTS5 MATCH expressions.
+ * Each word is wrapped in double quotes for exact-word matching.
+ * Multiple words are joined with OR so any match surfaces the row.
+ *
+ * Example: "auth refactor" → `"auth" OR "refactor"`
+ */
+export function ftsEscape(query: string): string {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '""';
+  return words.map(w => `"${w.replace(/"/g, "")}"`).join(" OR ");
+}
+
+/**
+ * Get the actual modification time (Unix ms) of a file on disk.
+ * Resolves relative paths against projectRoot when provided.
+ * Returns null if the file does not exist or stat fails.
+ */
+export function getFileMtime(filePath: string, projectRoot?: string): number | null {
+  try {
+    const resolved =
+      projectRoot && !path.isAbsolute(filePath)
+        ? path.join(projectRoot, filePath)
+        : filePath;
+    return fs.statSync(resolved).mtimeMs;
+  } catch {
+    return null;
+  }
+}

@@ -20,15 +20,17 @@ export class FileNotesRepo {
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;
+            file_mtime?: number | null;
         }
     ): void {
         const normalizedPath = normalizePath(filePath);
         const deps = data.dependencies ? JSON.stringify(data.dependencies.map(d => normalizePath(d))) : null;
         const depnts = data.dependents ? JSON.stringify(data.dependents.map(d => normalizePath(d))) : null;
+        const mtime = data.file_mtime ?? null;
 
         this.db.prepare(`
-      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity, file_mtime)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(file_path) DO UPDATE SET
         purpose = COALESCE(?, purpose),
         dependencies = COALESCE(?, dependencies),
@@ -37,16 +39,17 @@ export class FileNotesRepo {
         last_reviewed = ?,
         last_modified_session = COALESCE(?, last_modified_session),
         notes = COALESCE(?, notes),
-        complexity = COALESCE(?, complexity)
+        complexity = COALESCE(?, complexity),
+        file_mtime = COALESCE(?, file_mtime)
     `).run(
             normalizedPath,
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null,
+            data.notes || null, data.complexity || null, mtime,
             // Update values
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null,
+            data.notes || null, data.complexity || null, mtime,
         );
     }
 
@@ -59,6 +62,7 @@ export class FileNotesRepo {
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;
+            file_mtime?: number | null;
         }>,
         timestamp: string,
         sessionId: number | null
@@ -72,6 +76,7 @@ export class FileNotesRepo {
                     layer: entry.layer,
                     complexity: entry.complexity,
                     notes: entry.notes,
+                    file_mtime: entry.file_mtime,
                 });
             }
         });

@@ -48,6 +48,15 @@ export interface FileNoteRow {
   last_modified_session: number | null;
   notes: string | null;
   complexity: Complexity | null;
+  file_mtime: number | null;      // Unix ms of file at time notes were saved
+}
+
+export type FileNoteConfidence = "high" | "medium" | "stale" | "unknown";
+
+export interface FileNoteWithStaleness extends FileNoteRow {
+  confidence: FileNoteConfidence;
+  stale: boolean;
+  staleness_hours?: number;       // Present when stale: true
 }
 
 export interface ConventionRow {
@@ -203,6 +212,14 @@ export type EventRecurrence =
 
 // ─── Response Types ─────────────────────────────────────────────────────────
 
+export interface SessionFocusInfo {
+  query: string;
+  decisions_returned: number;
+  tasks_returned: number;
+  changes_returned: number;
+  note: string;
+}
+
 export interface SessionContext {
   session_id: number;
   previous_session: {
@@ -219,6 +236,7 @@ export interface SessionContext {
   active_conventions: ConventionRow[];
   open_tasks: TaskRow[];
   project_snapshot_age_minutes: number | null;
+  focus?: SessionFocusInfo;       // Present when focus param was used
   message: string;
 }
 

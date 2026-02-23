@@ -49,6 +49,27 @@ export class DecisionsRepo {
         ).all(limit) as DecisionRow[];
     }
 
+    /**
+     * FTS5-ranked active decisions filtered by a focus query.
+     * Falls back to getActive() if FTS tables are unavailable.
+     */
+    getActiveFocused(ftsQuery: string, limit: number = 15): DecisionRow[] {
+        try {
+            return this.db.prepare(`
+                WITH ranked AS (
+                    SELECT rowid, rank FROM fts_decisions WHERE fts_decisions MATCH ?
+                )
+                SELECT d.* FROM decisions d
+                JOIN ranked ON ranked.rowid = d.id
+                WHERE d.status = 'active'
+                ORDER BY ranked.rank
+                LIMIT ?
+            `).all(ftsQuery, limit) as DecisionRow[];
+        } catch {
+            return this.getActive(limit);
+        }
+    }
+
     getFiltered(filters: { status?: string; tag?: string; file_path?: string; limit: number }): DecisionRow[] {
         let query = "SELECT * FROM decisions WHERE 1=1";
         const params: unknown[] = [];
