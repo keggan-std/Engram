@@ -1,3 +1,115 @@
+# v1.4.1 — Installer Infrastructure Audit: Path Fixes, Multi-IDE & Detection Improvements
+
+**Engram v1.4.1 is a targeted hotfix release.** A thorough audit of the entire installer infrastructure — verified against official documentation for every supported IDE — uncovered a series of critical and high-severity bugs that caused silent wrong-directory installs on macOS, invisible installs in Visual Studio, and unreliable IDE detection. All are fixed in this release, along with multi-IDE awareness and several UX improvements.
+
+---
+
+## Breaking Changes
+
+None. v1.4.1 is fully backwards-compatible. Existing IDE config entries are unaffected.
+
+---
+
+## Fixes
+
+### Critical — macOS Install Path Wrong for All APPDATA-Based IDEs
+
+**Root cause:** `process.env.APPDATA` is Windows-only. The fallback `|| path.join(HOME, '.config')` accidentally produced the right path on Linux but the **wrong path on macOS** — `~/.config` instead of `~/Library/Application Support`.
+
+**Impact:** On every Mac, installs for VS Code, Cline/Roo Code, and Claude Desktop were written to `~/.config/...` instead of `~/Library/Application Support/...`. The IDE never read from that path. Re-running the installer returned "Already installed — nothing to do" on every subsequent run because the wrong file now existed.
+
+**Fix:** The `APPDATA` constant is now OS-aware:
+- **Windows:** `%APPDATA%` (e.g. `C:\Users\User\AppData\Roaming`)
+- **macOS:** `~/Library/Application Support`
+- **Linux:** `~/.config` (XDG Base Directory spec)
+
+This resolves the correct global config path for VS Code, Cline/Roo Code, Claude Desktop, and JetBrains on all three platforms in a single change.
+
+### Critical — Visual Studio Received Wrong Config Key
+
+**Root cause:** Visual Studio uses the `"servers"` JSON key — not `"mcpServers"`. The installer was writing `{ "mcpServers": { "engram": {...} } }` to `~/.mcp.json`.
+
+**Impact:** Every Visual Studio install silently wrote to a key VS never reads. Engram was permanently invisible in Visual Studio on all platforms.
+
+**Fix:** `configKey` for Visual Studio is now `"servers"`, confirmed against [official Microsoft docs](https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers).
+
+### High — VS Code, Cursor, and Windsurf Had Wrong Secondary Global Paths
+
+Three IDEs had incorrect fallback paths that would never exist on any real machine:
+
+| IDE | Wrong path (removed) | Correct path (kept) |
+|-----|----------------------|---------------------|
+| **VS Code** | `~/.vscode/mcp.json` (extensions dir) | `APPDATA/Code/User/mcp.json` |
+| **Cursor** | `APPDATA/Cursor/mcp.json` | `~/.cursor/mcp.json` |
+| **Windsurf** | `APPDATA/Windsurf/mcp.json` (wrong dir + wrong filename) | `~/.codeium/windsurf/mcp_config.json` |
+
+All three wrong paths have been removed. Sources: [VS Code docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers), [Cursor docs](https://cursor.com/docs/context/mcp), [Windsurf docs](https://docs.windsurf.com/windsurf/cascade/mcp).
+
+### High — `--check` Compared Against Wrong Reference Version
+
+**Root cause:** `--check` compared IDE config versions against the running binary version, not npm latest. If the installer ran from local source (e.g. `v1.2.5`), an IDE config stamped `v1.4.0` would show "update available (v1.2.5)" — completely backwards.
+
+**Fix:** `--check` now fetches npm latest **first**, before entering the IDE loop. All comparisons use `npmLatest ?? currentVersion` as the reference. Pre-release scenarios (running ahead of npm) are correctly labelled `⚡ running pre-release`.
+
+---
+
+## Improvements
+
+### Multi-IDE Awareness
+
+The installer now understands that most developers have multiple IDEs installed simultaneously. Behavior change summary:
+
+- **`--yes` without `--ide`:** Scans all installed IDEs via filesystem and installs to **all of them** in one pass (previously errored if no IDE was detected in the terminal env).
+- **Auto-detect:** When a terminal IDE is detected, a filesystem scan runs in parallel. Additional IDEs are displayed ("Also found: Cursor, Claude Code (CLI)") and included in the default install.
+- **Interactive menu:** The "Install to ALL" option now shows exactly which IDEs were found on the machine before the user confirms.
+- **New `detectInstalledIdes()`:** Filesystem-based scan independent of terminal env vars — finds all IDEs whose config file or parent directory exists.
+
+### Improved IDE Detection Reliability
+
+- **Cursor:** Now checks `CURSOR_TRACE_ID` env var and `process.execPath` for the word `"cursor"` before falling back to fragile `PATH`/`VSCODE_CWD` string matching. Handles custom install directories on Windows.
+- **Visual Studio:** Added detection via `VSINSTALLDIR` and `VisualStudioVersion` env vars (set by the VS Developer Command Prompt / PowerShell).
+
+### CWD Source Conflict Warning
+
+When `npx` resolves to the **local Engram source directory** (because the `CWD`'s `package.json` name matches `engram-mcp-server`), the installer now prints a clear warning before doing anything:
+
+```
+⚠️  Running from the engram source directory.
+   Version shown reflects the local build — not the published npm package.
+   For an accurate check: npm install -g engram-mcp-server@latest && engram --check
+```
+
+### JetBrains Install Warning
+
+The official JetBrains documentation does not publish a file-based global config path for MCP. Configuration is managed through **Settings › Tools › AI Assistant › Model Context Protocol** in the IDE. When installing for JetBrains, the installer now prints a warning and directs users to the Settings UI. The file-based path is retained as a best-effort fallback for configurations where it may work.
+
+### Claude Code CLI Hint — Argument Order Fixed
+
+The native CLI install hint for Claude Code displayed the wrong argument order. Positional arguments (`name`, `json`) must come before optional flags (`--scope`):
+
+```bash
+# Before (broken — flag before positional args)
+claude mcp add-json --scope=user engram '{...}'
+
+# After (correct)
+claude mcp add-json engram '{...}' --scope user
+```
+
+---
+
+## Fixes & Internal
+
+- Added `Roo Code` (`rooveterinaryinc.roo-cline`) as a second Cline config path alongside `saoudrizwan.claude-dev`
+- Inline source URL comments added to every IDE config path for future maintainability
+- Fixed test asserting `InstallResult` value `"updated"` (invalid) — corrected to `"legacy-upgraded"`; added new test for `"upgraded"` scenario
+- Fixed `IDE_CONFIGS.visualstudio` test asserting `configKey === "mcpServers"` — corrected to `"servers"`
+
+---
+
+**Full Changelog**: https://github.com/keggan-std/Engram/compare/v1.4.0...v1.4.1
+
+---
+
 # v1.4.0 — Versioned Installs, Auto-Update & Update CLI
 
 **Engram v1.4.0 is live.** This release brings full version awareness to the installer, a background update check service, and user-controlled update management — so agents can keep users informed about new releases without ever interrupting their work.
