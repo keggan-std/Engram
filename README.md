@@ -103,7 +103,7 @@ npx -y engram-mcp-server install --remove --ide claudecode
 
 **Check installed version vs npm latest:**
 ```bash
-npx -y engram-mcp-server install --check
+npx -y engram-mcp-server --check
 ```
 
 ### Option 2: Global Install (Windows Fallback)
@@ -459,5 +459,5 @@ This project is licensed under the [MIT License](LICENSE).
 
 <div align="center">
   <em>Because your AI agent shouldn't have amnesia.</em><br/>
-  <strong>Copyright &copy; 2026 Keggan Standard - Tanzania</strong>
+  <strong>Copyright &copy; 2026 Keggan Student - Tanzania</strong>
 </div>
