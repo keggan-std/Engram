@@ -320,6 +320,25 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V5: Trustworthy Context ───────────────────────────────────────
+  {
+    version: 5,
+    description: "Trustworthy context — file_mtime for stale detection; focus-ready indexes",
+    up: (db) => {
+      db.exec(`
+        -- Store the actual file modification time (Unix ms) when notes are saved.
+        -- Used to detect stale notes: if the file changed after notes were written,
+        -- the agent is warned so it can decide whether to re-read or trust the cache.
+        ALTER TABLE file_notes ADD COLUMN file_mtime INTEGER;
+
+        -- Composite index to speed up focused start_session queries on tasks
+        CREATE INDEX IF NOT EXISTS idx_tasks_priority_status
+          ON tasks(priority, status)
+          WHERE status NOT IN ('done', 'cancelled');
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

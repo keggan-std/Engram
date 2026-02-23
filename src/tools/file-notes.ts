@@ -4,10 +4,45 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getRepos } from "../database.js";
-import { TOOL_PREFIX } from "../constants.js";
-import { normalizePath } from "../utils.js";
+import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.js";
+import { TOOL_PREFIX, FILE_MTIME_STALE_HOURS } from "../constants.js";
+import { normalizePath, getFileMtime } from "../utils.js";
 import { success } from "../response.js";
+import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness } from "../types.js";
+
+/**
+ * Enrich a raw FileNoteRow with confidence and staleness information.
+ *
+ * Confidence levels:
+ *  - "high"    — stored mtime matches current file mtime (notes are fresh)
+ *  - "medium"  — file changed within FILE_MTIME_STALE_HOURS after notes were saved
+ *  - "stale"   — file changed more than FILE_MTIME_STALE_HOURS ago
+ *  - "unknown" — no stored mtime, or file not found on disk
+ */
+function withStaleness(note: FileNoteRow, projectRoot: string): FileNoteWithStaleness {
+    if (note.file_mtime == null) {
+        return { ...note, confidence: "unknown", stale: false };
+    }
+
+    const currentMtime = getFileMtime(note.file_path, projectRoot);
+    if (currentMtime == null) {
+        return { ...note, confidence: "unknown", stale: false };
+    }
+
+    const driftMs = currentMtime - note.file_mtime;
+    if (driftMs <= 0) {
+        return { ...note, confidence: "high", stale: false };
+    }
+
+    const driftHours = driftMs / 3_600_000;
+    const confidence: FileNoteConfidence = driftHours > FILE_MTIME_STALE_HOURS ? "stale" : "medium";
+    return {
+        ...note,
+        confidence,
+        stale: true,
+        staleness_hours: Math.round(driftHours),
+    };
+}
 
 export function registerFileNoteTools(server: McpServer): void {
     server.registerTool(
@@ -49,11 +84,17 @@ Returns:
             const sessionId = getCurrentSessionId();
             const fp = normalizePath(file_path);
 
+            // Capture the file's actual mtime so future retrievals can detect staleness
+            const file_mtime = getFileMtime(fp, getProjectRoot());
+
             repos.fileNotes.upsert(fp, timestamp, sessionId, {
-                purpose, dependencies, dependents, layer, complexity, notes,
+                purpose, dependencies, dependents, layer, complexity, notes, file_mtime,
             });
 
-            return success({ message: `File notes saved for ${fp}.` });
+            return success({
+                message: `File notes saved for ${fp}.`,
+                file_mtime_captured: file_mtime !== null,
+            });
         }
     );
 
@@ -98,8 +139,15 @@ Returns:
             const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
+            const projectRoot = getProjectRoot();
 
-            const count = repos.fileNotes.upsertBatch(files, timestamp, sessionId);
+            // Enrich each entry with the file's actual mtime before saving
+            const enrichedFiles = files.map(f => ({
+                ...f,
+                file_mtime: getFileMtime(normalizePath(f.file_path), projectRoot),
+            }));
+
+            const count = repos.fileNotes.upsertBatch(enrichedFiles, timestamp, sessionId);
 
             return success({
                 message: `Batch saved ${count} file note(s).`,
@@ -135,14 +183,23 @@ Returns:
         },
         async ({ file_path, layer, complexity }) => {
             const repos = getRepos();
+            const projectRoot = getProjectRoot();
 
             if (file_path) {
                 const note = repos.fileNotes.getByPath(file_path);
-                return success(note ? (note as unknown as Record<string, unknown>) : { message: "No notes found for this file." });
+                if (!note) return success({ message: "No notes found for this file." });
+                const enriched = withStaleness(note, projectRoot);
+                return success(enriched as unknown as Record<string, unknown>);
             }
 
             const notes = repos.fileNotes.getFiltered({ layer, complexity });
-            return success({ count: notes.length, files: notes });
+            const enriched = notes.map(n => withStaleness(n, projectRoot));
+            const staleCount = enriched.filter(n => n.stale).length;
+            return success({
+                count: enriched.length,
+                stale_count: staleCount,
+                files: enriched,
+            });
         }
     );
 }
