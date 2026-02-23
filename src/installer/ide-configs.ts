@@ -6,9 +6,26 @@ import path from "path";
 import os from "os";
 
 const HOME = os.homedir();
-const APPDATA = process.env.APPDATA || path.join(HOME, ".config");
 const IS_WINDOWS = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
+
+/**
+ * OS-aware application data directory.
+ *
+ * - Windows : %APPDATA%  (e.g. C:\Users\User\AppData\Roaming)
+ * - macOS   : ~/Library/Application Support
+ * - Linux   : ~/.config  (XDG Base Directory spec)
+ *
+ * The old code used `process.env.APPDATA || path.join(HOME, ".config")` which
+ * accidentally gave the correct value on Linux but the WRONG value on macOS
+ * (~/.config instead of ~/Library/Application Support).  This broke VS Code,
+ * Cline, and any other path that hangs off the AppData root on Mac.
+ */
+const APPDATA: string = IS_WINDOWS
+    ? (process.env.APPDATA ?? path.join(HOME, "AppData", "Roaming"))
+    : IS_MAC
+        ? path.join(HOME, "Library", "Application Support")
+        : path.join(HOME, ".config"); // Linux / other POSIX
 
 export interface IdeDefinition {
     name: string;
@@ -30,14 +47,20 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
     // ─── VS Code forks ──────────────────────────────────────────────
     vscode: {
         name: "VS Code (Copilot)",
+        // Confirmed: VS Code uses "servers" key, not "mcpServers".
+        // Source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers
         configKey: "servers",
         requiresType: true,
         requiresCmdWrapper: false,
         scopes: {
+            // Global user config.  APPDATA now resolves correctly on all OSes:
+            //   Windows : %APPDATA%\Code\User\mcp.json
+            //   macOS   : ~/Library/Application Support/Code/User/mcp.json
+            //   Linux   : ~/.config/Code/User/mcp.json
             global: [
                 path.join(APPDATA, "Code", "User", "mcp.json"),
-                path.join(HOME, ".vscode", "mcp.json"),
             ],
+            // Workspace-level: .vscode/mcp.json in project root.
             localDirs: [".vscode"],
         },
     },
@@ -47,10 +70,13 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // Confirmed: ~/.cursor/mcp.json is the cross-platform global path.
+            // Source: https://cursor.com/docs/context/mcp
+            // The old APPDATA/Cursor/mcp.json fallback was wrong on every OS.
             global: [
                 path.join(HOME, ".cursor", "mcp.json"),
-                path.join(APPDATA, "Cursor", "mcp.json"),
             ],
+            // Project-level: .cursor/mcp.json in project root.
             localDirs: [".cursor"],
         },
     },
@@ -60,9 +86,11 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // Confirmed: ~/.codeium/windsurf/mcp_config.json on all platforms.
+            // Source: https://docs.windsurf.com/windsurf/cascade/mcp
+            // Old fallback APPDATA/Windsurf/mcp.json was wrong: wrong dir + wrong filename.
             global: [
                 path.join(HOME, ".codeium", "windsurf", "mcp_config.json"),
-                path.join(APPDATA, "Windsurf", "mcp.json"),
             ],
         },
     },
@@ -72,6 +100,8 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // NOTE: Antigravity (Google) is newly announced; this path is unconfirmed.
+            // Marked best-effort until official docs are published.
             global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
         },
     },
@@ -79,11 +109,13 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
     // ─── Anthropic ──────────────────────────────────────────────────
     claudecode: {
         name: "Claude Code (CLI)",
+        // Confirmed: uses "mcpServers" key.
+        // Source: https://code.claude.com/docs/en/mcp
         configKey: "mcpServers",
         requiresType: true,
         requiresCmdWrapper: IS_WINDOWS,
         scopes: {
-            // User-level: ~/.claude.json contains mcpServers
+            // User-level: ~/.claude.json  (cross-platform, same path everywhere)
             global: [path.join(HOME, ".claude.json")],
             // Project-level: .mcp.json in workspace root
             localDirs: [""],
@@ -93,24 +125,36 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
     },
     claudedesktop: {
         name: "Claude Desktop",
+        // Confirmed: uses "mcpServers" key.
+        // Source: https://modelcontextprotocol.io/docs/develop/connect-local-servers
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: IS_WINDOWS,
         scopes: {
-            global: IS_MAC
-                ? [path.join(HOME, "Library", "Application Support", "Claude", "claude_desktop_config.json")]
-                : [path.join(APPDATA, "Claude", "claude_desktop_config.json")],
+            // With the corrected APPDATA constant, all three OS paths are now right:
+            //   Windows : %APPDATA%\Claude\claude_desktop_config.json
+            //   macOS   : ~/Library/Application Support/Claude/claude_desktop_config.json
+            //   Linux   : ~/.config/Claude/claude_desktop_config.json
+            global: [path.join(APPDATA, "Claude", "claude_desktop_config.json")],
         },
     },
 
     // ─── Microsoft ──────────────────────────────────────────────────
     visualstudio: {
         name: "Visual Studio 2022/2026",
-        configKey: "mcpServers",
+        // FIXED: Visual Studio uses "servers" key, not "mcpServers".
+        // Source: https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
+        // Every official example uses { "servers": { ... } }.
+        configKey: "servers",
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // Global: %USERPROFILE%\.mcp.json  (confirmed in MS docs)
             global: [path.join(HOME, ".mcp.json")],
+            // Local options (VS checks in order):
+            //   <SOLUTIONDIR>\.mcp.json   ← primary (source-controlled)
+            //   <SOLUTIONDIR>\.vs\mcp.json ← VS-specific (user-local)
+            // localDirs[0] drives the interactive menu; "" → .mcp.json in cwd.
             localDirs: ["", ".vs"],
         },
     },
@@ -122,9 +166,14 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // With corrected APPDATA:
+            //   Windows : %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
+            //   macOS   : ~/Library/Application Support/Code/User/globalStorage/.../cline_mcp_settings.json
+            //   Linux   : ~/.config/Code/User/globalStorage/.../cline_mcp_settings.json
             global: [
                 path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-                path.join(HOME, ".cline", "mcp_settings.json"),
+                // Roo Code uses a different extension ID
+                path.join(APPDATA, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"),
             ],
         },
     },
@@ -143,6 +192,9 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
+            // ~/.config/github-copilot/intellij/mcp.json on Mac/Linux.
+            // On Windows the GitHub Copilot JetBrains plugin uses the same
+            // ~/.config path (it does NOT use %APPDATA%).
             global: [
                 path.join(HOME, ".config", "github-copilot", "intellij", "mcp.json"),
             ],

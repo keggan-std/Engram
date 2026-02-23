@@ -19,7 +19,7 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.4.0](#-whats-new-in-v140)
+- [✨ What's New in v1.4.1](#-whats-new-in-v141)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
@@ -50,16 +50,21 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ---
 
-## ✨ What's New in v1.4.0
+## ✨ What's New in v1.4.1
 
-- **Version-Tracked Installs:** Every IDE config entry is now stamped with `_engram_version`. The installer detects four distinct states — fresh install, already up to date, upgrade from a known version, and legacy adoption (pre-tracking era entries) — and reports each one clearly.
-- **Background Auto-Update Check:** Engram silently checks for new versions after server startup using a fire-and-forget async check (never blocks startup or any tool call). If a newer version is found, the agent is notified via `engram_start_session` and can tell the user.
-- **User-Controlled Update Flow:** Users choose how to act on an update via agent commands — update now, skip this version forever, postpone for N days (`7d`, `2w`, `1m`), or disable checks entirely. Nothing is automatic; the user is always in control.
-- **Two-Source Changelog Delivery:** Update notifications include the release changelog fetched from the npm registry (primary) or GitHub Releases API (fallback). Both sources are tried with a 5-second timeout; network failures are silent.
-- **`--check` CLI Flag:** `npx -y engram-mcp-server install --check` shows the installed version for each detected IDE, compares against npm latest, and correctly handles pre-release scenarios (running ahead of the published version).
-- **`engram_stats` Version & Update Status:** Stats now include `server_version`, `update_status` (available version + releases URL if an update is pending), `auto_update_check` state, and `last_update_check` timestamp.
-- **`engram_config` Update Keys:** Four new configurable keys — `auto_update_check`, `auto_update_skip_version`, `auto_update_remind_after` (accepts durations like `7d`, `2w`, `1m`), and `auto_update_notify_level` (`"major"` | `"minor"` | `"patch"`).
-- **Pre-publish Release Notes Injection:** A new `scripts/inject-release-notes.js` script runs automatically before every `npm publish`. It extracts the current version's section from `RELEASE_NOTES.md` and injects it into `package.json`, enabling single-HTTP-call changelog delivery via the npm registry API.
+**v1.4.1** is a targeted hotfix that resolves a series of critical and high-severity bugs discovered during a full audit of the installer infrastructure — verified against official documentation for every supported IDE.
+
+- **macOS Install Path Fixed (Critical):** `process.env.APPDATA` is Windows-only. On macOS, the fallback resolved to `~/.config` instead of `~/Library/Application Support`, causing VS Code, Cline, and Claude Desktop installs to silently write to the wrong directory. The IDE never read from it, yet re-runs reported "Already installed." The `APPDATA` constant is now OS-aware across all three platforms.
+- **Visual Studio Config Key Fixed (Critical):** Visual Studio reads the `"servers"` JSON key, not `"mcpServers"`. Every install wrote to a key VS never reads — Engram was permanently invisible in Visual Studio. Fixed and confirmed against official Microsoft docs.
+- **Wrong Secondary Paths Removed (High):** VS Code's `~/.vscode/mcp.json` (the extensions dir), Cursor's `APPDATA/Cursor/mcp.json`, and Windsurf's `APPDATA/Windsurf/mcp.json` were all wrong paths that don't exist on any real machine. Removed in favour of the single correct path for each IDE.
+- **Multi-IDE Awareness:** Most developers have multiple IDEs installed simultaneously. The installer now scans all installed IDEs via filesystem and installs to all of them in one pass — without the user needing to run it multiple times with different `--ide` flags.
+- **Better IDE Detection:** Cursor detection now checks `CURSOR_TRACE_ID` and `process.execPath` before falling back to fragile PATH matching. Visual Studio is now detected via `VSINSTALLDIR`/`VisualStudioVersion` env vars.
+- **`--check` Reference Fixed (High):** `--check` was comparing IDE config versions against the running binary, not npm latest — producing backwards results when running from local source. npm latest is now fetched first and used as the sole reference.
+- **CWD Source Conflict Warning:** When `npx` resolves to the local Engram source directory, a clear warning is printed before any output so users understand why the version reported may not match npm.
+- **JetBrains Install Warning:** JetBrains MCP config is managed via the IDE Settings UI, not a config file. A warning is now shown during install directing users to `Settings › Tools › AI Assistant › Model Context Protocol`.
+- **Claude Code CLI Hint Fixed:** The `claude mcp add-json` hint displayed arguments in the wrong order. Fixed to `claude mcp add-json engram '{...}' --scope user`.
+
+> Previous release: **v1.4.0** — Versioned installs, background auto-update check, `--check` CLI flag, `engram_stats` version info, `engram_config` update keys. [Full notes →](https://github.com/keggan-std/Engram/releases/tag/v1.4.0)
 
 ---
 
@@ -328,106 +333,103 @@ Engram exposes 30+ tools. Here are the core highlights of what an agent can do f
 Add the following to your agent's system prompt or custom instructions (Cursor Rules, `.github/copilot-instructions.md`, `CLAUDE.md`, etc.). The goal is to ensure the agent consults Engram *before* doing work — not just after — which is where most of the token and time savings come from.
 
 ```text
-You have access to Engram, a persistent memory MCP server. It stores everything
-learned about this project across all sessions: file notes, architectural decisions,
-conventions, tasks, and change history. Use it to avoid re-reading files you have
-already analysed, re-debating settled decisions, and re-discovering known context.
+You have access to Engram, a persistent memory MCP server. It stores everything learned about this project across all sessions: file notes, architectural decisions, conventions, tasks, and change history. Use it to avoid re-reading files you have already analysed, re-debating settled decisions, and re-discovering known context.
 
-━━━ SESSION START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ━━━ SESSION START ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-ALWAYS call engram_start_session first — before reading any file or taking any action.
-Act on everything it returns:
+ALWAYS call `engram_start_session` first — before reading any file or taking any action. Act on everything it returns:
 
-  previous_session.summary  → Read this immediately. Do not re-explore what is already known.
-  active_decisions          → These are binding. Follow them; do not re-debate them.
-                              To change one, supersede it with a new engram_record_decision call.
-  active_conventions        → Enforce these in every file you touch this session.
-  open_tasks                → These are pending work items. Ask the user which to focus on if unclear.
-  update_available (if set) → Immediately tell the user:
-                                "Engram v{available_version} is available (you have {installed_version}).
-                                 Changes: {changelog}
-                                 Would you like to update, skip this version, or postpone?"
-                              Then act on their choice:
-                                Update      → instruct them to run: npx -y engram-mcp-server install
-                                Skip        → engram_config action=set key=auto_update_skip_version value={version}
-                                Postpone 7d → engram_config action=set key=auto_update_remind_after value=7d
-                                Disable     → engram_config action=set key=auto_update_check value=false
+*   **`previous_session.summary`**: Read this immediately. Do not re-explore what is already known.
+*   **`active_decisions`**: These are binding. Follow them; do not re-debate them. To change one, supersede it with a new `engram_record_decision` call.
+*   **`active_conventions`**: Enforce these in every file you touch this session.
+*   **`open_tasks`**: These are pending work items. Ask the user which to focus on if unclear.
+*   **`update_available` (if set)**: Immediately tell the user:
+    > "Engram v{available_version} is available (you have {installed_version}). Changes: {changelog}. Would you like to update, skip this version, or postpone?"
+    
+    Then act on their choice:
+    *   **Update**: instruct them to run: `npx -y engram-mcp-server install`
+    *   **Skip**: `engram_config action=set key=auto_update_skip_version value={version}`
+    *   **Postpone 7d**: `engram_config action=set key=auto_update_remind_after value=7d`
+    *   **Disable**: `engram_config action=set key=auto_update_check value=false`
 
-━━━ BEFORE READING OR REVIEWING ANY FILE ━━━━━━━━━━━━━━━━━━━
+## ━━━ BEFORE READING OR REVIEWING ANY FILE ━━━━━━━━━━━━━━━━━━━
 
 ALWAYS check Engram before opening a file:
 
-  engram_get_file_notes({ file_paths: ["path/to/file.ts"] })
+```javascript
+engram_get_file_notes({ file_paths: ["path/to/file.ts"] })
+```
 
-  If notes EXIST:
-    Use the stored purpose, dependencies, layer, and complexity to answer
-    questions or orient yourself WITHOUT reading the file.
-    Only open the file when you need the actual source code for editing or
-    a detailed line-by-line analysis.
+*   **If notes EXIST**:
+    Use the stored purpose, dependencies, layer, and complexity to answer questions or orient yourself WITHOUT reading the file. Only open the file when you need the actual source code for editing or a detailed line-by-line analysis.
 
-  If notes DO NOT EXIST:
-    1. Read the file.
-    2. Immediately call engram_set_file_notes with:
-         file_path, purpose, dependencies, dependents, layer, complexity, notes
-    3. For multiple files reviewed in one pass, batch them in a single call.
+*   **If notes DO NOT EXIST**:
+    1.  Read the file.
+    2.  Immediately call `engram_set_file_notes` with: `file_path`, `purpose`, `dependencies`, `dependents`, `layer`, `complexity`, `notes`.
+    3.  For multiple files reviewed in one pass, batch them in a single call.
 
-  If notes are STALE (you see evidence the file changed significantly since
-  the notes were last recorded — e.g., from git log or change history):
+*   **If notes are STALE** (you see evidence the file changed significantly since the notes were last recorded — e.g., from git log or change history):
     Re-read the file and update the notes.
 
-Rule: Never read a file you have already analysed in a previous session
-without first checking whether Engram already knows it.
+**Rule:** Never read a file you have already analysed in a previous session without first checking whether Engram already knows it.
 
-━━━ BEFORE MAKING ANY DESIGN DECISION ━━━━━━━━━━━━━━━━━━━━━━
+## ━━━ BEFORE MAKING ANY DESIGN DECISION ━━━━━━━━━━━━━━━━━━━━━━
 
 Before choosing an implementation approach, search for an existing decision:
 
-  engram_search({ query: "relevant keywords", scope: "decisions" })
+```javascript
+engram_search({ query: "relevant keywords", scope: "decisions" })
+```
 
-  If a matching decision EXISTS → follow it.
-  If you believe it should change → explain why, then supersede it:
+*   **If a matching decision EXISTS**: follow it.
+*   **If you believe it should change**: explain why, then supersede it:
+    ```javascript
     engram_record_decision({ decision: "...", supersedes: <id> })
-
-  If NO decision exists → make the call and record it:
+    ```
+*   **If NO decision exists**: make the call and record it:
+    ```javascript
     engram_record_decision({ decision, rationale, affected_files, tags })
+    ```
 
-━━━ WHEN MODIFYING FILES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ━━━ WHEN MODIFYING FILES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 After every meaningful change, record it. Batch where possible:
 
-  engram_record_change({ changes: [{
-    file_path,
-    change_type,   // created | modified | refactored | deleted | renamed | moved | config_changed
-    description,   // What changed AND why — not just the action. Future sessions read this.
-    impact_scope   // local | module | cross_module | global
-  }]})
+```javascript
+engram_record_change({ changes: [{
+  file_path,
+  change_type,   // created | modified | refactored | deleted | renamed | moved | config_changed
+  description,   // What changed AND why — not just the action. Future sessions read this.
+  impact_scope   // local | module | cross_module | global
+}]})
+```
 
-━━━ WHEN YOU DON'T KNOW SOMETHING ━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ━━━ WHEN YOU DON'T KNOW SOMETHING ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Before asking the user, search Engram first. The user may have already explained
-this to a previous session:
+Before asking the user, search Engram first. The user may have already explained this to a previous session:
 
-  engram_search({ query: "keywords" })       ← general search
-  engram_scan_project()                      ← project structure questions
-  engram_get_decisions()                     ← architecture / approach questions
-  engram_get_conventions()                   ← style / pattern questions
-  engram_get_file_notes({ file_paths: [] })  ← what is known about specific files
+*   `engram_search({ query: "keywords" })`       ← general search
+*   `engram_scan_project()`                      ← project structure questions
+*   `engram_get_decisions()`                     ← architecture / approach questions
+*   `engram_get_conventions()`                   ← style / pattern questions
+*   `engram_get_file_notes({ file_paths: [] })`  ← what is known about specific files
 
-━━━ SESSION END ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## ━━━ SESSION END ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Before ending every session:
 
-  1. Record all file changes not yet recorded (engram_record_change).
-  2. Create tasks for anything incomplete or blocked:
-       engram_create_task({ title, description, priority })
-  3. Call engram_end_session with a summary that includes:
-       • Exactly what was done — file names, function names, specific changes made
-       • What is pending or blocked, and why
-       • Any new patterns, gotchas, or constraints discovered this session
-       • Which tasks were completed or partially done
+1.  Record all file changes not yet recorded (`engram_record_change`).
+2.  Create tasks for anything incomplete or blocked:
+    ```javascript
+    engram_create_task({ title, description, priority })
+    ```
+3.  Call `engram_end_session` with a summary that includes:
+    *   Exactly what was done — file names, function names, specific changes made
+    *   What is pending or blocked, and why
+    *   Any new patterns, gotchas, or constraints discovered this session
+    *   Which tasks were completed or partially done
 
-  A precise summary is what allows the next session to start immediately
-  without re-reading files or re-asking the user for context.
+A precise summary is what allows the next session to start immediately without re-reading files or re-asking the user for context.
 ```
 
 ---
