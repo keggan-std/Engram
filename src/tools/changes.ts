@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getRepos } from "../database.js";
+import { now, getCurrentSessionId, getRepos, getDb } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { normalizePath } from "../utils.js";
 import { success } from "../response.js";
@@ -54,6 +54,25 @@ Returns:
 
             repos.changes.recordBulk(normalized, sessionId, timestamp);
 
+            // F2: auto-close any pending_work records that cover these files
+            const changedPaths = normalized.map(c => c.file_path);
+            try {
+                const db = getDb();
+                const pending = db.prepare(
+                    "SELECT id, files FROM pending_work WHERE status = 'pending'"
+                ).all() as { id: number; files: string }[];
+
+                for (const pw of pending) {
+                    const pwFiles: string[] = JSON.parse(pw.files);
+                    const overlap = pwFiles.some(f => changedPaths.includes(normalizePath(f)));
+                    if (overlap) {
+                        db.prepare(
+                            "UPDATE pending_work SET status = 'completed' WHERE id = ?"
+                        ).run(pw.id);
+                    }
+                }
+            } catch { /* best effort — pending_work table may not exist yet */ }
+
             return success({
                 message: `Recorded ${changes.length} change(s) in session #${sessionId ?? "none"}.`,
                 count: changes.length,
@@ -99,6 +118,54 @@ Returns:
                 changes,
                 related_decisions: decisions,
             });
+        }
+    );
+
+    // ─── BEGIN WORK ──────────────────────────────────────────────────
+    server.registerTool(
+        `${TOOL_PREFIX}_begin_work`,
+        {
+            title: "Begin Work",
+            description: `Record intent to modify files BEFORE you start editing. Creates a pending_work record that is automatically closed when engram_record_change is called for the same files. If a session ends without the change being recorded, the record shows as "abandoned" — a warning for the next session to investigate incomplete work.
+
+Args:
+  - description (string): What you are about to do (e.g. "Add context_chars enrichment block to search handler")
+  - files (array): Files you intend to edit
+  - agent_id (string, optional): Your agent identifier
+
+Returns:
+  work_id — pass this to engram_record_change if you want to explicitly close it.`,
+            inputSchema: {
+                description: z.string().min(5).describe("What you are about to do"),
+                files: z.array(z.string()).min(1).describe("Files you intend to edit"),
+                agent_id: z.string().default("unknown").describe("Your agent identifier"),
+            },
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: false,
+            },
+        },
+        async ({ description, files, agent_id }) => {
+            const sessionId = getCurrentSessionId();
+            const normalizedFiles = files.map(f => normalizePath(f));
+
+            try {
+                const db = getDb();
+                const result = db.prepare(
+                    `INSERT INTO pending_work (agent_id, session_id, description, files, started_at, status)
+                     VALUES (?, ?, ?, ?, ?, 'pending')`
+                ).run(agent_id, sessionId ?? null, description, JSON.stringify(normalizedFiles), Date.now());
+
+                return success({
+                    work_id: result.lastInsertRowid,
+                    message: `Pending work #${result.lastInsertRowid} recorded. Edit your files, then call engram_record_change — it will auto-close this record.`,
+                    files: normalizedFiles,
+                });
+            } catch (e) {
+                return success({ message: `Failed to record pending work: ${e}` });
+            }
         }
     );
 }

@@ -374,6 +374,42 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V7: File Locks + Pending Work ────────────────────────────────
+  {
+    version: 7,
+    description: "Agent safety — file_locks for concurrent write prevention, pending_work for intent recording",
+    up: (db) => {
+      db.exec(`
+        -- File locks: agents declare intent to write a file.
+        -- Auto-expiring prevents deadlocks. PRIMARY KEY = one lock per file.
+        CREATE TABLE IF NOT EXISTS file_locks (
+          file_path TEXT PRIMARY KEY,
+          agent_id  TEXT NOT NULL,
+          reason    TEXT,
+          locked_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_locks_expires ON file_locks(expires_at);
+
+        -- Pending work: agents record intent before touching files.
+        -- status: pending | completed | abandoned
+        -- Abandoned records surface as warnings in start_session.
+        CREATE TABLE IF NOT EXISTS pending_work (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id    TEXT NOT NULL,
+          session_id  INTEGER,
+          description TEXT NOT NULL,
+          files       TEXT NOT NULL DEFAULT '[]',
+          started_at  INTEGER NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_work_status ON pending_work(status);
+        CREATE INDEX IF NOT EXISTS idx_pending_work_agent  ON pending_work(agent_id, status);
+        CREATE INDEX IF NOT EXISTS idx_pending_work_session ON pending_work(session_id);
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

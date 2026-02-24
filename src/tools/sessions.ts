@@ -147,6 +147,24 @@ Returns:
       // ─── Update notification (once per process) ────────────
       const updateNotification = services.update.getNotification();
 
+      // ─── F2: Surface abandoned pending_work from prior sessions ─────
+      interface PendingWorkRow { id: number; agent_id: string; description: string; files: string; started_at: number; session_id: number | null; }
+      let abandonedWork: PendingWorkRow[] = [];
+      try {
+        // Mark any pending work from closed sessions as abandoned
+        const { getDb } = await import("../database.js");
+        const db = getDb();
+        if (lastSession?.id) {
+          db.prepare(
+            `UPDATE pending_work SET status = 'abandoned'
+             WHERE status = 'pending' AND (session_id IS NULL OR session_id < ?)`
+          ).run(sessionId);
+        }
+        abandonedWork = db.prepare(
+          "SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' ORDER BY started_at DESC LIMIT 5"
+        ).all() as PendingWorkRow[];
+      } catch { /* best effort — table may not exist */ }
+
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
         return success({
@@ -166,8 +184,12 @@ Returns:
           git: { branch: gitBranch, head: gitHead },
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          abandoned_work: abandonedWork.length > 0 ? abandonedWork.map(w => ({
+            id: w.id, agent_id: w.agent_id, description: w.description,
+            files: JSON.parse(w.files), started_ago_minutes: Math.round((Date.now() - w.started_at) / 60_000),
+          })) : undefined,
           update_available: updateNotification ?? undefined,
-          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${abandonedWork.length > 0 ? ` ⚠️ ${abandonedWork.length} abandoned work item(s) detected — review abandoned_work field.` : ""}${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
         });
       }
 
@@ -213,9 +235,13 @@ Returns:
           total_file_notes: repos.fileNotes.countAll(),
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          abandoned_work: abandonedWork.length > 0 ? abandonedWork.map(w => ({
+            id: w.id, agent_id: w.agent_id, description: w.description,
+            files: JSON.parse(w.files), started_ago_minutes: Math.round((Date.now() - w.started_at) / 60_000),
+          })) : undefined,
           update_available: updateNotification ?? undefined,
           message: lastSession
-            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${abandonedWork.length > 0 ? ` ⚠️ ${abandonedWork.length} abandoned work item(s) — check abandoned_work field.` : ""}${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
             : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
         });
       }
@@ -226,6 +252,7 @@ Returns:
         project_snapshot?: ProjectSnapshot | null;
         git_hook_log?: string;
         triggered_events?: ScheduledEventRow[];
+        abandoned_work?: Array<{ id: number; agent_id: string; description: string; files: unknown; started_ago_minutes: number }>;
         update_available?: typeof updateNotification;
       } = {
         session_id: sessionId,
@@ -250,9 +277,13 @@ Returns:
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
+        abandoned_work: abandonedWork.length > 0 ? abandonedWork.map(w => ({
+          id: w.id, agent_id: w.agent_id, description: w.description,
+          files: JSON.parse(w.files), started_ago_minutes: Math.round((Date.now() - w.started_at) / 60_000),
+        })) : undefined,
         update_available: updateNotification ?? undefined,
         message: lastSession
-          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${abandonedWork.length > 0 ? ` ⚠️ ${abandonedWork.length} abandoned work item(s) — check abandoned_work field.` : ""}${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
           : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 
