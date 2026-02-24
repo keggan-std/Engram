@@ -471,4 +471,156 @@ Returns:
       });
     }
   );
+
+  // ─── SESSION REPLAY ──────────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_replay`,
+    {
+      title: "Session Replay",
+      description: `Reconstruct a chronological timeline of everything that happened in a session: files modified (ordered by time), decisions recorded, tasks created/updated, milestones, and any tool_call_log entries. Use for debugging corruption, reconstructing what sub-agents did, and auditing multi-agent sessions.
+
+Args:
+  - session_id (number, optional): Session to replay. Defaults to the most recent completed session.
+  - include_tool_log (boolean, optional): Include raw tool_call_log entries if available (default: false).
+
+Returns:
+  Chronological timeline array with typed events.`,
+      inputSchema: {
+        session_id: z.number().int().optional().describe("Session ID to replay (defaults to last completed session)"),
+        include_tool_log: z.boolean().default(false).describe("Include raw tool_call_log entries if available"),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ session_id, include_tool_log }) => {
+      const db = getDb();
+
+      // Resolve the session to replay
+      let targetId = session_id;
+      if (!targetId) {
+        const last = db.prepare(
+          "SELECT id FROM sessions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).get() as { id: number } | undefined;
+        if (!last) return success({ message: "No completed sessions found.", timeline: [] });
+        targetId = last.id;
+      }
+
+      const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(targetId) as Record<string, unknown> | undefined;
+      if (!session) return success({ message: `Session #${targetId} not found.`, timeline: [] });
+
+      // Collect timeline events from multiple tables, all tagged with a sort key
+      const events: Array<{ sort_key: string; type: string; data: Record<string, unknown> }> = [];
+
+      // Changes
+      try {
+        const changes = db.prepare(
+          "SELECT * FROM changes WHERE session_id = ? ORDER BY timestamp ASC"
+        ).all(targetId) as Array<Record<string, unknown>>;
+        for (const c of changes) {
+          events.push({
+            sort_key: String(c["timestamp"]),
+            type: "file_change",
+            data: {
+              file_path: c["file_path"],
+              change_type: c["change_type"],
+              description: c["description"],
+              diff_summary: c["diff_summary"],
+              impact_scope: c["impact_scope"],
+              timestamp: c["timestamp"],
+            },
+          });
+        }
+      } catch { /* skip */ }
+
+      // Decisions
+      try {
+        const decisions = db.prepare(
+          "SELECT * FROM decisions WHERE session_id = ? ORDER BY timestamp ASC"
+        ).all(targetId) as Array<Record<string, unknown>>;
+        for (const d of decisions) {
+          events.push({
+            sort_key: String(d["timestamp"]),
+            type: "decision",
+            data: {
+              id: d["id"],
+              decision: d["decision"],
+              rationale: d["rationale"],
+              status: d["status"],
+              tags: d["tags"],
+              timestamp: d["timestamp"],
+            },
+          });
+        }
+      } catch { /* skip */ }
+
+      // Tasks created/updated in this session
+      try {
+        const tasks = db.prepare(
+          "SELECT * FROM tasks WHERE session_id = ? ORDER BY created_at ASC"
+        ).all(targetId) as Array<Record<string, unknown>>;
+        for (const t of tasks) {
+          events.push({
+            sort_key: String(t["created_at"]),
+            type: "task_created",
+            data: {
+              id: t["id"],
+              title: t["title"],
+              status: t["status"],
+              priority: t["priority"],
+              created_at: t["created_at"],
+            },
+          });
+        }
+      } catch { /* skip */ }
+
+      // Milestones
+      try {
+        const milestones = db.prepare(
+          "SELECT * FROM milestones WHERE session_id = ? ORDER BY timestamp ASC"
+        ).all(targetId) as Array<Record<string, unknown>>;
+        for (const m of milestones) {
+          events.push({
+            sort_key: String(m["timestamp"]),
+            type: "milestone",
+            data: { id: m["id"], title: m["title"], description: m["description"], version: m["version"], timestamp: m["timestamp"] },
+          });
+        }
+      } catch { /* skip */ }
+
+      // Tool call log (optional)
+      if (include_tool_log) {
+        try {
+          const toolCalls = db.prepare(
+            "SELECT * FROM tool_call_log WHERE session_id = ? ORDER BY called_at ASC"
+          ).all(targetId) as Array<Record<string, unknown>>;
+          for (const tc of toolCalls) {
+            events.push({
+              sort_key: String(new Date(tc["called_at"] as number).toISOString()),
+              type: "tool_call",
+              data: { tool_name: tc["tool_name"], outcome: tc["outcome"], notes: tc["notes"], called_at: tc["called_at"] },
+            });
+          }
+        } catch { /* tool_call_log table may not exist */ }
+      }
+
+      // Sort all events chronologically
+      events.sort((a, b) => a.sort_key < b.sort_key ? -1 : a.sort_key > b.sort_key ? 1 : 0);
+
+      return success({
+        session: {
+          id: session["id"],
+          agent: session["agent_name"],
+          started_at: session["started_at"],
+          ended_at: session["ended_at"],
+          summary: session["summary"],
+        },
+        event_count: events.length,
+        timeline: events.map(e => ({ type: e.type, ...e.data })),
+      });
+    }
+  );
 }

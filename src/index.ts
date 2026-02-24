@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   registerFileNoteTools(server);      // set_file_notes, get_file_notes
   registerConventionTools(server);    // add_convention, get_conventions, toggle_convention
   registerTaskTools(server);          // create_task, update_task, get_tasks
-  registerIntelligenceTools(server);  // scan_project, search, what_changed, dependency_map
+  registerIntelligenceTools(server);  // scan_project, search, what_changed, dependency_map, replay
   registerStatsTools(server);         // stats
   registerBackupTools(server);        // backup, restore, list_backups
   registerMilestoneTools(server);     // record_milestone, get_milestones

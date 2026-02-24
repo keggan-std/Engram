@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, logToolCall } from "../database.js";
 import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -146,6 +146,9 @@ Returns:
 
       // ─── Update notification (once per process) ────────────
       const updateNotification = services.update.getNotification();
+
+      // F10: Log this tool invocation for session replay
+      logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity}`);
 
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
@@ -297,6 +300,9 @@ Returns:
       const changeCount = repos.changes.countBySession(sessionId);
       const decisionCount = repos.sessions.countBySession(sessionId, "decisions");
       const tasksDone = repos.tasks.countDoneInSession(sessionId);
+
+      // F10: Log before closing so session_id is still valid
+      logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone}`);
 
       // Close the session
       repos.sessions.close(sessionId, timestamp, summary, tags);
