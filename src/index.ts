@@ -35,6 +35,7 @@ import { registerMilestoneTools } from "./tools/milestones.js";
 import { registerExportImportTools } from "./tools/export-import.js";
 import { registerCompactionTools } from "./tools/compaction.js";
 import { registerSchedulerTools } from "./tools/scheduler.js";
+import { registerReportTools } from "./tools/report.js";
 
 // ─── Initialize ───────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ async function main(): Promise<void> {
   registerExportImportTools(server);  // export, import
   registerCompactionTools(server);    // compact, clear
   registerSchedulerTools(server);     // schedule_event, get/update/acknowledge events, check_events
+  registerReportTools(server);         // generate_report
 
   log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 
