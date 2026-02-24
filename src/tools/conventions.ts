@@ -4,10 +4,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId } from "../database.js";
+import { getDb, now, getCurrentSessionId, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import type { ConventionRow } from "../types.js";
+import { writeGlobalConvention } from "../global-db.js";
 
 export function registerConventionTools(server: McpServer): void {
     server.registerTool(
@@ -20,6 +21,7 @@ Args:
   - category: "naming" | "architecture" | "styling" | "testing" | "git" | "documentation" | "error_handling" | "performance" | "security" | "other"
   - rule (string): The convention rule in clear, actionable language
   - examples (array of strings, optional): Code or usage examples
+  - export_global (boolean, optional): Mirror to cross-project global KB at ~/.engram/global.db (default: false)
 
 Returns:
   Convention ID and confirmation.`,
@@ -27,6 +29,7 @@ Returns:
                 category: z.enum(["naming", "architecture", "styling", "testing", "git", "documentation", "error_handling", "performance", "security", "other"]),
                 rule: z.string().min(5).describe("The convention rule"),
                 examples: z.array(z.string()).optional().describe("Examples of the convention in use"),
+                export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
             },
             annotations: {
                 readOnlyHint: false,
@@ -35,7 +38,7 @@ Returns:
                 openWorldHint: false,
             },
         },
-        async ({ category, rule, examples }) => {
+        async ({ category, rule, examples, export_global }) => {
             const db = getDb();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
@@ -44,10 +47,18 @@ Returns:
                 "INSERT INTO conventions (session_id, timestamp, category, rule, examples) VALUES (?, ?, ?, ?, ?)"
             ).run(sessionId, timestamp, category, rule, examples ? JSON.stringify(examples) : null);
 
+            const conventionId = Number(result.lastInsertRowid);
+
+            let globalId: number | null = null;
+            if (export_global) {
+                globalId = writeGlobalConvention(getProjectRoot(), category, rule, timestamp);
+            }
+
             return success({
-                convention_id: Number(result.lastInsertRowid),
-                message: `Convention #${result.lastInsertRowid} added to [${category}].`,
+                convention_id: conventionId,
+                message: `Convention #${conventionId} added to [${category}]${globalId != null ? " and exported to global KB." : "."}`,
                 rule,
+                exported_globally: globalId != null,
             });
         }
     );
