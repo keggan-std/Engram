@@ -374,6 +374,34 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V10: Structured Agent Handoffs ───────────────────────────────
+  {
+    version: 10,
+    description: "Session handoffs — handoffs table for graceful context-exhaustion transfers between agents",
+    up: (db) => {
+      db.exec(`
+        -- Stores structured handoff packets for context-exhaustion transfers.
+        -- start_session surfaces any unacknowledged handoff as handoff_pending.
+        CREATE TABLE IF NOT EXISTS handoffs (
+          id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_session_id        INTEGER NOT NULL,
+          from_agent             TEXT,
+          created_at             INTEGER NOT NULL,
+          reason                 TEXT NOT NULL,
+          next_agent_instructions TEXT,
+          resume_at              TEXT,
+          git_branch             TEXT,
+          open_task_ids          TEXT,
+          last_file_touched      TEXT,
+          acknowledged_at        INTEGER,
+          acknowledged_by        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(from_session_id);
+        CREATE INDEX IF NOT EXISTS idx_handoffs_acked   ON handoffs(acknowledged_at) WHERE acknowledged_at IS NULL;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb } from "../database.js";
 import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -147,6 +147,15 @@ Returns:
       // ─── Update notification (once per process) ────────────
       const updateNotification = services.update.getNotification();
 
+      // ─── F6: Check for unacknowledged handoff from a previous agent ──
+      interface HandoffRow { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null; open_task_ids: string | null; last_file_touched: string | null; created_at: number; }
+      let handoffPending: HandoffRow | null = null;
+      try {
+        handoffPending = getDb().prepare(
+          "SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 1"
+        ).get() as HandoffRow | null;
+      } catch { /* table may not exist on older DBs */ }
+
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
         return success({
@@ -166,8 +175,9 @@ Returns:
           git: { branch: gitBranch, head: gitHead },
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          handoff_pending: handoffPending ? { id: handoffPending.id, from_agent: handoffPending.from_agent, reason: handoffPending.reason, next_agent_instructions: handoffPending.next_agent_instructions, resume_at: handoffPending.resume_at, git_branch: handoffPending.git_branch } : undefined,
           update_available: updateNotification ?? undefined,
-          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${handoffPending ? ` 🤝 Handoff pending from "${handoffPending.from_agent ?? "previous agent"}" — see handoff_pending field. Call engram_acknowledge_event after reading.` : ""}${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
         });
       }
 
@@ -213,9 +223,10 @@ Returns:
           total_file_notes: repos.fileNotes.countAll(),
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          handoff_pending: handoffPending ? { id: handoffPending.id, from_agent: handoffPending.from_agent, reason: handoffPending.reason, next_agent_instructions: handoffPending.next_agent_instructions, resume_at: handoffPending.resume_at, git_branch: handoffPending.git_branch } : undefined,
           update_available: updateNotification ?? undefined,
           message: lastSession
-            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${handoffPending ? ` 🤝 Handoff pending from "${handoffPending.from_agent ?? "previous agent"}" — see handoff_pending. Acknowledge with engram_acknowledge_handoff(${handoffPending.id}).` : ""}${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
             : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
         });
       }
@@ -226,6 +237,7 @@ Returns:
         project_snapshot?: ProjectSnapshot | null;
         git_hook_log?: string;
         triggered_events?: ScheduledEventRow[];
+        handoff_pending?: { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null };
         update_available?: typeof updateNotification;
       } = {
         session_id: sessionId,
@@ -250,9 +262,10 @@ Returns:
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
+        handoff_pending: handoffPending ? { id: handoffPending.id, from_agent: handoffPending.from_agent, reason: handoffPending.reason, next_agent_instructions: handoffPending.next_agent_instructions, resume_at: handoffPending.resume_at, git_branch: handoffPending.git_branch } : undefined,
         update_available: updateNotification ?? undefined,
         message: lastSession
-          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${handoffPending ? ` 🤝 Handoff pending from "${handoffPending.from_agent ?? "previous agent"}" — see handoff_pending. Acknowledge with engram_acknowledge_handoff(${handoffPending.id}).` : ""}${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
           : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 
@@ -440,6 +453,128 @@ ${body}`;
           change_types: typeCounts,
         },
       });
+    }
+  );
+
+  // ─── HANDOFF ────────────────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_handoff`,
+    {
+      title: "Create Agent Handoff",
+      description: `Create a structured handoff packet for the next agent when your context is nearly exhausted. The handoff is surfaced automatically in start_session as handoff_pending. Call this BEFORE context is completely exhausted so your instructions are preserved.
+
+Args:
+  - reason (string): Why you are handing off (e.g., "context_exhausted", "task_complete", "blocked")
+  - next_agent_instructions (string, optional): Specific instructions for the incoming agent — what to do next, what to avoid, key context to know
+  - resume_at (string, optional): Specific file, function, or task to resume at (e.g., "src/tools/sessions.ts line 300", "Task #5")
+
+Returns:
+  Handoff ID and confirmation. The next agent will see this in start_session.`,
+      inputSchema: {
+        reason: z.string().min(3).describe("Why you are handing off"),
+        next_agent_instructions: z.string().optional().describe("Instructions for the next agent"),
+        resume_at: z.string().optional().describe("File, function, or task to resume at"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+    },
+    async ({ reason, next_agent_instructions, resume_at }) => {
+      const db = getDb();
+      const sessionId = getCurrentSessionId();
+      const repos = getRepos();
+      const services = getServices();
+
+      if (!sessionId) {
+        return error("No active session. Start one with engram_start_session first.");
+      }
+
+      // Gather context for the handoff packet
+      const gitBranch = services.git.getBranch();
+      const openTasks = repos.tasks.getOpen(20);
+      const openTaskIds = openTasks.map(t => t.id);
+
+      // Last touched file: most recent change in this session
+      const recentChanges = repos.changes.getBySession(sessionId);
+      const lastFileTouched = recentChanges.length > 0
+        ? recentChanges[recentChanges.length - 1].file_path
+        : null;
+
+      const fromAgent = (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown";
+
+      const result = db.prepare(`
+        INSERT INTO handoffs (from_session_id, from_agent, created_at, reason, next_agent_instructions, resume_at, git_branch, open_task_ids, last_file_touched)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        sessionId,
+        fromAgent,
+        Date.now(),
+        reason,
+        next_agent_instructions ?? null,
+        resume_at ?? null,
+        gitBranch,
+        openTaskIds.length > 0 ? JSON.stringify(openTaskIds) : null,
+        lastFileTouched
+      );
+
+      const handoffId = result.lastInsertRowid as number;
+
+      return success({
+        handoff_id: handoffId,
+        message: `Handoff #${handoffId} created. The next agent will see this in start_session as handoff_pending.`,
+        snapshot: {
+          from_agent: fromAgent,
+          git_branch: gitBranch,
+          open_task_count: openTaskIds.length,
+          last_file_touched: lastFileTouched,
+          resume_at: resume_at ?? null,
+        },
+      });
+    }
+  );
+
+  // ─── ACKNOWLEDGE HANDOFF ─────────────────────────────────────────────
+  server.registerTool(
+    `${TOOL_PREFIX}_acknowledge_handoff`,
+    {
+      title: "Acknowledge Handoff",
+      description: `Mark a handoff as acknowledged after reading it in start_session. This clears it from future start_session responses so it is not surfaced again.
+
+Args:
+  - id (number): Handoff ID to acknowledge (from start_session handoff_pending.id)
+
+Returns:
+  Confirmation.`,
+      inputSchema: {
+        id: z.number().int().describe("Handoff ID to acknowledge"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ id }) => {
+      const db = getDb();
+      const repos = getRepos();
+      const sessionId = getCurrentSessionId();
+      const fromAgent = sessionId
+        ? (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown"
+        : "unknown";
+
+      const result = db.prepare(`
+        UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL
+      `).run(Date.now(), fromAgent, id);
+
+      if ((result.changes as number) === 0) {
+        return error(`Handoff #${id} not found or already acknowledged.`);
+      }
+
+      return success({ message: `Handoff #${id} acknowledged. It will no longer appear in start_session.` });
     }
   );
 }
