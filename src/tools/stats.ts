@@ -81,6 +81,8 @@ Returns:
             const lastCheck = repos.config.get(CFG_AUTO_UPDATE_LAST_CHECK) || null;
             const autoUpdateEnabled = repos.config.getBool(CFG_AUTO_UPDATE_CHECK, true);
 
+            const durationStats = repos.sessions.getDurationStats();
+
             return success({
                 server_version: SERVER_VERSION,
                 update_status: updateAvailable
@@ -103,6 +105,9 @@ Returns:
                 tasks_by_status: tasksByStatus,
                 schema_version: schemaVersion,
                 engine: "better-sqlite3 (WAL mode)",
+                avg_session_duration_minutes: durationStats.avg_minutes,
+                longest_session_minutes: durationStats.max_minutes,
+                sessions_last_7_days: durationStats.sessions_last_7_days,
             });
         }
     );

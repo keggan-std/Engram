@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, MAX_SEARCH_RESULTS } from "../constants.js";
-import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse, normalizePath } from "../utils.js";
+import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse, normalizePath, truncate } from "../utils.js";
 import { success } from "../response.js";
 import type { FileNoteRow, DecisionRow, ConventionRow, ChangeRow, ProjectSnapshot } from "../types.js";
 
@@ -138,6 +138,7 @@ Returns:
         query: z.string().min(1).describe("Search term(s)"),
         scope: z.enum(["all", "sessions", "changes", "decisions", "file_notes", "conventions", "tasks"]).default("all"),
         limit: z.number().int().min(1).max(MAX_SEARCH_RESULTS).default(20),
+        context_chars: z.number().int().min(0).max(500).default(0).describe("When > 0, each result includes a context field with a snippet of relevant text (truncated to this many chars)"),
       },
       annotations: {
         readOnlyHint: true,
@@ -146,7 +147,7 @@ Returns:
         openWorldHint: false,
       },
     },
-    async ({ query, scope, limit }) => {
+    async ({ query, scope, limit, context_chars }) => {
       const db = getDb();
       const useFts = hasFts(db);
       const oversample = Math.min(limit * 2, MAX_SEARCH_RESULTS);
@@ -284,6 +285,40 @@ Returns:
       for (const item of top) {
         if (!results[item.table]) results[item.table] = [];
         results[item.table].push(item.data);
+      }
+
+      // Enrich results with context snippet if context_chars > 0
+      if (context_chars > 0) {
+        for (const [table, items] of Object.entries(results)) {
+          results[table] = items.map((item) => {
+            const d = item as Record<string, unknown>;
+            let ctx = "";
+            if (table === "decisions") {
+              ctx = truncate(
+                String(d["decision"] ?? "") + " " + String(d["rationale"] ?? ""),
+                context_chars * 2
+              ).slice(0, context_chars);
+            } else if (table === "sessions") {
+              ctx = truncate(String(d["summary"] ?? ""), context_chars);
+            } else if (table === "tasks") {
+              ctx = truncate(
+                String(d["title"] ?? "") + " " + String(d["description"] ?? ""),
+                context_chars * 2
+              ).slice(0, context_chars);
+            } else if (table === "file_notes") {
+              ctx = truncate(
+                String(d["purpose"] ?? "") + " " + String(d["notes"] ?? ""),
+                context_chars * 2
+              ).slice(0, context_chars);
+            } else if (table === "changes") {
+              ctx = truncate(
+                String(d["description"] ?? "") + " " + String(d["diff_summary"] ?? ""),
+                context_chars * 2
+              ).slice(0, context_chars);
+            }
+            return ctx ? { ...d, context: ctx } : d;
+          });
+        }
       }
 
       return success({

@@ -348,4 +348,98 @@ Returns:
       return success({ sessions, total, has_more: offset + limit < total });
     }
   );
+
+  // -- SUGGEST COMMIT -------------------------------------------------------
+  server.registerTool(
+    `${TOOL_PREFIX}_suggest_commit`,
+    {
+      title: "Suggest Commit Message",
+      description: "Analyze changes in the current session and generate a conventional commit message.",
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async () => {
+      const sessionId = getCurrentSessionId();
+      if (!sessionId) {
+        return error("No active session. Start a session with engram_start_session first.");
+      }
+
+      const repos = getRepos();
+      const changes = repos.changes.getBySession(sessionId);
+
+      if (changes.length === 0) {
+        return success({
+          message: "No changes recorded in the current session.",
+          suggested_message: null,
+          breakdown: null,
+        });
+      }
+
+      // Group by change_type
+      const typeCounts: Record<string, number> = {};
+      for (const c of changes) {
+        typeCounts[c.change_type] = (typeCounts[c.change_type] || 0) + 1;
+      }
+
+      // Determine commit type
+      const created = typeCounts["created"] || 0;
+      const modified = typeCounts["modified"] || 0;
+      const refactored = typeCounts["refactored"] || 0;
+      const total = changes.length;
+      let commitType: string;
+      if (created > total / 2) {
+        commitType = "feat";
+      } else if (refactored > modified && refactored > created) {
+        commitType = "refactor";
+      } else if (modified > total / 2) {
+        commitType = "fix";
+      } else {
+        commitType = "chore";
+      }
+
+      // Scope: most common directory prefix among changed files
+      const dirCounts: Record<string, number> = {};
+      for (const c of changes) {
+        const parts = c.file_path.replace(/\\/g, "/").split("/");
+        if (parts.length >= 2) {
+          const scopeKey = parts.length >= 3 && parts[0] === "src"
+            ? parts[1]
+            : parts[0];
+          dirCounts[scopeKey] = (dirCounts[scopeKey] || 0) + 1;
+        }
+      }
+      const scope = Object.keys(dirCounts).sort((a, b) => dirCounts[b] - dirCounts[a])[0] || "app";
+
+      // Build body from top-5 changes
+      const top5 = changes.slice(0, 5);
+      const bodyLines = top5.map(c => {
+        const desc = truncate(c.description, 80);
+        return `- ${c.file_path}: ${desc}`;
+      });
+      if (changes.length > 5) {
+        bodyLines.push(`- ...and ${changes.length - 5} more change(s)`);
+      }
+
+      const subject = `${commitType}(${scope}): summarize changes from session #${sessionId}`;
+      const body = bodyLines.join("\n");
+      const suggestedMessage = `${subject}
+
+${body}`;
+
+      return success({
+        suggested_message: suggestedMessage,
+        breakdown: {
+          type: commitType,
+          scope,
+          files_changed: changes.length,
+          change_types: typeCounts,
+        },
+      });
+    }
+  );
 }

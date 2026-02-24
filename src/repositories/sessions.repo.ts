@@ -97,4 +97,28 @@ export class SessionsRepo {
             `SELECT COUNT(*) as c FROM ${table} WHERE session_id = ?`
         ).get(sessionId) as { c: number }).c;
     }
+    getDurationStats(): { avg_minutes: number; max_minutes: number; sessions_last_7_days: number } {
+        const durRow = this.db.prepare(
+            `SELECT ROUND(AVG((julianday(ended_at) - julianday(started_at)) * 1440), 1) as avg_minutes,
+                    ROUND(MAX((julianday(ended_at) - julianday(started_at)) * 1440), 1) as max_minutes
+             FROM sessions WHERE ended_at IS NOT NULL`
+        ).get() as { avg_minutes: number | null; max_minutes: number | null } | undefined;
+
+        const recentRow = this.db.prepare(
+            "SELECT COUNT(*) as c FROM sessions WHERE started_at > datetime('now', '-7 days')"
+        ).get() as { c: number } | undefined;
+
+        return {
+            avg_minutes: durRow?.avg_minutes ?? 0,
+            max_minutes: durRow?.max_minutes ?? 0,
+            sessions_last_7_days: recentRow?.c ?? 0,
+        };
+    }
+
+    getById(id: number): import("../types.js").SessionRow | null {
+        const row = this.db.prepare(
+            "SELECT * FROM sessions WHERE id = ?"
+        ).get(id) as import("../types.js").SessionRow | undefined;
+        return row ?? null;
+    }
 }
