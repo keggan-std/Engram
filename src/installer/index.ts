@@ -73,13 +73,15 @@ Usage:
   npx -y engram-mcp-server install [options]
 
 Options:
-  --ide <name>    Install for a specific IDE
-  --yes, -y       Non-interactive mode (requires --ide if no IDE is detected)
-  --remove        Remove Engram from an IDE config (requires --ide)
-  --list          Show all supported IDEs and their detection/install status
-  --check         Show installed version per IDE and latest available on npm
-  --version       Show version number
-  --help, -h      Show this help
+  --ide <name>      Install for a specific IDE
+  --yes, -y         Non-interactive mode (requires --ide if no IDE is detected)
+  --remove          Remove Engram from an IDE config (requires --ide)
+  --list            Show all supported IDEs and their detection/install status
+  --check           Show installed version per IDE and latest available on npm
+  --install-hooks   Install git post-commit hook to auto-record changes (run in your git repo)
+  --remove-hooks    Remove the Engram git hook from the current repo
+  --version         Show version number
+  --help, -h        Show this help
 
 Supported IDEs:
   ${ideNames}
@@ -202,6 +204,45 @@ Examples:
 
         console.log(`  To update: npx -y engram-mcp-server install`);
         console.log(`  Releases : https://github.com/keggan-std/Engram/releases\n`);
+        process.exit(0);
+    }
+
+    // ─── --install-hooks / --remove-hooks ────────────────────────────
+    if (args.includes("--install-hooks")) {
+        const hookDir = path.join(process.cwd(), ".git", "hooks");
+        if (!fs.existsSync(hookDir)) {
+            console.error("❌ No .git/hooks directory found. Is this a git repository?");
+            console.error("   Run this command from the root of your git repository.");
+            process.exit(1);
+        }
+        const hookPath = path.join(hookDir, "post-commit");
+        const hookScript = [
+            "#!/bin/bash",
+            "# Engram auto-recording hook — installed by engram install --install-hooks",
+            "# Automatically records changed files to Engram memory after each commit.",
+            "npx -y engram-mcp-server record-commit 2>/dev/null || true",
+            "",
+        ].join("\n");
+        fs.writeFileSync(hookPath, hookScript, { encoding: "utf-8", mode: 0o755 });
+        console.log(`✅ Engram git hook installed at ${hookPath}`);
+        console.log("   After each commit, Engram will automatically record the changed files.");
+        console.log("   To remove it later: engram install --remove-hooks");
+        process.exit(0);
+    }
+
+    if (args.includes("--remove-hooks")) {
+        const hookPath = path.join(process.cwd(), ".git", "hooks", "post-commit");
+        if (!fs.existsSync(hookPath)) {
+            console.log("ℹ️  No post-commit hook found at .git/hooks/post-commit");
+            process.exit(0);
+        }
+        const content = fs.readFileSync(hookPath, "utf-8");
+        if (!content.includes("engram-mcp-server")) {
+            console.log("ℹ️  The post-commit hook was not installed by Engram. Not removing it.");
+            process.exit(0);
+        }
+        fs.unlinkSync(hookPath);
+        console.log("✅ Engram git hook removed from .git/hooks/post-commit");
         process.exit(0);
     }
 
