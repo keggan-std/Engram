@@ -1,3 +1,147 @@
+# v1.6.0 — Agent Safety, Session Handoffs, Knowledge Graph & Diagnostics
+
+**Engram v1.6.0** delivers six feature tracks developed in parallel, focused on making multi-agent workflows safer, making cross-session context transfers seamless, and giving agents deeper visibility into what they and their peers are doing.
+
+Seven feature branches were developed and merged into `develop`:
+
+---
+
+## Breaking Changes
+
+None. v1.6.0 is fully backwards-compatible. All existing tool calls, IDE configs, and databases continue to work unchanged. The schema auto-migrates from V6 through V7–V11 on first startup.
+
+---
+
+## F1/F2 — Agent Safety (`feature/v1.6-agent-safety`)
+
+### File Locking
+
+Two new tools prevent concurrent write conflicts between parallel agents:
+
+- **`engram_lock_file`** — Acquires an exclusive write lock on a file with a reason and optional expiry. Fails immediately if another agent holds the lock, returning who holds it.
+- **`engram_unlock_file`** — Releases the lock. Locks auto-expire after 30 minutes (configurable via `FILE_LOCK_DEFAULT_TIMEOUT_MINUTES`).
+- **`engram_get_file_notes`** (updated) — Now surfaces `lock_status` for every file: `locked`, `expired`, or `none`. The locking agent's ID is included so other agents know whom to coordinate with.
+
+### Pending Work Intent
+
+- **`engram_begin_work`** — Record your intent before touching a file (agent ID, description, file list). Stored in a new `pending_work` table.
+- **`engram_end_work`** — Mark the intent complete or cancelled.
+- **`engram_start_session`** (updated) — Now surfaces `abandoned_work`: any `pending_work` records left open when a session ended unexpectedly. Automatically marks old items as `abandoned` so new sessions know what was interrupted.
+
+Schema change: V7 adds `file_locks` and `pending_work` tables.
+
+---
+
+## F3 — Context Pressure Detection (`feature/v1.6-context-pressure`)
+
+`engram_check_events` now includes a `context_pressure` event type with three severity levels:
+
+| Level | Threshold | Message |
+|-------|-----------|---------|
+| `notice` | ≥ 50% | Context filling — save progress soon |
+| `warning` | ≥ 70% | Context > 70% — consider ending session |
+| `urgent` | ≥ 85% | Context critical — end session now |
+
+Thresholds are stored in `config` and adjustable via `engram_config`. Byte estimates are tracked per-session in a new `session_bytes` table (V8).
+
+---
+
+## F4/F8 — Knowledge Graph Enhancements (`feature/v1.6-knowledge-graph`)
+
+### Branch-Aware File Notes (F4)
+
+`engram_set_file_notes` now captures the current `git_branch` at write time. On read, `engram_get_file_notes` detects if the stored branch differs from the current branch and returns a `branch_warning` field:
+
+```json
+{
+  "branch_warning": "Notes written on 'main' — you are on 'feature/auth'. File may differ."
+}
+```
+
+Schema change: V9 adds `git_branch TEXT` column to `file_notes`.
+
+### Decision Dependency Chains (F8)
+
+`engram_record_decision` accepts a new optional `depends_on` field — an array of decision IDs that must be in place for this decision to be valid. `engram_get_decisions` returns the dependency chain so agents can reason about which decisions block others.
+
+Schema change: V9 adds `depends_on TEXT` column to `decisions`.
+
+---
+
+## F6 — Session Handoffs (`feature/v1.6-session-handoff`)
+
+Two new tools enable graceful agent-to-agent context transfers when approaching context limits:
+
+- **`engram_handoff`** — The outgoing agent records a structured handoff packet: reason, instructions for the next agent, which tasks are open, the last file touched, and the current git branch. All context is auto-captured.
+- **`engram_acknowledge_handoff`** — The incoming agent marks the handoff read, clearing it from future `start_session` responses.
+
+`engram_start_session` (updated) — Returns `handoff_pending` in all verbosity modes if an unacknowledged handoff exists. The message includes the originating agent and a direct call to acknowledge.
+
+Schema change: V10 adds `handoffs` table.
+
+---
+
+## Q1/Q3/Q4/Q5 — Quick Wins (`feature/v1.6-quick-wins`)
+
+Four targeted improvements:
+
+**Q1 — Search Confidence Enrichment:** `engram_search` results that include `file_notes` now carry per-result `confidence` levels (`high`, `medium`, `stale`, `unknown`) matching the per-file staleness detection already in `engram_get_file_notes`.
+
+**Q3 — Per-Agent Metrics in Stats:** `engram_stats` now returns an `agents` array with per-agent session counts, changes recorded, decisions made, and last-active timestamp — useful for auditing which agent has been most productive.
+
+**Q4 — Unclosed Task Warning in End Session:** `engram_end_session` now warns if the ending agent has claimed tasks that are still open, listing each by ID and title. The session closes normally — the warning is surfaced in the response for the agent to act on.
+
+**Q5 — Suggested Focus:** `engram_start_session` now returns `suggested_focus` when no explicit `focus` parameter was provided. The suggestion is derived from: the most recently-touched file's parent directory, the highest-priority task title, and the most recent decision — whichever is most informative. Agents can pass this back as `focus` on the next call.
+
+---
+
+## F7 — Git Hook Auto-Recording (`feature/v1.6-automation`)
+
+The installer now supports automatic commit recording via git hooks:
+
+```bash
+npx -y engram-mcp-server install --install-hooks
+npx -y engram-mcp-server install --remove-hooks
+```
+
+`--install-hooks` writes a `post-commit` hook to `.git/hooks/` that runs `engram record-commit` after every commit. The new `record-commit` CLI command reads the last commit's changed files from `git show --name-only` and records them to the `changes` table automatically — no agent action required.
+
+```bash
+# Also available as a standalone command:
+npx -y engram-mcp-server record-commit
+```
+
+---
+
+## F10 — Session Replay & Diagnostics (`feature/v1.6-diagnostics`)
+
+### Tool Call Log
+
+Every MCP tool invocation is now logged to a new `tool_call_log` table (V11). The log captures session ID, agent ID, tool name, timestamp, outcome (`success`/`error`), and optional notes.
+
+### `engram_replay`
+
+A new tool reconstructs the complete timeline of a session in chronological order, interleaving:
+- Tool calls from `tool_call_log`
+- Changes from `changes`
+- Decisions from `decisions`
+- Tasks created/updated
+- Milestones
+
+Useful for post-session audits, debugging unexpected agent behaviour, and handoff documentation.
+
+```js
+engram_replay({ session_id: 14, limit: 50 })
+```
+
+Schema change: V11 adds `tool_call_log` table.
+
+---
+
+> Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence. [Full notes below →](#v150--multi-agent-coordination-trustworthy-context--knowledge-intelligence)
+
+---
+
 # v1.5.0 — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence
 
 **Engram v1.5.0** is the biggest feature release since v1.0. It transforms Engram from a single-agent memory store into a full **multi-agent coordination platform** — while simultaneously making every individual agent more trustworthy, context-efficient, and self-sufficient.

@@ -20,7 +20,7 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.5.0](#-whats-new-in-v150)
+- [✨ What's New in v1.6.0](#-whats-new-in-v160)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
@@ -52,27 +52,32 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ---
 
-## ✨ What's New in v1.5.0
+## ✨ What's New in v1.6.0
 
-**v1.5.0** is a major feature release available on the `develop` branch, delivering four significant tracks of new capability:
+**v1.6.0** is a major feature release delivering seven capability tracks focused on agent safety, seamless handoffs, deeper memory intelligence, and session diagnostics.
 
-### 🔐 Trustworthy Context
-File notes now store `file_mtime` at write time and are validated against the actual filesystem on every read. Each note returns a `confidence` level — `high`, `medium`, `stale`, or `unknown` — so agents know when stored knowledge is still valid versus when a file has changed significantly enough to warrant re-reading.
+### 🔒 Agent Safety — File Locking & Pending Work
+Two new tools prevent concurrent write conflicts between parallel agents: `engram_lock_file` and `engram_unlock_file`. Locks auto-expire after 30 minutes and are surfaced in `engram_get_file_notes` via a `lock_status` field. A companion pair — `engram_begin_work` / `engram_end_work` — lets agents declare intent before touching a file. Abandoned work from crashed sessions surfaces in `engram_start_session` as `abandoned_work`.
 
-### 🤖 Multi-Agent Coordination
-Multiple AI agents can now collaborate on the same project simultaneously without stepping on each other. Agents register themselves, claim tasks atomically (preventing duplicate work), release tasks, broadcast messages to the team, and check agent health. A new `engram_dump` tool lets any agent submit a block of unstructured text that Engram auto-classifies into decisions, tasks, conventions, and findings in one shot.
+### 🌡️ Context Pressure Detection
+`engram_check_events` now fires a `context_pressure` event at three thresholds (50%/70%/85%) so agents know when to wrap up and hand off before hitting the context wall.
 
-### 🌐 Global Knowledge Base
-Architectural decisions and project conventions can now be exported to a cross-project global knowledge base at `~/.engram/global.db`. Any future project can query this shared store with `engram_get_global_knowledge` — so hard-won decisions and conventions from one project inform all future work without manual copy-paste.
+### 🌿 Branch-Aware File Notes & Decision Chains
+File notes now record the git branch they were written on. On a different branch, `engram_get_file_notes` warns that notes may not reflect the current file. Decisions now support a `depends_on` field linking them to prerequisite decisions.
 
-### 🛠️ Quality of Life
-- **`engram_generate_report`**: Produces a Markdown project report (decisions, tasks, conventions, recent changes, stats) suitable for handoffs or PR descriptions.
-- **`engram_suggest_commit`**: Generates a conventional commit message from session change records.
-- **`engram_stats` enhancements**: Now includes average/max session duration and sessions-in-last-7-days.
-- **`engram_search` enrichment**: New `context_chars` parameter returns a text snippet alongside each search result for inline reading without extra fetches.
-- **Session focus**: `engram_start_session` accepts a `focus` parameter that FTS5-ranks all returned context around the topic you're about to work on.
+### 🤝 Session Handoffs
+`engram_handoff` lets an agent leaving due to context exhaustion package up everything the next agent needs: open tasks, last file touched, git branch, and instructions. `engram_acknowledge_handoff` clears it. All `start_session` verbosity modes surface `handoff_pending` when a handoff is waiting.
 
-> Previous release: **v1.4.1** — Installer bug fixes, macOS path fixes, Visual Studio config key fix. [Full notes →](RELEASE_NOTES.md)
+### 💡 Smart Start Session (suggested_focus & more)
+`engram_start_session` now suggests a `suggested_focus` automatically when none is provided — derived from the most recent file change, highest-priority task, and latest decision. It also warns on abandoned_work and handoff_pending in a unified message per verbosity mode.
+
+### 🔗 Git Hook Auto-Recording
+`engram install --install-hooks` writes a `post-commit` git hook that automatically calls `engram record-commit` after every commit — recording changed files to Engram without any agent action.
+
+### 🎬 Session Replay & Diagnostics
+Every MCP tool call is logged to a new `tool_call_log` table. The new `engram_replay` tool reconstructs the complete chronological timeline of any session: tool calls, changes, decisions, and tasks interleaved by timestamp.
+
+> Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence. [Full release notes →](RELEASE_NOTES.md)
 
 ---
 
@@ -260,19 +265,23 @@ In the extension settings → MCP Servers:
 
 ## Features
 
-- 🧠 **Session Continuity:** Each session automatically receives the previous session's summary, changes, decisions, and full project context. Use the `focus` parameter to FTS5-rank all context around the topic you're about to work on.
-- 🔐 **Trustworthy Context:** File notes track `file_mtime` and return a `confidence` level (`high`, `medium`, `stale`, `unknown`) so agents know when stored knowledge is still valid.
+- 🧠 **Session Continuity:** Each session automatically receives the previous session's summary, changes, decisions, and full project context. Use the `focus` parameter to FTS5-rank all context around the topic you're about to work on. `suggested_focus` is returned automatically when no focus is provided.
+- 🔐 **Trustworthy Context:** File notes track `file_mtime` and `git_branch` at write time. Returns `confidence` (`high`, `medium`, `stale`, `unknown`) and a `branch_warning` when the current branch differs from when notes were stored.
+- 🔒 **Agent Safety:** `engram_lock_file` / `engram_unlock_file` prevent concurrent write conflicts. `engram_begin_work` / `engram_end_work` record intent before touching files. Abandoned work from prior sessions surfaces in `start_session`.
 - 🤖 **Multi-Agent Coordination:** Multiple agents can collaborate simultaneously. Atomic task claiming prevents duplicate work. Agent heartbeat registry tracks who is alive and idle.
+- 🤝 **Session Handoffs:** `engram_handoff` packages all necessary context (tasks, files, git branch, instructions) for graceful agent-to-agent transfers at context limits. `engram_acknowledge_handoff` clears the pending handoff.
+- 🌡️ **Context Pressure Detection:** `engram_check_events` fires at 50%/70%/85% context fill — giving agents advance warning before hitting the context wall.
 - 🌐 **Global Knowledge Base:** Export decisions and conventions to a shared cross-project store at `~/.engram/global.db`. Query it from any project with `engram_get_global_knowledge`.
 - ⏰ **Scheduled Events:** Postpone tasks or set reminders. Triggers include `next_session`, `datetime`, or `task_complete`.
-- 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history.
-- 🏗️ **Architectural Decision Records:** Logs design decisions with rationale, affected files, and tags forever. FTS5 deduplication warns on similar existing decisions.
-- 📁 **File Intelligence:** Stores per-file notes (purpose, deps, layer, complexity) preventing endless re-reads.
+- 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history. Git hook integration (`--install-hooks`) auto-records commits.
+- 🏗️ **Architectural Decision Records:** Logs design decisions with rationale, affected files, and tags forever. `depends_on` field models prerequisite decision chains. FTS5 deduplication warns on similar existing decisions.
+- 📁 **File Intelligence:** Stores per-file notes (purpose, deps, layer, complexity) with branch-aware staleness detection preventing endless re-reads.
 - 📐 **Convention Tracking:** Records and enforces project conventions (naming, testing, styling).
-- ✅ **Task Management:** Work items persist across sessions with priority, status, and multi-agent claiming.
-- 🔍 **Precise Full-Text Search (FTS5):** High-performance ranked search across all memory, with `context_chars` enrichment for inline snippets.
+- ✅ **Task Management:** Work items persist across sessions with priority, status, and multi-agent claiming. End-session warns on unclosed claimed tasks.
+- 🔍 **Precise Full-Text Search (FTS5):** High-performance ranked search across all memory, with `context_chars` enrichment and per-result `confidence` levels for file note results.
+- 🎬 **Session Replay:** `engram_replay` reconstructs the complete tool-call + change + decision timeline for any session via the new `tool_call_log` table.
 - 💾 **Backup & Restore:** `engram_backup` creates timestamped SQLite copies to any path (like Dropbox/OneDrive) for cross-machine portability.
-- 📊 **Reports & Commit Suggestions:** Generate Markdown project reports and conventional commit messages from session data.
+- 📊 **Reports, Stats & Commit Suggestions:** Generate Markdown project reports, per-agent activity metrics, and conventional commit messages from session data.
 
 ---
 
@@ -315,19 +324,33 @@ graph TB
 
 ## Tools Reference
 
-Engram exposes 40+ tools. Here are the highlights:
+Engram exposes 50+ tools. Here are the highlights:
 
 ### Core Memory Tools
 | Tool | Purpose |
 |------|---------|
-| `engram_start_session` | Begin a session. Pass `focus` to FTS5-rank context around your current topic. |
-| `engram_end_session` | End session, storing a summary for the next agent or session. |
+| `engram_start_session` | Begin a session. Pass `focus` to FTS5-rank context. Returns `suggested_focus`, `abandoned_work`, `handoff_pending`. |
+| `engram_end_session` | End session, storing a summary. Warns on unclosed claimed tasks. |
 | `engram_record_change` | Record file changes with descriptions, impact scope, and diff summaries. |
-| `engram_set_file_notes` | Store intelligence about a file. Returns `confidence` on subsequent reads. |
-| `engram_get_file_notes` | Retrieve notes with staleness detection — check before opening any file. |
-| `engram_record_decision` | Log an architectural decision. Use `export_global` to share cross-project. |
+| `engram_set_file_notes` | Store intelligence about a file (purpose, deps, layer, complexity). Captures `file_mtime` and `git_branch`. |
+| `engram_get_file_notes` | Retrieve notes with staleness detection (`confidence`) and `branch_warning` if branch differs. Also returns `lock_status`. |
+| `engram_record_decision` | Log an architectural decision with optional `depends_on` dependency chain. |
 | `engram_record_decisions_batch` | Record multiple decisions in a single atomic call. |
 | `engram_add_convention` | Record a project convention. Use `export_global` to share cross-project. |
+
+### Agent Safety
+| Tool | Purpose |
+|------|---------|
+| `engram_lock_file` | Acquire an exclusive write lock on a file. Returns lock status and holder if already locked. |
+| `engram_unlock_file` | Release a previously acquired lock. |
+| `engram_begin_work` | Record intent to work on a set of files before touching them. |
+| `engram_end_work` | Mark work intent complete or cancelled. |
+
+### Session Handoffs
+| Tool | Purpose |
+|------|---------|
+| `engram_handoff` | Package context (tasks, last file, git branch, instructions) for the next agent when approaching context limits. |
+| `engram_acknowledge_handoff` | Mark a pending handoff as read, clearing it from future `start_session` responses. |
 
 ### Tasks & Scheduling
 | Tool | Purpose |
@@ -336,7 +359,7 @@ Engram exposes 40+ tools. Here are the highlights:
 | `engram_update_task` | Update task status, description, or mark complete. |
 | `engram_get_tasks` | Retrieve tasks filtered by status, priority, or tags. |
 | `engram_schedule_event` | Schedule deferred work with a trigger (`next_session`, `datetime`, etc). |
-| `engram_check_events` | Mid-session check for triggered events that require attention. |
+| `engram_check_events` | Mid-session check for triggered events. Includes `context_pressure` at 50%/70%/85%. |
 
 ### Multi-Agent Coordination
 | Tool | Purpose |
@@ -351,20 +374,21 @@ Engram exposes 40+ tools. Here are the highlights:
 ### Intelligence & Search
 | Tool | Purpose |
 |------|---------|
-| `engram_search` | FTS5-ranked full-text search. Use `context_chars` for inline snippets. |
+| `engram_search` | FTS5-ranked full-text search. File note results include `confidence` levels. |
 | `engram_scan_project` | Scan and cache project structure automatically. |
-| `engram_get_decisions` | Retrieve decisions filtered by status, tag, or affected file. |
+| `engram_get_decisions` | Retrieve decisions filtered by status, tag, affected file, or dependency chain. |
 | `engram_get_conventions` | Retrieve active conventions, optionally filtered by category. |
 | `engram_get_global_knowledge` | Query the cross-project global KB at `~/.engram/global.db`. |
 | `engram_get_dependency_map` | Get the file dependency graph for a module. |
 | `engram_what_changed` | Summarise all changes since a given timestamp or session. |
+| `engram_replay` | Reconstruct the complete tool-call + change + decision timeline for any session. |
 
 ### Utilities & Reports
 | Tool | Purpose |
 |------|---------|
 | `engram_generate_report` | Generate a Markdown project report (handoffs, PR descriptions). |
 | `engram_suggest_commit` | Generate a conventional commit message from session changes. |
-| `engram_stats` | Project stats including session duration averages and activity metrics. |
+| `engram_stats` | Project stats including per-agent metrics (sessions, changes, decisions per agent). |
 | `engram_backup` | Create a database backup to any synced folder. |
 | `engram_restore` | Restore from a previous backup. |
 | `engram_compact` | Compress old session data to reduce database size. |
@@ -399,7 +423,10 @@ Act on everything it returns:
 | `active_decisions` | Binding. Follow them; do not re-debate. Supersede with `engram_record_decision` if they must change. |
 | `active_conventions` | Enforce in every file you touch this session. |
 | `open_tasks` | Pending work items. Ask the user which to focus on if unclear. |
-| `pending_events` | Scheduled reminders or deferred work now triggered. Act on them. |
+| `abandoned_work` | Work items left open by a previous session that ended unexpectedly. Review and resume or close. |
+| `handoff_pending` | A structured handoff from the previous agent. Read instructions, then call `engram_acknowledge_handoff`. |
+| `suggested_focus` | Auto-derived topic hint. Pass as `focus` on the next `start_session` call for filtered context. |
+| `triggered_events` | Scheduled reminders or deferred work now triggered. Act on them. |
 | `update_available` | Tell the user: *"Engram v{available_version} is available (you have {installed_version}). Changes: {changelog}. Update, skip, or postpone?"* |
 
 If `update_available` is set, respond to the user's choice:
