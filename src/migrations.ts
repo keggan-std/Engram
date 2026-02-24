@@ -374,6 +374,25 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V9: Knowledge Graph Enhancements ─────────────────────────────
+  {
+    version: 9,
+    description: "Knowledge graph — git_branch in file_notes for branch-aware staleness; depends_on in decisions for dependency chains",
+    up: (db) => {
+      db.exec(`
+        -- F4: store the git branch when file notes were written.
+        -- On retrieval, if current branch != stored branch, a branch_warning is returned.
+        ALTER TABLE file_notes ADD COLUMN git_branch TEXT;
+
+        -- F8: decisions can declare they depend on other decisions.
+        -- When a parent decision is superseded, dependents are returned as review_required[].
+        ALTER TABLE decisions ADD COLUMN depends_on TEXT;
+        CREATE INDEX IF NOT EXISTS idx_decisions_depends ON decisions(depends_on)
+          WHERE depends_on IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

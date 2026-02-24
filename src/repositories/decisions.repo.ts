@@ -16,19 +16,36 @@ export class DecisionsRepo {
         affectedFiles?: string[] | null,
         tags?: string[] | null,
         status: string = "active",
-        supersedes?: number | null
+        supersedes?: number | null,
+        dependsOn?: number[] | null
     ): number {
         const result = this.db.prepare(
-            "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by, depends_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ).run(
             sessionId, timestamp, decision,
             rationale || null,
             affectedFiles ? JSON.stringify(affectedFiles) : null,
             tags ? JSON.stringify(tags) : null,
             status,
-            supersedes || null
+            supersedes || null,
+            dependsOn && dependsOn.length > 0 ? JSON.stringify(dependsOn) : null
         );
         return result.lastInsertRowid as number;
+    }
+
+    /** Returns all active decisions that list the given ID in their depends_on array. */
+    getDependents(decisionId: number): DecisionRow[] {
+        try {
+            return this.db.prepare(
+                `SELECT * FROM decisions
+                 WHERE status = 'active'
+                   AND depends_on IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM json_each(depends_on) WHERE value = ?)
+                 ORDER BY timestamp DESC`
+            ).all(decisionId) as DecisionRow[];
+        } catch {
+            return [];
+        }
     }
 
     supersede(oldId: number, newId: number): void {

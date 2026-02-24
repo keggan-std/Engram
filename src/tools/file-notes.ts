@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, FILE_MTIME_STALE_HOURS } from "../constants.js";
-import { normalizePath, getFileMtime, coerceStringArray } from "../utils.js";
+import { normalizePath, getFileMtime, coerceStringArray, gitCommand } from "../utils.js";
 import { success } from "../response.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness } from "../types.js";
 
@@ -85,15 +85,20 @@ Returns:
             const fp = normalizePath(file_path);
 
             // Capture the file's actual mtime so future retrievals can detect staleness
-            const file_mtime = getFileMtime(fp, getProjectRoot());
+            const projectRoot = getProjectRoot();
+            const file_mtime = getFileMtime(fp, projectRoot);
+
+            // F4: capture current git branch for branch-aware staleness detection
+            const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
 
             repos.fileNotes.upsert(fp, timestamp, sessionId, {
-                purpose, dependencies, dependents, layer, complexity, notes, file_mtime,
+                purpose, dependencies, dependents, layer, complexity, notes, file_mtime, git_branch,
             });
 
             return success({
                 message: `File notes saved for ${fp}.`,
                 file_mtime_captured: file_mtime !== null,
+                git_branch_captured: git_branch,
             });
         }
     );
@@ -141,10 +146,12 @@ Returns:
             const sessionId = getCurrentSessionId();
             const projectRoot = getProjectRoot();
 
-            // Enrich each entry with the file's actual mtime before saving
+            // Enrich each entry with the file's actual mtime and current git branch before saving
+            const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
             const enrichedFiles = files.map(f => ({
                 ...f,
                 file_mtime: getFileMtime(normalizePath(f.file_path), projectRoot),
+                git_branch,
             }));
 
             const count = repos.fileNotes.upsertBatch(enrichedFiles, timestamp, sessionId);
@@ -185,11 +192,27 @@ Returns:
             const repos = getRepos();
             const projectRoot = getProjectRoot();
 
+            // F4: get current branch for branch-aware staleness check
+            const currentBranch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+
             if (file_path) {
-                const note = repos.fileNotes.getByPath(file_path);
+                const fp = normalizePath(file_path);
+                const note = repos.fileNotes.getByPath(fp);
                 if (!note) return success({ message: "No notes found for this file." });
+
                 const enriched = withStaleness(note, projectRoot);
-                return success(enriched as unknown as Record<string, unknown>);
+
+                // F4: warn if note was written on a different branch
+                const branch_warning = ((note as unknown as Record<string, unknown>)).git_branch &&
+                    currentBranch &&
+                    ((note as unknown as Record<string, unknown>)).git_branch !== currentBranch
+                    ? `Note was written on branch "${((note as unknown as Record<string, unknown>)).git_branch}". Current branch is "${currentBranch}". File content may differ.`
+                    : undefined;
+
+                return success({
+                    ...enriched as unknown as Record<string, unknown>,
+                    branch_warning,
+                });
             }
 
             const notes = repos.fileNotes.getFiltered({ layer, complexity });
@@ -203,3 +226,4 @@ Returns:
         }
     );
 }
+
