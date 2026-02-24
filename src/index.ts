@@ -39,6 +39,78 @@ import { registerCoordinationTools } from "./tools/coordination.js";
 import { registerKnowledgeTools } from "./tools/knowledge.js";
 import { registerReportTools } from "./tools/report.js";
 
+// ─── F7: record-commit — git hook handler ────────────────────────────
+// Called by the Engram post-commit git hook after each git commit.
+// Reads the last commit's changed files and records them in Engram's DB
+// so the history stays complete even when an agent doesn't call record_change.
+
+async function runRecordCommit(): Promise<void> {
+  const { execSync } = await import("child_process");
+  const projectRoot = findProjectRoot();
+
+  try {
+    await initDatabase(projectRoot);
+    const { getDb } = await import("./database.js");
+    const db = getDb();
+
+    // Get changed files from the last commit
+    const changedFilesRaw = execSync(
+      "git show --name-only --format= HEAD",
+      { cwd: projectRoot, encoding: "utf-8" }
+    ).trim();
+    const changedFiles = changedFilesRaw.split("\n").map(f => f.trim()).filter(Boolean);
+
+    if (changedFiles.length === 0) {
+      log.info("record-commit: no files changed in last commit");
+      return;
+    }
+
+    // Get commit message
+    const commitMsg = execSync("git log -1 --format=%B HEAD", {
+      cwd: projectRoot, encoding: "utf-8",
+    }).trim().split("\n")[0] ?? "git commit";
+
+    // Get commit hash (short)
+    const commitHash = execSync("git rev-parse --short HEAD", {
+      cwd: projectRoot, encoding: "utf-8",
+    }).trim();
+
+    const timestamp = new Date().toISOString();
+
+    // Find the most recent open session, if any
+    let sessionId: number | null = null;
+    try {
+      const sessionRow = db.prepare(
+        "SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+      ).get() as { id: number } | undefined;
+      sessionId = sessionRow?.id ?? null;
+    } catch { /* sessions table may not exist */ }
+
+    const stmt = db.prepare(`
+      INSERT INTO changes (session_id, timestamp, file_path, change_type, description, diff_summary, impact_scope)
+      VALUES (?, ?, ?, 'modified', ?, ?, 'local')
+    `);
+
+    const insertAll = db.transaction(() => {
+      for (const file of changedFiles) {
+        stmt.run(
+          sessionId,
+          timestamp,
+          file,
+          `git commit ${commitHash}: ${commitMsg}`,
+          `Auto-recorded via Engram git post-commit hook`
+        );
+      }
+    });
+
+    insertAll();
+    log.info(`record-commit: recorded ${changedFiles.length} file(s) from commit ${commitHash}`);
+  } catch (e) {
+    // Always exit 0 from a git hook — never block commits
+    log.warn(`record-commit: ${e}`);
+  }
+}
+
 // ─── Initialize ───────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -53,9 +125,17 @@ async function main(): Promise<void> {
     args.includes("--help") ||
     args.includes("-h") ||
     args.includes("--version") ||
-    args.includes("-v")
+    args.includes("-v") ||
+    args.includes("--install-hooks") ||
+    args.includes("--remove-hooks")
   ) {
     runInstaller(args);
+    return;
+  }
+
+  // ─── record-commit (git hook handler) ──────────────────────────────
+  if (args.includes("record-commit")) {
+    await runRecordCommit();
     return;
   }
 
