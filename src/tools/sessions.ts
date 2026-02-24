@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb } from "../database.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall } from "../database.js";
 import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -152,7 +152,6 @@ Returns:
       let abandonedWork: PendingWorkRow[] = [];
       try {
         // Mark any pending work from closed sessions as abandoned
-        const { getDb } = await import("../database.js");
         const db = getDb();
         if (lastSession?.id) {
           db.prepare(
@@ -164,7 +163,7 @@ Returns:
           "SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' ORDER BY started_at DESC LIMIT 5"
         ).all() as PendingWorkRow[];
       } catch { /* best effort — table may not exist */ }
-      
+
       // ─── F6: Check for unacknowledged handoff from a previous agent ──
       interface HandoffRow { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null; open_task_ids: string | null; last_file_touched: string | null; created_at: number; }
       let handoffPending: HandoffRow | null = null;
@@ -200,6 +199,9 @@ Returns:
           suggestedFocus = candidates[0];
         }
       }
+
+      // F10: Log this tool invocation for session replay
+      logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity}`);
 
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
@@ -386,6 +388,9 @@ Returns:
       const changeCount = repos.changes.countBySession(sessionId);
       const decisionCount = repos.sessions.countBySession(sessionId, "decisions");
       const tasksDone = repos.tasks.countDoneInSession(sessionId);
+
+      // F10: Log before closing so session_id is still valid
+      logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone}`);
 
       // Close the session
       repos.sessions.close(sessionId, timestamp, summary, tags);

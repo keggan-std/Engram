@@ -195,3 +195,27 @@ export function forceFlush(): void {
   const db = getDb();
   db.pragma("wal_checkpoint(TRUNCATE)");
 }
+
+/**
+ * F10: Log a tool invocation for session replay diagnostics.
+ * Silent no-op if the tool_call_log table doesn't exist (older schemas).
+ */
+export function logToolCall(
+  toolName: string,
+  outcome: "success" | "error" = "success",
+  notes?: string
+): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      getCurrentSessionId(),
+      null,
+      toolName,
+      Date.now(),
+      outcome,
+      notes ?? null
+    );
+  } catch { /* table may not exist on older schemas — always silent */ }
+}

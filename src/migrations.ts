@@ -443,7 +443,7 @@ const migrations: Migration[] = [
     },
   },
 
-    // ─── V10: Structured Agent Handoffs ───────────────────────────────
+  // ─── V10: Structured Agent Handoffs ───────────────────────────────
   {
     version: 10,
     description: "Session handoffs — handoffs table for graceful context-exhaustion transfers between agents",
@@ -467,6 +467,30 @@ const migrations: Migration[] = [
         );
         CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(from_session_id);
         CREATE INDEX IF NOT EXISTS idx_handoffs_acked   ON handoffs(acknowledged_at) WHERE acknowledged_at IS NULL;
+      `);
+    },
+  },
+
+  // ─── V11: Tool Call Log (Session Replay / Diagnostics) ────────────
+  {
+    version: 11,
+    description: "Tool call log — records every MCP tool invocation for session replay and audit",
+    up: (db) => {
+      db.exec(`
+        -- Log of every MCP tool invocation for diagnostic replay.
+        -- Populated by tools that call logToolCall(); passive tools may skip logging.
+        CREATE TABLE IF NOT EXISTS tool_call_log (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id  INTEGER,
+          agent_id    TEXT,
+          tool_name   TEXT NOT NULL,
+          called_at   INTEGER NOT NULL,
+          input_hash  TEXT,
+          outcome     TEXT NOT NULL DEFAULT 'success',
+          notes       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_call_log(session_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_time    ON tool_call_log(called_at);
       `);
     },
   },
