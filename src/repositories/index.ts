@@ -12,6 +12,8 @@ export { MilestonesRepo } from "./milestones.repo.js";
 export { EventsRepo } from "./events.repo.js";
 export { ConfigRepo } from "./config.repo.js";
 export { SnapshotRepo } from "./snapshot.repo.js";
+export { AgentsRepo } from "./agents.repo.js";
+export { BroadcastsRepo } from "./broadcasts.repo.js";
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import { SessionsRepo } from "./sessions.repo.js";
@@ -24,6 +26,8 @@ import { MilestonesRepo } from "./milestones.repo.js";
 import { EventsRepo } from "./events.repo.js";
 import { ConfigRepo } from "./config.repo.js";
 import { SnapshotRepo } from "./snapshot.repo.js";
+import { AgentsRepo } from "./agents.repo.js";
+import { BroadcastsRepo } from "./broadcasts.repo.js";
 
 export interface Repositories {
     sessions: SessionsRepo;
@@ -36,6 +40,8 @@ export interface Repositories {
     events: EventsRepo;
     config: ConfigRepo;
     snapshot: SnapshotRepo;
+    agents: AgentsRepo;
+    broadcasts: BroadcastsRepo;
 }
 
 /**
@@ -53,5 +59,7 @@ export function createRepositories(db: DatabaseType): Repositories {
         events: new EventsRepo(db),
         config: new ConfigRepo(db),
         snapshot: new SnapshotRepo(db),
+        agents: new AgentsRepo(db),
+        broadcasts: new BroadcastsRepo(db),
     };
 }

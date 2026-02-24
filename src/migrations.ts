@@ -339,6 +339,41 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V6: Multi-Agent Coordination ─────────────────────────────────
+  {
+    version: 6,
+    description: "Multi-agent coordination — agents registry, broadcasts, task claiming",
+    up: (db) => {
+      db.exec(`
+        -- Agent registry: tracks active agents, their status, and current task
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          last_seen INTEGER NOT NULL,
+          current_task_id INTEGER,
+          status TEXT DEFAULT 'idle'
+        );
+        CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+
+        -- Broadcast messages: agents can post messages readable by all other agents
+        CREATE TABLE IF NOT EXISTS broadcasts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_agent TEXT NOT NULL,
+          message TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          read_by TEXT DEFAULT '[]'
+        );
+        CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON broadcasts(created_at DESC);
+
+        -- Task claiming: add claimed_by and claimed_at to tasks for atomic ownership
+        ALTER TABLE tasks ADD COLUMN claimed_by TEXT;
+        ALTER TABLE tasks ADD COLUMN claimed_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_tasks_claimed ON tasks(claimed_by) WHERE claimed_by IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

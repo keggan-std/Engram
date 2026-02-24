@@ -82,6 +82,25 @@ export interface TaskRow {
   tags: string | null;            // JSON array
   completed_at: string | null;
   blocked_by: string | null;      // JSON array of task IDs
+  claimed_by: string | null;      // Agent ID that claimed this task
+  claimed_at: number | null;      // Unix ms when claimed
+}
+
+export interface AgentRow {
+  id: string;
+  name: string;
+  last_seen: number;              // Unix ms
+  current_task_id: number | null;
+  status: AgentStatus;
+}
+
+export interface BroadcastRow {
+  id: number;
+  from_agent: string;
+  message: string;
+  created_at: number;             // Unix ms
+  expires_at: number | null;      // Unix ms
+  read_by: string;                // JSON array of agent IDs
 }
 
 export interface SnapshotRow {
@@ -189,6 +208,12 @@ export type TaskPriority =
   | "high"
   | "medium"
   | "low";
+
+export type AgentStatus =
+  | "idle"
+  | "working"
+  | "done"
+  | "stale";
 
 export type EventTriggerType =
   | "next_session"
