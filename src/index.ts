@@ -21,23 +21,11 @@ import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer/index.js";
 
-// Tool registrations
-import { registerSessionTools } from "./tools/sessions.js";
-import { registerChangeTools } from "./tools/changes.js";
-import { registerDecisionTools } from "./tools/decisions.js";
-import { registerFileNoteTools } from "./tools/file-notes.js";
-import { registerConventionTools } from "./tools/conventions.js";
-import { registerTaskTools } from "./tools/tasks.js";
-import { registerIntelligenceTools } from "./tools/intelligence.js";
-import { registerStatsTools } from "./tools/stats.js";
-import { registerBackupTools } from "./tools/backup.js";
-import { registerMilestoneTools } from "./tools/milestones.js";
-import { registerExportImportTools } from "./tools/export-import.js";
-import { registerCompactionTools } from "./tools/compaction.js";
-import { registerSchedulerTools } from "./tools/scheduler.js";
-import { registerCoordinationTools } from "./tools/coordination.js";
-import { registerKnowledgeTools } from "./tools/knowledge.js";
-import { registerReportTools } from "./tools/report.js";
+// ─── v1.6 Lean Surface — 4 dispatcher tools ──────────────────────────────────
+import { registerSessionDispatcher } from "./tools/sessions.js";
+import { registerMemoryDispatcher } from "./tools/dispatcher-memory.js";
+import { registerAdminDispatcher } from "./tools/dispatcher-admin.js";
+import { registerFindTool } from "./tools/find.js";
 
 // ─── F7: record-commit — git hook handler ────────────────────────────
 // Called by the Engram post-commit git hook after each git commit.
@@ -155,22 +143,10 @@ async function main(): Promise<void> {
 
   // ─── Register All Tools ──────────────────────────────────────────
 
-  registerSessionTools(server);       // start_session, end_session, get_session_history
-  registerChangeTools(server);        // record_change, get_file_history
-  registerDecisionTools(server);      // record_decision, get_decisions, update_decision
-  registerFileNoteTools(server);      // set_file_notes, get_file_notes
-  registerConventionTools(server);    // add_convention, get_conventions, toggle_convention
-  registerTaskTools(server);          // create_task, update_task, get_tasks
-  registerIntelligenceTools(server);  // scan_project, search, what_changed, dependency_map, replay
-  registerStatsTools(server);         // stats
-  registerBackupTools(server);        // backup, restore, list_backups
-  registerMilestoneTools(server);     // record_milestone, get_milestones
-  registerExportImportTools(server);  // export, import
-  registerCompactionTools(server);    // compact, clear
-  registerSchedulerTools(server);     // schedule_event, get/update/acknowledge events, check_events
-  registerCoordinationTools(server);  // dump, claim_task, release_task, agent_sync, get_agents, broadcast
-  registerKnowledgeTools(server);     // get_global_knowledge
-  registerReportTools(server);        // generate_report
+  registerSessionDispatcher(server);  // engram_session: start, end, get_history, handoff
+  registerMemoryDispatcher(server);   // engram_memory: all memory operations via action enum
+  registerAdminDispatcher(server);    // engram_admin: backup, restore, stats, health, config, scan
+  registerFindTool(server);           // engram_find: catalog keyword search
 
   log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 
