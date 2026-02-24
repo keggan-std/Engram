@@ -35,6 +35,7 @@ Returns:
                 tags: coerceStringArray().optional().describe("Tags for categorization"),
                 status: z.enum(["active", "experimental"]).default("active"),
                 supersedes: z.number().int().optional().describe("ID of a previous decision this replaces"),
+                depends_on: z.array(z.number().int()).optional().describe("IDs of decisions this one depends on. When those decisions are superseded, this one is surfaced as needing review."),
                 export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
             },
             annotations: {
@@ -44,17 +45,23 @@ Returns:
                 openWorldHint: false,
             },
         },
-        async ({ decision, rationale, affected_files, tags, status, supersedes, export_global }) => {
+        async ({ decision, rationale, affected_files, tags, status, supersedes, depends_on, export_global }) => {
             const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
             const newDecisionId = repos.decisions.create(
-                sessionId, timestamp, decision, rationale, affected_files, tags, status, supersedes
+                sessionId, timestamp, decision, rationale, affected_files, tags, status, supersedes, depends_on
             );
 
+            let reviewRequired: Array<{ id: number; decision: string }> = [];
             if (supersedes) {
                 repos.decisions.supersede(supersedes, newDecisionId);
+                // F8: find decisions that depend on the superseded one — they may need review
+                reviewRequired = repos.decisions.getDependents(supersedes).map(d => ({
+                    id: d.id,
+                    decision: d.decision,
+                }));
             }
 
             // Mirror to global KB if requested
@@ -69,9 +76,10 @@ Returns:
             // Check for similar existing decisions (deduplication / conflict signal via FTS5)
             const response: Record<string, unknown> = {
                 decision_id: newDecisionId,
-                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}${globalId != null ? " and exported to global KB." : "."}`,
+                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}${globalId != null ? " and exported to global KB." : "."}${reviewRequired.length > 0 ? ` ⚠️ ${reviewRequired.length} dependent decision(s) may need review (see review_required).` : ""}`,
                 decision,
                 exported_globally: globalId != null,
+                review_required: reviewRequired.length > 0 ? reviewRequired : undefined,
             };
 
             const similar = repos.decisions.findSimilar(decision, 5)
