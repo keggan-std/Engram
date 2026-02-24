@@ -83,6 +83,21 @@ Returns:
 
             const durationStats = repos.sessions.getDurationStats();
 
+            // Q3: Per-agent contribution metrics
+            const agentMetrics = db.prepare(`
+              SELECT
+                s.agent_name,
+                COUNT(DISTINCT s.id)                                          AS sessions,
+                (SELECT COUNT(*) FROM changes c WHERE c.session_id IN
+                  (SELECT id FROM sessions WHERE agent_name = s.agent_name)) AS changes_recorded,
+                (SELECT COUNT(*) FROM decisions d WHERE d.session_id IN
+                  (SELECT id FROM sessions WHERE agent_name = s.agent_name)) AS decisions_made,
+                MAX(COALESCE(s.ended_at, s.started_at))                       AS last_active
+              FROM sessions s
+              GROUP BY s.agent_name
+              ORDER BY sessions DESC
+            `).all() as Array<{ agent_name: string; sessions: number; changes_recorded: number; decisions_made: number; last_active: string }>;
+
             return success({
                 server_version: SERVER_VERSION,
                 update_status: updateAvailable
@@ -108,6 +123,7 @@ Returns:
                 avg_session_duration_minutes: durationStats.avg_minutes,
                 longest_session_minutes: durationStats.max_minutes,
                 sessions_last_7_days: durationStats.sessions_last_7_days,
+                agents: agentMetrics,
             });
         }
     );
