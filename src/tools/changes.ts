@@ -33,7 +33,7 @@ Returns:
                     description: z.string().describe("What was changed and why"),
                     diff_summary: z.string().optional().describe("Brief diff summary"),
                     impact_scope: z.enum(["local", "module", "cross_module", "global"]).default("local"),
-                })).min(1).describe("Array of changes to record"),
+                })).min(1, 'Pass a "changes" array: [{ file_path, change_type, description, impact_scope? }]. Do not pass fields at the top level.').describe("Array of changes to record"),
             },
             annotations: {
                 readOnlyHint: false,

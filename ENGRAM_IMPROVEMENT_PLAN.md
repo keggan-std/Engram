@@ -224,26 +224,64 @@ tags: ["feature", "multi-agent", "session-continuity", "v1.6"]
 
 **Proposed tool:** Enhancement to `engram_check_events`
 
-Engram tracks: session start time, number of `engram_record_change` calls this session, number of decisions/tasks created, and total characters in the session summary so far. When these exceed configurable thresholds, `engram_check_events` returns a new event type: `context_pressure`.
+#### The precision question: how smart can this actually be?
 
+The core challenge is that Engram (as an MCP server) **does not have direct access to the model's context window counter**. That number lives inside the model runtime and is not exposed via the MCP protocol. So the real question is: what signals can Engram use, and how accurate are they?
+
+**Precision Level 1 — Proxy heuristics (easy, indirect, ~50% accuracy):**
+Engram tracks session duration and tool call count. These are rough proxies: a 45-minute session has likely consumed more context than a 5-minute one. Useful as a floor, but a fast-moving session with large tool outputs burns context much faster than time alone suggests.
+
+**Precision Level 2 — Byte-based token estimation (medium effort, ~75% accuracy):**
+Every MCP tool invocation passes JSON in and returns JSON out. Engram can record the byte size of each call's input args and response payload. Accumulated across the session, this gives a running estimate of how many tokens Engram itself has contributed to the context. Using the standard ~4 bytes/token approximation and knowing the model's context window (200k for Claude Sonnet/Opus, configurable), Engram can estimate percentage consumed with reasonable accuracy.
+
+```
+estimated_tokens_used ≈ Σ(input_bytes + output_bytes) / 4
+pressure_ratio = estimated_tokens_used / configured_context_window
+```
+
+This doesn't capture the conversation text itself, but MCP tool output is typically the largest single contributor to context growth in agentic sessions.
+
+**Precision Level 3 — Agent-reported token counts (zero extra effort on Engram's side, ~95% accuracy):**
+The agent already knows its context usage — Claude Code surfaces this as a percentage in the UI. Add an optional parameter to `engram_check_events`:
+
+```typescript
+engram_check_events({
+  context_tokens_used?: number,   // agent passes its known value
+  context_window_total?: number   // e.g. 200000
+})
+```
+
+When the agent provides these values, Engram uses them directly instead of estimating. The returned event includes the exact ratio and calibrated severity thresholds. This is the most precise approach and costs zero extra inference — the agent reads a number from its context and passes it in.
+
+**Recommended implementation: all three levels together:**
+- Default: byte-tracking (Level 2) active automatically with no agent changes required
+- When agent passes `context_tokens_used`: switch to exact mode (Level 3)
+- Time/count heuristics (Level 1) as a safety net when both above are missing
+
+**Multi-severity output:**
 ```json
 {
   "type": "context_pressure",
-  "severity": "warning",
-  "message": "Session has been running 47 minutes with 23 tool calls. Consider calling engram_end_session soon and creating tasks for remaining work.",
+  "severity": "notice|warning|urgent",
+  "estimated_pct_used": 68,
+  "source": "byte_estimate|agent_reported|heuristic",
+  "message": "~68% of context window estimated consumed (byte-based). Consider wrapping up long sub-tasks.",
   "suggestions": ["engram_end_session", "engram_create_task"]
 }
 ```
 
-Agents that call `engram_check_events` periodically (already recommended in the prompt guide) would receive this and can initiate a graceful handoff.
+Severity thresholds (configurable):
+- `notice` at 50% — start finishing current sub-task before starting new ones
+- `warning` at 70% — create tasks for incomplete work now
+- `urgent` at 85% — call `engram_end_session` immediately
 
 ---
 
 **→ Engram Record to Create:**
 ```
 Tool: engram_create_task
-title: "Add context_pressure event type to engram_check_events"
-description: "Track session duration (minutes since started_at), tool_call_count (increment on each tool invocation), and decisions/changes recorded. When thresholds are exceeded (e.g., >30 min, >20 tool calls, or >5000 chars of accumulated changes), return a context_pressure event from engram_check_events. Thresholds configurable via engram_config. This gives agents a proactive signal to wrap up before context exhaustion."
+title: "Add context_pressure event type to engram_check_events (3-level precision)"
+description: "Three precision levels: (1) Heuristic: track session duration + tool_call_count. (2) Byte-estimate: record input_bytes + output_bytes per tool call in a new session_tool_calls table; estimate tokens as bytes/4; compare against configured_context_window. (3) Agent-reported: engram_check_events accepts optional context_tokens_used + context_window_total params; when provided, use directly. Return context_pressure event at 50%/70%/85% thresholds with severity: notice/warning/urgent and source: heuristic|byte_estimate|agent_reported. All thresholds configurable via engram_config. DB: add input_bytes + output_bytes columns to tool_call_log table (see F10) if implemented, else a lightweight session_bytes table."
 priority: "high"
 tags: ["feature", "session-management", "quality-of-life", "v1.6"]
 ```
@@ -527,6 +565,186 @@ tags: ["feature", "session-management", "quality-of-life", "v1.6"]
 
 ---
 
+---
+
+## Part 4 — Bug Fixes (Resolved)
+
+These are confirmed bugs encountered during live usage, root-caused, and fixed in-session.
+
+---
+
+### B1 · String-Encoded Array Parameters Rejected by Zod (FIXED — v1.5.0)
+
+**Bug:** Tools accepting `tags`, `affected_files`, `dependencies`, `examples`, and similar optional array parameters failed with:
+```
+MCP error -32602: Expected array, received string
+```
+
+**Root cause:** The MCP protocol transports tool inputs as JSON. When the model generates a tool call with an array parameter, some MCP clients (including Claude Code) occasionally serialize the array value as a JSON string (`"[\"architecture\",\"mcp\"]"`) rather than a native JSON array (`["architecture","mcp"]`). Zod's `z.array(z.string())` validator strictly requires a native array and rejects the string form.
+
+**Affected parameters (17 locations across 7 files):**
+
+| File | Parameters |
+|---|---|
+| `tools/decisions.ts` | `tags`, `affected_files` (×2 — single + batch) |
+| `tools/conventions.ts` | `examples` |
+| `tools/coordination.ts` | `tags` |
+| `tools/file-notes.ts` | `dependencies`, `dependents` (×2 — single + batch) |
+| `tools/milestones.ts` | `tags` |
+| `tools/scheduler.ts` | `tags` |
+| `tools/sessions.ts` | `tags` |
+| `tools/tasks.ts` | `assigned_files`, `tags` (×2 — create + update) |
+
+**Fix applied:** Added `coerceStringArray()` utility to `src/utils.ts`. It uses `z.preprocess` to parse JSON-string-encoded arrays before Zod validation runs. All 17 occurrences of `z.array(z.string())` in tool input schemas replaced with `coerceStringArray()`.
+
+```typescript
+// src/utils.ts
+export function coerceStringArray() {
+  return z.preprocess((v) => {
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch { return v; }
+    }
+    return v;
+  }, z.array(z.string()));
+}
+```
+
+**Status:** Fixed. Build passes (`tsc` clean). Takes effect immediately on next server restart.
+
+---
+
+### B2 · Unhelpful Validation Error for `engram_record_change` (FIXED — v1.5.0)
+
+**Bug:** Calling `engram_record_change` with flat top-level fields (`file_path`, `change_type`, `summary`) instead of a `changes` array returned:
+```
+MCP error -32602: Required
+```
+
+No indication of what was required or what the correct shape was.
+
+**Root cause:** Zod's default missing-field error is just `"Required"`. The `changes` parameter is required and takes a specific nested array shape, but the error gave no hint of the expected structure.
+
+**Fix applied:** Added a descriptive message to the `changes` schema's `.min()` call:
+```typescript
+changes: z.array(...).min(1,
+  'Pass a "changes" array: [{ file_path, change_type, description, impact_scope? }]. Do not pass fields at the top level.'
+)
+```
+
+**Status:** Fixed. Build passes.
+
+---
+
+**→ Engram Records to Create:**
+```
+Tool: engram_record_decision
+decision: "All optional array parameters in Engram tool schemas must use coerceStringArray() from utils.ts instead of z.array(z.string()). This handles MCP clients that serialize arrays as JSON strings."
+rationale: "Claude Code and other MCP clients occasionally serialize array tool parameters as JSON strings, causing Zod to reject them with 'Expected array, received string'. The coerceStringArray() preprocessor handles both forms transparently."
+tags: ["architecture", "validation", "mcp-compatibility"]
+```
+
+---
+
+## Part 5 — MCP Token Optimization
+
+*Added from claude doctor analysis — 2026-02-24. The `claude doctor` diagnostic flagged ~29,485 tokens of MCP tool definitions loaded globally, exceeding the 25,000 token threshold. This section addresses it.*
+
+---
+
+### T1 · Move Project-Specific Servers to Project Scope (Immediate, ~8,000–10,000 token saving)
+
+**Problem:** All MCP servers load globally on every session, regardless of which project is open. Servers like `android-studio-ide` and `adb-enhanced` are only useful in the `fundi-smart` Android project, but they consume ~8,500 tokens of tool definitions in every web, CLI, and documentation session.
+
+**Action taken:** `android-studio-ide` and `adb-enhanced` removed from global `~/.claude.json`. They should be re-added per-project via `.mcp.json` in the relevant project root.
+
+**Template for `fundi-smart/.mcp.json`:**
+```json
+{
+  "mcpServers": {
+    "android-studio-ide": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["C:\\MCP\\MCP\\mcp_android_studio_ide.py"],
+      "env": {
+        "IDE_PROJECT_PATH": "C:\\Users\\~ RG\\Documents\\Apps\\fundi-smart",
+        "ENABLE_TERMINAL": "true",
+        "ENABLE_GRADLE": "true"
+      }
+    },
+    "adb-enhanced": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["C:\\MCP\\MCP\\mcp_adb_enhanced.py"],
+      "env": {
+        "ADB_PATH": "adb",
+        "ANDROID_HOME": "C:\\Users\\~ RG\\AppData\\Local\\Android\\Sdk"
+      }
+    }
+  }
+}
+```
+
+**Remaining global servers (4):** `engram`, `github-integration`, `filesystem-full-access`, `webdev-toolkit`
+**Estimated context after change:** ~16,000–18,000 tokens (well under 25,000 threshold)
+
+---
+
+### T2 · Engram Verbosity Control (Already in Use)
+
+**Best practices confirmed:**
+- Always use `verbosity: "minimal"` on `engram_start_session` to reduce session startup context
+- Use `engram_get_file_notes` before opening files — avoids loading file content into context entirely
+- Use `engram_get_decisions` and `engram_search` on-demand rather than in every session start
+- Use `verbosity: "summary"` (default) for most sessions; only use `"full"` when diagnosing issues
+
+**Token impact of verbosity levels (approximate):**
+| Level | Tokens | When to use |
+|---|---|---|
+| `minimal` | ~50–100 | Normal sessions — just counts, no lists |
+| `summary` | ~300–800 | When you need recent context |
+| `full` | ~1,000–3,000 | Debugging / auditing sessions only |
+
+---
+
+### T3 · Engram Could Detect Its Own Context Contribution (Future)
+
+**Idea:** Engram could expose a `engram_context_budget()` tool that reports:
+- Estimated tokens Engram tools have consumed this session (from byte tracking in F3/T2)
+- Which tools were the most expensive (e.g., `engram_get_decisions` returning 31 decisions vs. `engram_health` returning a small object)
+- A recommendation: "Consider switching to `verbosity: minimal` — engram has contributed ~4,200 estimated tokens this session"
+
+This would make Engram self-aware about its own cost and help users tune verbosity dynamically.
+
+---
+
+### T4 · `webdev-toolkit` Scoping (Next Step)
+
+`webdev-toolkit` (20 tools, ~3,540 tokens) is project-specific to web projects. Consider moving it to project-level `.mcp.json` files for web projects (e.g., `wilberforcemamose` repo), and out of the global config — similar to T1.
+
+**Savings:** ~3,540 tokens in all non-web sessions (MCP Builder, fundi-smart, etc.)
+
+---
+
+**→ Engram Records to Create:**
+```
+Tool: engram_record_decision
+decision: "android-studio-ide and adb-enhanced MCP servers must be configured at project scope (.mcp.json), not globally. They were removed from ~/.claude.json on 2026-02-24."
+rationale: "claude doctor flagged 29,485 token MCP context exceeding 25,000 threshold. These two servers account for ~8,500 tokens and are only needed in the fundi-smart Android project."
+affected_files: ["C:/Users/~ RG/.claude.json", "C:/Users/~ RG/Documents/Apps/fundi-smart/.mcp.json"]
+tags: ["architecture", "mcp", "token-optimization"]
+status: "active"
+```
+
+```
+Tool: engram_create_task
+title: "Create fundi-smart/.mcp.json with android-studio-ide and adb-enhanced"
+description: "Move android-studio-ide and adb-enhanced from global ~/.claude.json to C:/Users/~ RG/Documents/Apps/fundi-smart/.mcp.json. Use cmd /c wrapper for Windows npx compatibility. Template is documented in T1 of ENGRAM_IMPROVEMENT_PLAN.md. Also evaluate moving webdev-toolkit to project scope (wilberforcemamose repo)."
+priority: "medium"
+tags: ["mcp", "token-optimization", "configuration"]
+```
+
+---
+
 ## Summary Table
 
 | ID | Feature | Priority | Target | Type |
@@ -546,6 +764,12 @@ tags: ["feature", "session-management", "quality-of-life", "v1.6"]
 | Q3 | Per-Agent Stats | Low | v1.6 | Query change |
 | Q4 | Warn on Unclosed Claims at End | Low | v1.6 | Validation |
 | Q5 | Auto-Suggest Session Focus | Low | v1.6 | Inference logic |
+| T1 | Project-Scope Android MCP Servers | **Done** | — | Config change |
+| T2 | Engram Verbosity Best Practices | Active | — | Workflow |
+| T3 | Engram Self-Reported Context Cost | Low | v1.6 | New tool |
+| T4 | Project-Scope webdev-toolkit | Medium | — | Config change |
+| B1 | String-encoded array coercion | **Fixed** | v1.5.0 | Bug fix |
+| B2 | Descriptive validation errors | **Fixed** | v1.5.0 | Bug fix |
 
 ---
 

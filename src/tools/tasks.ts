@@ -8,6 +8,7 @@ import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import type { TaskRow } from "../types.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerTaskTools(server: McpServer): void {
   // ─── CREATE TASK ────────────────────────────────────────────────────
@@ -33,8 +34,8 @@ Returns:
         description: z.string().optional().describe("Detailed description"),
         priority: z.enum(["critical", "high", "medium", "low"]).default("medium"),
         status: z.enum(["backlog", "in_progress", "blocked", "review"]).default("backlog"),
-        assigned_files: z.array(z.string()).optional().describe("Related files"),
-        tags: z.array(z.string()).optional().describe("Tags"),
+        assigned_files: coerceStringArray().optional().describe("Related files"),
+        tags: coerceStringArray().optional().describe("Tags"),
         blocked_by: z.array(z.number().int()).optional().describe("Blocking task IDs"),
       },
       annotations: {
@@ -92,8 +93,8 @@ Returns:
         priority: z.enum(["critical", "high", "medium", "low"]).optional(),
         description: z.string().optional(),
         blocked_by: z.array(z.number().int()).optional(),
-        assigned_files: z.array(z.string()).optional(),
-        tags: z.array(z.string()).optional(),
+        assigned_files: coerceStringArray().optional(),
+        tags: coerceStringArray().optional(),
       },
       annotations: {
         readOnlyHint: false,

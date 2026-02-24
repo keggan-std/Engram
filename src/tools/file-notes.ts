@@ -6,7 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX, FILE_MTIME_STALE_HOURS } from "../constants.js";
-import { normalizePath, getFileMtime } from "../utils.js";
+import { normalizePath, getFileMtime, coerceStringArray } from "../utils.js";
 import { success } from "../response.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness } from "../types.js";
 
@@ -65,8 +65,8 @@ Returns:
             inputSchema: {
                 file_path: z.string().describe("Relative path to the file"),
                 purpose: z.string().optional().describe("What this file does"),
-                dependencies: z.array(z.string()).optional().describe("Files this depends on"),
-                dependents: z.array(z.string()).optional().describe("Files that depend on this"),
+                dependencies: coerceStringArray().optional().describe("Files this depends on"),
+                dependents: coerceStringArray().optional().describe("Files that depend on this"),
                 layer: z.enum(["ui", "viewmodel", "domain", "data", "network", "database", "di", "util", "test", "config", "build", "other"]).optional(),
                 complexity: z.enum(["trivial", "simple", "moderate", "complex", "critical"]).optional(),
                 notes: z.string().optional().describe("Important context, gotchas, warnings"),
@@ -121,8 +121,8 @@ Returns:
                 files: z.array(z.object({
                     file_path: z.string().describe("Relative path to the file"),
                     purpose: z.string().optional(),
-                    dependencies: z.array(z.string()).optional(),
-                    dependents: z.array(z.string()).optional(),
+                    dependencies: coerceStringArray().optional(),
+                    dependents: coerceStringArray().optional(),
                     layer: z.enum(["ui", "viewmodel", "domain", "data", "network", "database", "di", "util", "test", "config", "build", "other"]).optional(),
                     complexity: z.enum(["trivial", "simple", "moderate", "complex", "critical"]).optional(),
                     notes: z.string().optional(),

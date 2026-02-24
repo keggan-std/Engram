@@ -9,6 +9,7 @@ import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import type { ConventionRow } from "../types.js";
 import { writeGlobalConvention } from "../global-db.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerConventionTools(server: McpServer): void {
     server.registerTool(
@@ -28,7 +29,7 @@ Returns:
             inputSchema: {
                 category: z.enum(["naming", "architecture", "styling", "testing", "git", "documentation", "error_handling", "performance", "security", "other"]),
                 rule: z.string().min(5).describe("The convention rule"),
-                examples: z.array(z.string()).optional().describe("Examples of the convention in use"),
+                examples: coerceStringArray().optional().describe("Examples of the convention in use"),
                 export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
             },
             annotations: {

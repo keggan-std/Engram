@@ -5,6 +5,7 @@
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { z } from "zod";
 import {
   EXCLUDED_DIRS,
   LAYER_PATTERNS,
@@ -13,6 +14,25 @@ import {
   PROJECT_MARKERS,
 } from "./constants.js";
 import type { ArchLayer } from "./types.js";
+
+/**
+ * Zod preprocessor that accepts either a real string array OR a JSON-string-
+ * encoded array (e.g. '["a","b"]'). Required because some MCP clients (including
+ * Claude Code) occasionally serialize optional array parameters as JSON strings
+ * instead of native JSON arrays, causing z.array() to reject them with
+ * "Expected array, received string".
+ *
+ * Usage:  tags: coerceStringArray().optional()
+ *         (replaces: z.array(z.string()).optional())
+ */
+export function coerceStringArray() {
+  return z.preprocess((v) => {
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch { return v; }
+    }
+    return v;
+  }, z.array(z.string()));
+}
 
 /**
  * Normalize a file path for consistent storage as a database key.

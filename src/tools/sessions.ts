@@ -7,7 +7,7 @@ import { z } from "zod";
 import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
 import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
-import { truncate, ftsEscape } from "../utils.js";
+import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
 import type { SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
 
@@ -275,7 +275,7 @@ Returns:
   Confirmation with session stats.`,
       inputSchema: {
         summary: z.string().min(10).describe("Detailed summary of session accomplishments, pending work, and blockers"),
-        tags: z.array(z.string()).optional().describe("Tags for session categorization"),
+        tags: coerceStringArray().optional().describe("Tags for session categorization"),
       },
       annotations: {
         readOnlyHint: false,

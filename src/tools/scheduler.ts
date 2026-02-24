@@ -8,6 +8,7 @@ import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import type { ScheduledEventRow } from "../types.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerSchedulerTools(server: McpServer): void {
     // ─── SCHEDULE EVENT ──────────────────────────────────────────────────
@@ -41,7 +42,7 @@ Returns:
                 priority: z.enum(["critical", "high", "medium", "low"]).default("medium"),
                 requires_approval: z.boolean().default(true).describe("Whether user must approve"),
                 recurrence: z.enum(["once", "every_session", "daily", "weekly"]).optional().describe("Recurrence pattern"),
-                tags: z.array(z.string()).optional().describe("Tags"),
+                tags: coerceStringArray().optional().describe("Tags"),
             },
             annotations: {
                 readOnlyHint: false,

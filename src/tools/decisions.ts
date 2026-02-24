@@ -8,6 +8,7 @@ import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import { writeGlobalDecision } from "../global-db.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerDecisionTools(server: McpServer): void {
     server.registerTool(
@@ -30,8 +31,8 @@ Returns:
             inputSchema: {
                 decision: z.string().min(5).describe("The decision that was made"),
                 rationale: z.string().optional().describe("Why — context, tradeoffs, alternatives considered"),
-                affected_files: z.array(z.string()).optional().describe("Files impacted by this decision"),
-                tags: z.array(z.string()).optional().describe("Tags for categorization"),
+                affected_files: coerceStringArray().optional().describe("Files impacted by this decision"),
+                tags: coerceStringArray().optional().describe("Tags for categorization"),
                 status: z.enum(["active", "experimental"]).default("active"),
                 supersedes: z.number().int().optional().describe("ID of a previous decision this replaces"),
                 export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
@@ -110,8 +111,8 @@ Returns:
                 decisions: z.array(z.object({
                     decision: z.string().min(5).describe("The decision"),
                     rationale: z.string().optional(),
-                    affected_files: z.array(z.string()).optional(),
-                    tags: z.array(z.string()).optional(),
+                    affected_files: coerceStringArray().optional(),
+                    tags: coerceStringArray().optional(),
                     status: z.enum(["active", "experimental"]).default("active"),
                 })).min(1).max(50).describe("Array of decisions to record"),
             },

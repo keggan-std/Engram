@@ -16,7 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getCurrentSessionId, getRepos } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
-import { truncate } from "../utils.js";
+import { truncate, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
 
 // ─── Dump classification ──────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ Returns:
                 hint: z.enum(["decision", "task", "convention", "finding", "auto"])
                     .default("auto")
                     .describe("Classification hint — 'auto' lets Engram decide"),
-                tags: z.array(z.string()).optional().describe("Tags to apply to the stored item"),
+                tags: coerceStringArray().optional().describe("Tags to apply to the stored item"),
             },
             annotations: {
                 readOnlyHint: false,
