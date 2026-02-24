@@ -4,9 +4,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getRepos } from "../database.js";
+import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
+import { writeGlobalDecision } from "../global-db.js";
 
 export function registerDecisionTools(server: McpServer): void {
     server.registerTool(
@@ -22,6 +23,7 @@ Args:
   - tags (array of strings, optional): Categorization tags (e.g., "architecture", "database", "ui", "api")
   - status: "active" | "experimental" (default: "active")
   - supersedes (number, optional): ID of a previous decision this replaces
+  - export_global (boolean, optional): Mirror this decision to the shared cross-project global KB at ~/.engram/global.db (default: false)
 
 Returns:
   Decision ID and confirmation. May include a warning if similar decisions exist.`,
@@ -32,6 +34,7 @@ Returns:
                 tags: z.array(z.string()).optional().describe("Tags for categorization"),
                 status: z.enum(["active", "experimental"]).default("active"),
                 supersedes: z.number().int().optional().describe("ID of a previous decision this replaces"),
+                export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
             },
             annotations: {
                 readOnlyHint: false,
@@ -40,7 +43,7 @@ Returns:
                 openWorldHint: false,
             },
         },
-        async ({ decision, rationale, affected_files, tags, status, supersedes }) => {
+        async ({ decision, rationale, affected_files, tags, status, supersedes, export_global }) => {
             const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
@@ -53,17 +56,27 @@ Returns:
                 repos.decisions.supersede(supersedes, newDecisionId);
             }
 
-            // Check for similar existing decisions (deduplication signal)
+            // Mirror to global KB if requested
+            let globalId: number | null = null;
+            if (export_global) {
+                globalId = writeGlobalDecision({
+                    projectRoot: getProjectRoot(),
+                    decision, rationale, tags, timestamp,
+                });
+            }
+
+            // Check for similar existing decisions (deduplication / conflict signal via FTS5)
             const response: Record<string, unknown> = {
                 decision_id: newDecisionId,
-                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
+                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}${globalId != null ? " and exported to global KB." : "."}`,
                 decision,
+                exported_globally: globalId != null,
             };
 
             const similar = repos.decisions.findSimilar(decision, 5)
                 .filter(d => d.id !== newDecisionId);
             if (similar.length > 0) {
-                response.warning = `Found ${similar.length} similar active decision(s). Review for potential duplicates.`;
+                response.warning = `Found ${similar.length} similar active decision(s). Review for potential conflicts or duplicates.`;
                 response.similar_decisions = similar.map(d => ({
                     id: d.id,
                     decision: d.decision,

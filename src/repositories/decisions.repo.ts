@@ -122,17 +122,29 @@ export class DecisionsRepo {
     }
 
     findSimilar(decisionText: string, limit: number = 5): DecisionRow[] {
-        const words = decisionText
-            .split(/\s+/)
-            .filter(w => w.length > 3)
-            .slice(0, 5);
+        // FTS5-powered similarity search — more accurate than LIKE
+        const words = decisionText.trim().split(/\s+/).filter(w => w.length > 3).slice(0, 6);
+        if (words.length > 0) {
+            try {
+                const ftsQuery = words.map(w => `"${w.replace(/"/g, "")}"`).join(" OR ");
+                return this.db.prepare(`
+                    WITH ranked AS (
+                        SELECT rowid, rank FROM fts_decisions WHERE fts_decisions MATCH ?
+                    )
+                    SELECT d.* FROM decisions d
+                    JOIN ranked ON ranked.rowid = d.id
+                    WHERE d.status = 'active'
+                    ORDER BY ranked.rank
+                    LIMIT ?
+                `).all(ftsQuery, limit) as DecisionRow[];
+            } catch { /* FTS unavailable, fall through */ }
+        }
 
+        // LIKE fallback
         if (words.length === 0) return [];
-
         const conditions = words.map(() => "decision LIKE ?");
         const params: unknown[] = words.map(w => `%${w}%`);
         params.push(limit);
-
         return this.db.prepare(
             `SELECT * FROM decisions WHERE status = 'active' AND (${conditions.join(" OR ")}) ORDER BY timestamp DESC LIMIT ?`
         ).all(...params) as DecisionRow[];

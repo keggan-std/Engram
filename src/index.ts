@@ -36,6 +36,7 @@ import { registerExportImportTools } from "./tools/export-import.js";
 import { registerCompactionTools } from "./tools/compaction.js";
 import { registerSchedulerTools } from "./tools/scheduler.js";
 import { registerCoordinationTools } from "./tools/coordination.js";
+import { registerKnowledgeTools } from "./tools/knowledge.js";
 
 // ─── Initialize ───────────────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
   registerCompactionTools(server);    // compact, clear
   registerSchedulerTools(server);     // schedule_event, get/update/acknowledge events, check_events
   registerCoordinationTools(server);  // dump, claim_task, release_task, agent_sync, get_agents, broadcast
+  registerKnowledgeTools(server);     // get_global_knowledge
 
   log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
 
