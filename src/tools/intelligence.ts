@@ -5,8 +5,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, now, getProjectRoot } from "../database.js";
-import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, MAX_SEARCH_RESULTS } from "../constants.js";
-import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse, normalizePath, truncate } from "../utils.js";
+import { TOOL_PREFIX, SNAPSHOT_TTL_MINUTES, MAX_SEARCH_RESULTS, FILE_MTIME_STALE_HOURS } from "../constants.js";
+import { scanFileTree, detectLayer, isGitRepo, getGitBranch, getGitHead, getGitLogSince, getGitFilesChanged, minutesSince, safeJsonParse, normalizePath, truncate, getFileMtime } from "../utils.js";
 import { success } from "../response.js";
 import type { FileNoteRow, DecisionRow, ConventionRow, ChangeRow, ProjectSnapshot } from "../types.js";
 
@@ -285,6 +285,23 @@ Returns:
       for (const item of top) {
         if (!results[item.table]) results[item.table] = [];
         results[item.table].push(item.data);
+      }
+
+      // Q1: Attach confidence to file_notes results (staleness detection)
+      if (results["file_notes"]) {
+        const projectRoot = getProjectRoot();
+        results["file_notes"] = results["file_notes"].map((item) => {
+          const d = item as Record<string, unknown>;
+          const storedMtime = d["file_mtime"] as number | null | undefined;
+          if (storedMtime == null) return { ...d, confidence: "unknown" };
+          const currentMtime = getFileMtime(String(d["file_path"] ?? ""), projectRoot);
+          if (currentMtime == null) return { ...d, confidence: "unknown" };
+          const driftMs = currentMtime - storedMtime;
+          if (driftMs <= 0) return { ...d, confidence: "high" };
+          const driftHours = driftMs / 3_600_000;
+          const confidence = driftHours > FILE_MTIME_STALE_HOURS ? "stale" : "medium";
+          return { ...d, confidence, staleness_hours: Math.round(driftHours) };
+        });
       }
 
       // Enrich results with context snippet if context_chars > 0

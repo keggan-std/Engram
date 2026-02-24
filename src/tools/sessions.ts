@@ -4,7 +4,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices } from "../database.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb } from "../database.js";
 import { TOOL_PREFIX, COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -147,6 +147,33 @@ Returns:
       // ─── Update notification (once per process) ────────────
       const updateNotification = services.update.getNotification();
 
+      // ─── Q5: Auto-suggest focus when none provided ─────────
+      let suggestedFocus: string | undefined;
+      if (!focus) {
+        // Derive suggested focus from: most-recently-touched file prefix, highest-priority task title, most-recent decision
+        const candidates: string[] = [];
+        // Recent file path component
+        if (recordedChanges.length > 0) {
+          const fp = recordedChanges[recordedChanges.length - 1].file_path;
+          const parts = fp.replace(/\\/g, "/").split("/").filter(Boolean);
+          // Take the last directory name before the filename as the focus hint
+          if (parts.length >= 2) candidates.push(parts[parts.length - 2]);
+        }
+        // Highest priority open task — first content word
+        if (openTasks.length > 0) {
+          const taskWord = openTasks[0].title.split(/\s+/).find(w => w.length > 3);
+          if (taskWord) candidates.push(taskWord.toLowerCase());
+        }
+        // Most recent decision — first meaningful word
+        if (activeDecisions.length > 0) {
+          const decWord = activeDecisions[0].decision.split(/\s+/).find(w => w.length > 4);
+          if (decWord) candidates.push(decWord.toLowerCase());
+        }
+        if (candidates.length > 0) {
+          suggestedFocus = candidates[0];
+        }
+      }
+
       // ─── Build response based on verbosity ─────────────────
       if (verbosity === "minimal") {
         return success({
@@ -166,8 +193,9 @@ Returns:
           git: { branch: gitBranch, head: gitHead },
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          suggested_focus: suggestedFocus,
           update_available: updateNotification ?? undefined,
-          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
+          message: `Session #${sessionId} started (minimal mode). Use engram_get_* tools to load details on demand.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}${focusInfo ? ` Focus: "${focus}".` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} is available (currently v${updateNotification.installed_version}).` : ""}`,
         });
       }
 
@@ -213,9 +241,10 @@ Returns:
           total_file_notes: repos.fileNotes.countAll(),
           auto_compacted: autoCompacted,
           focus: focusInfo,
+          suggested_focus: suggestedFocus,
           update_available: updateNotification ?? undefined,
           message: lastSession
-            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+            ? `Session #${sessionId} started (summary mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}). ${recordedChanges.length} changes since then.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}" — pass as focus param next call for filtered context.` : ""}${focusInfo ? ` [Focus: "${focus}" — ${focusInfo.decisions_returned} decisions, ${focusInfo.tasks_returned} tasks, ${focusInfo.changes_returned} changes returned.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
             : `Session #${sessionId} started (summary mode). First session — no prior memory.`,
         });
       }
@@ -226,6 +255,7 @@ Returns:
         project_snapshot?: ProjectSnapshot | null;
         git_hook_log?: string;
         triggered_events?: ScheduledEventRow[];
+        suggested_focus?: string;
         update_available?: typeof updateNotification;
       } = {
         session_id: sessionId,
@@ -246,13 +276,14 @@ Returns:
         open_tasks: openTasks,
         project_snapshot_age_minutes: projectSnapshot ? 0 : null,
         focus: focusInfo,
+        suggested_focus: suggestedFocus,
         git: { branch: gitBranch, head: gitHead },
         project_snapshot: projectSnapshot,
         git_hook_log: gitHookLog || undefined,
         triggered_events: triggeredEvents.length > 0 ? triggeredEvents : undefined,
         update_available: updateNotification ?? undefined,
         message: lastSession
-          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
+          ? `Session #${sessionId} started (full mode). Resuming from session #${lastSession.id} (${lastSession.agent_name}, ended ${lastSession.ended_at}). ${recordedChanges.length} recorded changes since then.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}${focusInfo ? ` [Focus: "${focus}" applied.]` : ""}${autoCompacted ? " [Auto-compacted old sessions.]" : ""}${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}${triggeredEvents.length > 0 ? ` ${triggeredEvents.length} scheduled event(s) triggered — review and acknowledge.` : ""}${updateNotification ? ` ⚡ Engram v${updateNotification.available_version} available — inform user (see update_available field).` : ""}`
           : `Session #${sessionId} started (full mode). This is the first session — no prior memory.${projectSnapshot ? ` Project snapshot included (${projectSnapshot.total_files} files).` : ""}`,
       };
 
@@ -286,11 +317,25 @@ Returns:
     },
     async ({ summary, tags }) => {
       const repos = getRepos();
+      const db = getDb();
       const timestamp = now();
       const sessionId = getCurrentSessionId();
 
       if (!sessionId) {
         return error("No active session to end. Start one with engram_start_session first.");
+      }
+
+      // Q4: Warn on unclosed claimed tasks before closing
+      const sessionRow = repos.sessions.getById(sessionId) as { agent_name?: string } | null;
+      const agentName = sessionRow?.agent_name ?? null;
+      let claimedTasksWarning: Array<{ id: number; title: string; status: string }> | undefined;
+      if (agentName) {
+        try {
+          const unclosed = db.prepare(
+            "SELECT id, title, status FROM tasks WHERE claimed_by = ? AND status NOT IN ('done', 'cancelled')"
+          ).all(agentName) as Array<{ id: number; title: string; status: string }>;
+          if (unclosed.length > 0) claimedTasksWarning = unclosed;
+        } catch { /* tasks may not have claimed_by on older schemas */ }
       }
 
       // Get session stats before closing
@@ -302,13 +347,19 @@ Returns:
       repos.sessions.close(sessionId, timestamp, summary, tags);
 
       return success({
-        message: `Session #${sessionId} ended successfully.`,
+        message: `Session #${sessionId} ended successfully.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open — release or complete them.` : ""}`,
         stats: {
           changes_recorded: changeCount,
           decisions_made: decisionCount,
           tasks_completed: tasksDone,
         },
         summary,
+        ...(claimedTasksWarning ? {
+          claimed_tasks_warning: {
+            message: `You have ${claimedTasksWarning.length} uncompleted claimed task(s). Call engram_release_task or engram_update_task (status: 'done') for each.`,
+            tasks: claimedTasksWarning,
+          },
+        } : {}),
       });
     }
   );
