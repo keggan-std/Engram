@@ -410,6 +410,32 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V8: Context Pressure Tracking ────────────────────────────────
+  {
+    version: 8,
+    description: "Context pressure — session_bytes table for byte-estimate token tracking",
+    up: (db) => {
+      db.exec(`
+        -- Tracks accumulated MCP tool call byte sizes per session.
+        -- Used for Level 2 (byte-estimate) context pressure detection.
+        -- Agents can call engram_check_events with context_tokens_used for Level 3 (exact).
+        CREATE TABLE IF NOT EXISTS session_bytes (
+          session_id INTEGER PRIMARY KEY,
+          input_bytes  INTEGER NOT NULL DEFAULT 0,
+          output_bytes INTEGER NOT NULL DEFAULT 0,
+          tool_calls   INTEGER NOT NULL DEFAULT 0,
+          updated_at   INTEGER NOT NULL
+        );
+
+        -- Configurable context pressure thresholds (as percentages 0-100)
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_notice_pct',  '50', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_warning_pct', '70', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_urgent_pct',  '85', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_window_size',    '200000', datetime('now'));
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
