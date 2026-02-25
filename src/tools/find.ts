@@ -10,7 +10,7 @@ import { getRepos } from "../database.js";
 
 // ─── Full Operation Catalog ───────────────────────────────────────────────────
 
-const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = {
+export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = {
   // File Notes
   get_file_notes:       { desc: "Read stored notes for a file. Includes staleness confidence.", params: "{ file_path: string, task_focus?: string }" },
   set_file_notes:       { desc: "Store notes for a file. Call immediately after reading a file.", params: "{ file_path, purpose?, layer?, complexity?, dependencies?, dependents?, notes? }" },
@@ -58,7 +58,7 @@ const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = {
   broadcast:            { desc: "Send a message to all or specific agents.", params: "{ message: string, target_agents? }" },
 };
 
-const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
+export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   backup:             { desc: "Create a database backup.", params: "{ output_path? }" },
   restore:            { desc: "Restore from a backup file.", params: "{ input_path: string, confirm: 'yes-restore' }" },
   list_backups:       { desc: "List all available backup files.", params: "{}" },
@@ -135,20 +135,31 @@ Actions:
         const conventions = repos.conventions.getActive();
         const violations: Array<{ id: number; category: string; rule: string; severity: "warning" | "error" }> = [];
         for (const conv of conventions) {
-          // Simple heuristic: check for keyword presence implying violation
-          const ruleText = conv.rule.toLowerCase();
-          const contentText = content.toLowerCase();
-          // Detect "never" or "must not" rules
-          const isProhibition = /\b(never|must not|do not|don'?t|avoid|forbidden)\b/.test(ruleText);
-          // Detect "always" or "required" rules
-          const isRequirement = /\b(always|must|required|every|all)\b/.test(ruleText);
-          // Extract key subject from rule (first noun phrase after the verb)
-          const keywords = ruleText.match(/\b[a-z_]{4,}\b/g)?.filter(w => !["always","never","must","every","file","with","that","this","when","from","into","call","have"].includes(w)) ?? [];
-          const topKeyword = keywords[0];
-          if (!topKeyword) continue;
-          if (isProhibition && contentText.includes(topKeyword)) {
+          const ruleText = conv.rule;
+          const ruleTextLower = ruleText.toLowerCase();
+          const contentText = content;
+          // Detect prohibition vs requirement
+          const isProhibition = /\b(never|must not|do not|don'?t|avoid|forbidden)\b/i.test(ruleText);
+          const isRequirement = /\b(always|must|required|every|all)\b/i.test(ruleText);
+          // Extract backtick-quoted identifiers as high-priority exact tokens
+          const backtickTokens = Array.from(ruleText.matchAll(/`([^`]+)`/g)).map(m => m[1]);
+          // Fall back to whole-word keyword extraction (min 4 chars, excluding stop words)
+          const STOP = new Set(["always","never","must","every","file","with","that","this","when","from","into","call","have","use","using","should","ensure","code","each"]);
+          const fallbackKeywords = ruleTextLower.match(/\b[a-z_.]{4,}\b/g)?.filter(w => !STOP.has(w)) ?? [];
+          // Prefer backtick tokens; fall back to extracted keywords
+          const identifiers = backtickTokens.length > 0 ? backtickTokens : fallbackKeywords.slice(0, 2);
+          if (identifiers.length === 0) continue;
+          // Whole-token matching: check if the identifier appears as a word/call in the code
+          const matchesAny = identifiers.some(id => {
+            const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            // Match as a word boundary (handles dot-notation identifiers like console.log)
+            return new RegExp(`\\b${escaped}\\b`, "i").test(contentText) ||
+              // Also match call-site (identifier followed by ( or .)
+              new RegExp(`${escaped}\\s*[.(]`, "i").test(contentText);
+          });
+          if (isProhibition && matchesAny) {
             violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });
-          } else if (isRequirement && !contentText.includes(topKeyword)) {
+          } else if (isRequirement && !matchesAny) {
             violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });
           }
         }
@@ -189,7 +200,40 @@ Actions:
 
 // ─── Exported catalog for embedding in start_session response ─────────────────
 
-export function buildToolCatalog(): Record<string, unknown> {
+/**
+ * Build the tool catalog at one of three detail levels.
+ *
+ * Tier 0 (~80 tokens)  — Action names only. For repeat sessions; agent already knows the surface.
+ * Tier 1 (~400 tokens) — Names + one-line descriptions. After 30+ days since last delivery.
+ * Tier 2 (~1,200 tokens) — Full descriptions + param schemas. First session ever for this agent.
+ */
+export function buildToolCatalog(tier: 0 | 1 | 2 = 2): Record<string, unknown> {
+  if (tier === 0) {
+    return {
+      memory_actions: Object.keys(MEMORY_CATALOG),
+      admin_actions: Object.keys(ADMIN_CATALOG),
+      note: "Repeat session — action names only. Use engram_find({query}) to look up params for any action.",
+    };
+  }
+  if (tier === 1) {
+    return {
+      engram_memory: {
+        description: "All memory operations. Pass action + relevant params.",
+        operations: Object.fromEntries(
+          Object.entries(MEMORY_CATALOG).map(([k, v]) => [k, v.desc])
+        ),
+      },
+      engram_admin: {
+        description: "Admin and maintenance operations.",
+        operations: Object.fromEntries(
+          Object.entries(ADMIN_CATALOG).map(([k, v]) => [k, v.desc])
+        ),
+      },
+      engram_find: { description: "Search this catalog. params: { query: string }" },
+      note: "Use engram_find({query}) to retrieve full param schemas for any action.",
+    };
+  }
+  // tier === 2: full catalog (first session)
   return {
     engram_memory: {
       description: "All memory operations. Pass action + relevant params.",
@@ -217,7 +261,7 @@ export const AGENT_RULES = [
   { priority: "CRITICAL", id: "AR-03", rule: "Call engram_session(action:'end') before terminating. Include all incomplete work as tasks." },
   { priority: "HIGH",     id: "AR-04", rule: "Call engram_memory(action:'get_decisions') before making any architectural choice." },
   { priority: "HIGH",     id: "AR-05", rule: "Call engram_memory(action:'record_decision') for every new design or architecture decision made." },
-  { priority: "HIGH",     id: "AR-06", rule: "Call engram_memory(action:'set_file_notes') immediately after reading a file for the first time." },
+  { priority: "HIGH",     id: "AR-06", rule: "Call engram_memory(action:'set_file_notes') with executive_summary immediately after reading a file for the first time. Include 2-3 sentences in executive_summary for fast future reads." },
   { priority: "MEDIUM",   id: "AR-07", rule: "Batch related record_change calls. Set impact_scope accurately: local|module|cross_module|global." },
   { priority: "MEDIUM",   id: "AR-08", rule: "For large multi-step tasks, checkpoint progress with engram_memory(action:'checkpoint') before context exhausts." },
 ];
