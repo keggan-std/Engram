@@ -6,15 +6,15 @@
 
 v1.7.2 is a hotfix release addressing **20 bugs** discovered during a systematic functional audit of the v1.7.0 tool surface. No new features — only correctness and reliability fixes. Zero breaking changes.
 
-| ID       | Area                 | Fix                                                              | Commit    |
-| -------- | -------------------- | ---------------------------------------------------------------- | --------- |
-| ISS-001–015 | API correctness   | Various: report, backup, tasks, events, session error messages   | `8dd7bce` |
-| ISS-007  | Universal Mode       | `discover` action used full-string includes instead of BM25       | `061b790` |
-| ISS-016  | `what_changed`       | `"session_start"` used as literal SQL string (always 0 results)  | `061b790` |
-| ISS-017  | `create_task`        | `priority` accepted any string — no enum validation              | `c89edb1` |
-| ISS-018  | `broadcast`          | `target_agent` column missing; all agents received all broadcasts | `b0efaf2` |
-| ISS-019  | `record_change`      | `change_type` + `impact_scope` accepted any string               | `c89edb1` |
-| ISS-020  | Universal Mode       | `set_file_notes` crashed when `dependencies` was a JSON string   | `13af958` |
+| ID          | Area            | Fix                                                               | Commit    |
+| ----------- | --------------- | ----------------------------------------------------------------- | --------- |
+| ISS-001–015 | API correctness | Various: report, backup, tasks, events, session error messages    | `8dd7bce` |
+| ISS-007     | Universal Mode  | `discover` action used full-string includes instead of BM25       | `061b790` |
+| ISS-016     | `what_changed`  | `"session_start"` used as literal SQL string (always 0 results)   | `061b790` |
+| ISS-017     | `create_task`   | `priority` accepted any string — no enum validation               | `c89edb1` |
+| ISS-018     | `broadcast`     | `target_agent` column missing; all agents received all broadcasts | `b0efaf2` |
+| ISS-019     | `record_change` | `change_type` + `impact_scope` accepted any string                | `c89edb1` |
+| ISS-020     | Universal Mode  | `set_file_notes` crashed when `dependencies` was a JSON string    | `13af958` |
 
 ---
 
@@ -25,8 +25,9 @@ v1.7.2 is a hotfix release addressing **20 bugs** discovered during a systematic
 `record_change`, `create_task`, and related actions now reject invalid values with a clear Zod validation error.
 
 **Valid values:**
+
 - `change_type`: `created | modified | deleted | refactored | renamed | moved | config_changed`
-- `impact_scope`: `local | module | cross_module | global`  
+- `impact_scope`: `local | module | cross_module | global`
 - `priority`: `critical | high | medium | low`
 
 ### 📡 Directed Broadcasts — `target_agent` Column + Query Filter

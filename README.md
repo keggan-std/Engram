@@ -95,7 +95,10 @@ The `"session_start"` sentinel value is now resolved to the current session's `s
 
 ---
 
-## ✨ What's New in v1.7.0
+## What's New in v1.7.0
+
+<details>
+<summary><strong>✨ What's New in v1.7.0</strong></summary>
 
 **v1.7.0** is a precision token-efficiency release — six improvement tracks with zero breaking changes to the 4-dispatcher API surface.
 
@@ -105,7 +108,7 @@ The `"session_start"` sentinel value is now resolved to the current session's `s
 
 ### ⚡ Default Search Limit: 20 → 8
 
-`engram_memory(action:"search")` now defaults to 8 results (`DEFAULT_SEARCH_LIMIT`). Typ­ical lookups rarely need more. Still overridable via explicit `limit` param (up to 50).
+`engram_memory(action:"search")` now defaults to 8 results (`DEFAULT_SEARCH_LIMIT`). Typical lookups rarely need more. Still overridable via explicit `limit` param (up to 50).
 
 ### 📋 Convention Capping by Verbosity
 
@@ -149,9 +152,14 @@ BM25 routing and fuzzy action resolution built-in. Use when you want minimal tok
 
 > Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
+</details>
+
 ---
 
-## ✨ What's New in v1.6.0
+## What's New in v1.6.0
+
+<details>
+<summary><strong>✨ What's New in v1.6.0</strong></summary>
 
 **v1.6.0** is the largest Engram release to date — fourteen feature tracks covering a complete lean-surface rearchitecture, deeper memory intelligence, smarter multi-agent coordination, and a new thin-client proxy.
 
@@ -224,6 +232,8 @@ New `packages/engram-universal-thin-client/` proxy exposes Engram as a **single 
 | **v1.7 `--mode=universal`**     | **~80**            | ✅ **All agents (built-in)** |
 
 > Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
+
+</details>
 
 ---
 
@@ -772,7 +782,7 @@ engram_memory({ action: "get_decisions" });
 ```
 
 - **Decision exists** → Follow it.
-- **Needs to change** → Explain why, then: `engram_memory({ action:"record_decision", supersedes:<id>, decision, rationale })`
+- **Needs to change** → Explain why, then: `engram_memory({ action: "record_decision", supersedes: <id>, decision, rationale })`
 - **No decision** → Make the call and record it immediately:
 
 ```js
@@ -812,7 +822,7 @@ engram_memory({
 Search Engram before asking the user — they may have already explained it to a previous session:
 
 ```js
-engram_memory({ action: "search", query: "keywords", context_chars: 200 });
+engram_memory({ action: "search", query: "keywords", context_chars: 200 }); // general search
 engram_admin({ action: "scan_project" }); // project structure
 engram_memory({ action: "get_decisions" }); // architecture questions
 engram_memory({ action: "get_conventions" }); // style / pattern questions
@@ -845,9 +855,9 @@ engram_memory({ action: "check_events" }); // fires at 50% / 70% / 85% context f
 Before ending any session:
 
 1. Record all file changes not yet recorded.
-2. Mark completed tasks: `engram_memory({ action:"update_task", task_id, status:"done" })`
-3. Create tasks for anything incomplete: `engram_memory({ action:"create_task", title, description, priority })`
-4. Record any new conventions: `engram_memory({ action:"add_convention", convention, rationale })`
+2. Mark completed tasks: `engram_memory({ action: "update_task", task_id, status: "done" })`
+3. Create tasks for anything incomplete: `engram_memory({ action: "create_task", title, description, priority })`
+4. Record any new conventions: `engram_memory({ action: "add_convention", convention, rationale })`
 5. Call end with a precise summary:
 
 ```js
@@ -857,6 +867,32 @@ engram_session({
         "Exact files/functions touched, what is pending, any blockers, new patterns discovered",
 });
 ```
+
+---
+
+### 8. Sub-Agent Sessions (v1.7+)
+
+When your orchestrator spawns a sub-agent to handle a specific task, use `agent_role: "sub"` to get a lightweight, task-scoped context (~300–500 tokens) instead of the full session boilerplate:
+
+```js
+engram_session({
+    action: "start",
+    agent_name: "sub-agent-auth",
+    agent_role: "sub",
+    task_id: 42, // The task ID assigned by the orchestrator
+});
+```
+
+The response includes only:
+
+- The specified task's details (title, description, priority, tags)
+- File notes for files assigned to that task
+- Decisions matching the task's tags
+- Up to 5 relevant conventions
+
+Sub-agents should still call `engram_session(action:"end")` when done and `engram_memory(action:"record_change")` for any edits made.
+
+> **Note:** Sub-agent mode is auto-activated when `agent_role: "sub"` is passed. No separate configuration needed.
 
 ---
 
@@ -880,32 +916,6 @@ engram_session({
 | Lint code against conventions   | `engram_find(action:"lint", content:"...")`                 | Returns `violations[]`                  |
 | Backup the database             | `engram_admin(action:"backup")`                             |                                         |
 | **End every session**           | `engram_session(action:"end")`                              | Be specific: files, functions, blockers |
-
----
-
-### 8. Sub-Agent Sessions (v1.7+)
-
-When your orchestrator spawns a sub-agent to handle a specific task, use `agent_role: "sub"` to get a lightweight, task-scoped context (~300-500 tokens) instead of the full session boilerplate:
-
-```js
-engram_session({
-    action: "start",
-    agent_name: "sub-agent-auth",
-    agent_role: "sub",
-    task_id: 42, // The task ID assigned by the orchestrator
-});
-```
-
-The response includes only:
-
-- The specified task's details (title, description, priority, tags)
-- File notes for files assigned to that task
-- Decisions matching the task's tags
-- Up to 5 relevant conventions
-
-Sub-agents should still call `engram_session(action:"end")` when done and `engram_memory(action:"record_change")` for any edits made.
-
-> **Note:** Sub-agent mode is auto-activated when `agent_role: "sub"` is passed. No separate configuration needed.
 
 <!-- ENGRAM_INSTRUCTIONS_END -->
 
