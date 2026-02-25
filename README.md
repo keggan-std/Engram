@@ -114,6 +114,17 @@ Every MCP tool call is logged to `tool_call_log`. Session Replay reconstructs th
 
 New `packages/engram-thin-client/` proxy enables Anthropic's `defer_loading` beta — tools are defined with `defer_loading: true` so **zero** schema tokens are consumed upfront. Claude discovers tools on demand via BM25 search. For agents using the Anthropic API directly.
 
+### 📦 `engram-universal-client` Package
+
+New `packages/engram-universal-thin-client/` proxy exposes Engram as a **single MCP tool** with an ~80-token schema — works with **every** MCP-compatible agent (Cursor, VS Code Copilot, Windsurf, Gemini CLI, GPT-based IDEs, Claude). BM25 routing maps free-text or near-miss action strings to the correct dispatcher. No Anthropic API required.
+
+| Approach | Schema tokens/call | Works universally |
+|---|---|---|
+| v1.5 (50+ tools) | ~32,500 | ✅ |
+| v1.6 dispatcher (4 tools) | ~1,600 | ✅ |
+| `engram-thin-client` | ~0 (deferred) | ⚠️ Anthropic only |
+| **`engram-universal-client`** | **~80** | ✅ **All agents** |
+
 > Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
 
 ---
@@ -171,7 +182,40 @@ engram install --ide <your-ide>
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
-### Option 3: Manual Configuration
+### Option 3: Universal Thin Client (All Agents — ~80 Token Schema)
+
+For maximum token efficiency across **any** MCP-compatible agent, use the universal thin client. It wraps Engram in a single `engram` tool with an ~80-token schema. BM25 routing handles action resolution internally.
+
+**Cursor** (`~/.cursor/mcp.json`):
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-universal-client", "--project-root", "/absolute/path/to/project"]
+        }
+    }
+}
+```
+
+**VS Code Copilot** (`.vscode/mcp.json`):
+```json
+{
+    "servers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "engram-universal-client", "--project-root", "${workspaceFolder}"]
+        }
+    }
+}
+```
+
+**Windsurf / Gemini CLI / any MCP agent** — same pattern, replace `--project-root` with your project path.
+
+> The agent should call `engram({"action":"start"})` first. The response includes `tool_catalog` with all available actions.
+
+### Option 4: Manual Configuration
 
 If you prefer to configure manually, find your IDE below:
 
