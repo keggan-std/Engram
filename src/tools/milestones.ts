@@ -7,6 +7,7 @@ import { z } from "zod";
 import { getDb, now, getCurrentSessionId } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success } from "../response.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerMilestoneTools(server: McpServer): void {
     server.registerTool(
@@ -27,7 +28,7 @@ Returns:
                 title: z.string().min(3).describe("Milestone title"),
                 description: z.string().optional().describe("What was achieved"),
                 version: z.string().optional().describe("Version number"),
-                tags: z.array(z.string()).optional(),
+                tags: coerceStringArray().optional(),
             },
             annotations: {
                 readOnlyHint: false,

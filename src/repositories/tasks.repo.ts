@@ -70,6 +70,27 @@ export class TasksRepo {
         return (this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as TaskRow | undefined) ?? null;
     }
 
+    /**
+     * FTS5-ranked open tasks filtered by a focus query.
+     * Falls back to getOpen() if FTS tables are unavailable.
+     */
+    getOpenFocused(ftsQuery: string, limit: number = 15): TaskRow[] {
+        try {
+            return this.db.prepare(`
+                WITH ranked AS (
+                    SELECT rowid, rank FROM fts_tasks WHERE fts_tasks MATCH ?
+                )
+                SELECT t.* FROM tasks t
+                JOIN ranked ON ranked.rowid = t.id
+                WHERE t.status NOT IN ('done', 'cancelled')
+                ORDER BY ranked.rank
+                LIMIT ?
+            `).all(ftsQuery, limit) as TaskRow[];
+        } catch {
+            return this.getOpen(limit);
+        }
+    }
+
     getOpen(limit: number, resumeTask?: string): TaskRow[] {
         if (resumeTask) {
             const results = this.db.prepare(

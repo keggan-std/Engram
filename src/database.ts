@@ -9,7 +9,7 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
-import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService } from "./services/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService } from "./services/index.js";
 import { SERVER_VERSION } from "./constants.js";
 
 export interface Services {
@@ -18,6 +18,7 @@ export interface Services {
   git: GitService;
   events: EventTriggerService;
   update: UpdateService;
+  agentRules: AgentRulesService;
 }
 
 let _db: DatabaseType | null = null;
@@ -28,6 +29,52 @@ let _dbPath: string = "";
 
 // ─── Initialization ──────────────────────────────────────────────────
 
+/**
+ * Open the SQLite database, auto-recovering from WAL/SHM corruption.
+ * If the WAL or SHM files cause SQLITE_CORRUPT, they are removed and the
+ * main DB is reopened (which is almost always intact in WAL mode).
+ * If the main DB itself is corrupt, it is renamed to a timestamped .corrupt
+ * file and a fresh database is created.
+ */
+function openDatabaseWithRecovery(dbPath: string): DatabaseType {
+  // First attempt
+  try {
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL"); // quick smoke-test
+    db.pragma("journal_mode = DELETE"); // reset so caller sets it properly
+    return db;
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+  }
+
+  // Try removing WAL/SHM — the main file is usually fine in WAL mode
+  const walPath = dbPath + "-wal";
+  const shmPath = dbPath + "-shm";
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  for (const p of [walPath, shmPath]) {
+    if (fs.existsSync(p)) {
+      try { fs.renameSync(p, p + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
+    }
+  }
+
+  try {
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL");
+    db.pragma("journal_mode = DELETE");
+    console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
+    return db;
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+  }
+
+  // Main DB is also corrupt — rename it and start fresh
+  try { fs.renameSync(dbPath, dbPath + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
+  console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
+  return new Database(dbPath);
+}
+
 export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   _projectRoot = projectRoot;
   const dbDir = path.join(projectRoot, DB_DIR_NAME);
@@ -35,7 +82,7 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   ensureGitignore(projectRoot);
 
   _dbPath = path.join(dbDir, DB_FILE_NAME);
-  _db = new Database(_dbPath);
+  _db = openDatabaseWithRecovery(_dbPath);
 
   // Performance pragmas
   _db.pragma("journal_mode = WAL");
@@ -57,6 +104,7 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
     git: new GitService(projectRoot),
     events: new EventTriggerService(_repos),
     update: new UpdateService(_repos, SERVER_VERSION),
+    agentRules: new AgentRulesService(projectRoot),
   };
 
   return _db;
@@ -194,4 +242,28 @@ export function forceFlush(): void {
   // With better-sqlite3 + WAL mode, we can force a WAL checkpoint
   const db = getDb();
   db.pragma("wal_checkpoint(TRUNCATE)");
+}
+
+/**
+ * F10: Log a tool invocation for session replay diagnostics.
+ * Silent no-op if the tool_call_log table doesn't exist (older schemas).
+ */
+export function logToolCall(
+  toolName: string,
+  outcome: "success" | "error" = "success",
+  notes?: string
+): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      "INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(
+      getCurrentSessionId(),
+      null,
+      toolName,
+      Date.now(),
+      outcome,
+      notes ?? null
+    );
+  } catch { /* table may not exist on older schemas — always silent */ }
 }

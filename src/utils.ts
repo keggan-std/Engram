@@ -3,8 +3,10 @@
 // ============================================================================
 
 import { execSync } from "child_process";
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { z } from "zod";
 import {
   EXCLUDED_DIRS,
   LAYER_PATTERNS,
@@ -13,6 +15,25 @@ import {
   PROJECT_MARKERS,
 } from "./constants.js";
 import type { ArchLayer } from "./types.js";
+
+/**
+ * Zod preprocessor that accepts either a real string array OR a JSON-string-
+ * encoded array (e.g. '["a","b"]'). Required because some MCP clients (including
+ * Claude Code) occasionally serialize optional array parameters as JSON strings
+ * instead of native JSON arrays, causing z.array() to reject them with
+ * "Expected array, received string".
+ *
+ * Usage:  tags: coerceStringArray().optional()
+ *         (replaces: z.array(z.string()).optional())
+ */
+export function coerceStringArray() {
+  return z.preprocess((v) => {
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch { return v; }
+    }
+    return v;
+  }, z.array(z.string()));
+}
 
 /**
  * Normalize a file path for consistent storage as a database key.
@@ -235,4 +256,51 @@ export function minutesSince(isoTimestamp: string): number {
 export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.slice(0, maxLength - 3) + "...";
+}
+
+/**
+ * Escape a query string for safe use in SQLite FTS5 MATCH expressions.
+ * Each word is wrapped in double quotes for exact-word matching.
+ * Multiple words are joined with OR so any match surfaces the row.
+ *
+ * Example: "auth refactor" → `"auth" OR "refactor"`
+ */
+export function ftsEscape(query: string): string {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '""';
+  return words.map(w => `"${w.replace(/"/g, "")}"`).join(" OR ");
+}
+
+/**
+ * Get the actual modification time (Unix ms) of a file on disk.
+ * Resolves relative paths against projectRoot when provided.
+ * Returns null if the file does not exist or stat fails.
+ */
+export function getFileMtime(filePath: string, projectRoot?: string): number | null {
+  try {
+    const resolved =
+      projectRoot && !path.isAbsolute(filePath)
+        ? path.join(projectRoot, filePath)
+        : filePath;
+    return fs.statSync(resolved).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute a SHA-256 hex digest of a file's contents.
+ * Returns null if the file cannot be read.
+ */
+export function getFileHash(filePath: string, projectRoot?: string): string | null {
+  try {
+    const resolved =
+      projectRoot && !path.isAbsolute(filePath)
+        ? path.join(projectRoot, filePath)
+        : filePath;
+    const content = fs.readFileSync(resolved);
+    return createHash("sha256").update(content).digest("hex");
+  } catch {
+    return null;
+  }
 }

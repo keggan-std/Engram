@@ -320,6 +320,228 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V5: Trustworthy Context ───────────────────────────────────────
+  {
+    version: 5,
+    description: "Trustworthy context — file_mtime for stale detection; focus-ready indexes",
+    up: (db) => {
+      db.exec(`
+        -- Store the actual file modification time (Unix ms) when notes are saved.
+        -- Used to detect stale notes: if the file changed after notes were written,
+        -- the agent is warned so it can decide whether to re-read or trust the cache.
+        ALTER TABLE file_notes ADD COLUMN file_mtime INTEGER;
+
+        -- Composite index to speed up focused start_session queries on tasks
+        CREATE INDEX IF NOT EXISTS idx_tasks_priority_status
+          ON tasks(priority, status)
+          WHERE status NOT IN ('done', 'cancelled');
+      `);
+    },
+  },
+
+  // ─── V6: Multi-Agent Coordination ─────────────────────────────────
+  {
+    version: 6,
+    description: "Multi-agent coordination — agents registry, broadcasts, task claiming",
+    up: (db) => {
+      db.exec(`
+        -- Agent registry: tracks active agents, their status, and current task
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          last_seen INTEGER NOT NULL,
+          current_task_id INTEGER,
+          status TEXT DEFAULT 'idle'
+        );
+        CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
+
+        -- Broadcast messages: agents can post messages readable by all other agents
+        CREATE TABLE IF NOT EXISTS broadcasts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_agent TEXT NOT NULL,
+          message TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          read_by TEXT DEFAULT '[]'
+        );
+        CREATE INDEX IF NOT EXISTS idx_broadcasts_created ON broadcasts(created_at DESC);
+
+        -- Task claiming: add claimed_by and claimed_at to tasks for atomic ownership
+        ALTER TABLE tasks ADD COLUMN claimed_by TEXT;
+        ALTER TABLE tasks ADD COLUMN claimed_at INTEGER;
+        CREATE INDEX IF NOT EXISTS idx_tasks_claimed ON tasks(claimed_by) WHERE claimed_by IS NOT NULL;
+      `);
+    },
+  },
+
+  // ─── V7: File Locks + Pending Work ────────────────────────────────
+  {
+    version: 7,
+    description: "Agent safety — file_locks for concurrent write prevention, pending_work for intent recording",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS file_locks (
+          file_path TEXT PRIMARY KEY,
+          agent_id  TEXT NOT NULL,
+          reason    TEXT,
+          locked_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_locks_expires ON file_locks(expires_at);
+
+        CREATE TABLE IF NOT EXISTS pending_work (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent_id    TEXT NOT NULL,
+          session_id  INTEGER,
+          description TEXT NOT NULL,
+          files       TEXT NOT NULL DEFAULT '[]',
+          started_at  INTEGER NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'pending'
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_work_status ON pending_work(status);
+        CREATE INDEX IF NOT EXISTS idx_pending_work_agent  ON pending_work(agent_id, status);
+        CREATE INDEX IF NOT EXISTS idx_pending_work_session ON pending_work(session_id);
+      `);
+    },
+  },
+
+  // ─── V8: Context Pressure Tracking ────────────────────────────────
+  {
+    version: 8,
+    description: "Context pressure — session_bytes table for byte-estimate token tracking",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_bytes (
+          session_id INTEGER PRIMARY KEY,
+          input_bytes  INTEGER NOT NULL DEFAULT 0,
+          output_bytes INTEGER NOT NULL DEFAULT 0,
+          tool_calls   INTEGER NOT NULL DEFAULT 0,
+          updated_at   INTEGER NOT NULL
+        );
+
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_notice_pct',  '50', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_warning_pct', '70', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_pressure_urgent_pct',  '85', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('context_window_size',    '200000', datetime('now'));
+      `);
+    },
+  },
+
+  // ─── V9: Knowledge Graph Enhancements ─────────────────────────────
+  {
+    version: 9,
+    description: "Knowledge graph — git_branch in file_notes for branch-aware staleness; depends_on in decisions for dependency chains",
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE file_notes ADD COLUMN git_branch TEXT;
+
+        ALTER TABLE decisions ADD COLUMN depends_on TEXT;
+        CREATE INDEX IF NOT EXISTS idx_decisions_depends ON decisions(depends_on)
+          WHERE depends_on IS NOT NULL;
+      `);
+    },
+  },
+
+  // ─── V10: Structured Agent Handoffs ───────────────────────────────
+  {
+    version: 10,
+    description: "Session handoffs — handoffs table for graceful context-exhaustion transfers between agents",
+    up: (db) => {
+      db.exec(`
+        -- Stores structured handoff packets for context-exhaustion transfers.
+        -- start_session surfaces any unacknowledged handoff as handoff_pending.
+        CREATE TABLE IF NOT EXISTS handoffs (
+          id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+          from_session_id        INTEGER NOT NULL,
+          from_agent             TEXT,
+          created_at             INTEGER NOT NULL,
+          reason                 TEXT NOT NULL,
+          next_agent_instructions TEXT,
+          resume_at              TEXT,
+          git_branch             TEXT,
+          open_task_ids          TEXT,
+          last_file_touched      TEXT,
+          acknowledged_at        INTEGER,
+          acknowledged_by        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(from_session_id);
+        CREATE INDEX IF NOT EXISTS idx_handoffs_acked   ON handoffs(acknowledged_at) WHERE acknowledged_at IS NULL;
+      `);
+    },
+  },
+
+  // ─── V11: Tool Call Log (Session Replay / Diagnostics) ────────────
+  {
+    version: 11,
+    description: "Tool call log — records every MCP tool invocation for session replay and audit",
+    up: (db) => {
+      db.exec(`
+        -- Log of every MCP tool invocation for diagnostic replay.
+        -- Populated by tools that call logToolCall(); passive tools may skip logging.
+        CREATE TABLE IF NOT EXISTS tool_call_log (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id  INTEGER,
+          agent_id    TEXT,
+          tool_name   TEXT NOT NULL,
+          called_at   INTEGER NOT NULL,
+          input_hash  TEXT,
+          outcome     TEXT NOT NULL DEFAULT 'success',
+          notes       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_call_log(session_id);
+        CREATE INDEX IF NOT EXISTS idx_tool_calls_time    ON tool_call_log(called_at);
+      `);
+    },
+  },
+
+  // ─── V12: Checkpoints ─────────────────────────────────────────────
+  {
+    version: 12,
+    description: "Checkpoints — working memory offload table for agent context preservation across sessions",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS checkpoints (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id           INTEGER NOT NULL,
+          agent_name           TEXT,
+          created_at           INTEGER NOT NULL,
+          current_understanding TEXT NOT NULL,
+          progress             TEXT NOT NULL,
+          relevant_files       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id);
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_time    ON checkpoints(created_at DESC);
+      `);
+    },
+  },
+
+  // ─── V13: Staleness-Enhanced ───────────────────────────────────────
+  {
+    version: 13,
+    description: "Staleness-enhanced — content_hash SHA-256 on file_notes for hash-based confidence scoring",
+    up: (db) => {
+      db.exec(`ALTER TABLE file_notes ADD COLUMN content_hash TEXT;`);
+    },
+  },
+
+  // ─── V14: Tiered Verbosity ───────────────────────────────────────
+  {
+    version: 14,
+    description: "Tiered verbosity — executive_summary column on file_notes for Tier 1 micro-level reads",
+    up: (db) => {
+      db.exec(`ALTER TABLE file_notes ADD COLUMN executive_summary TEXT;`);
+    },
+  },
+
+  // ─── V15: Multi-Agent Specializations ───────────────────────────
+  {
+    version: 15,
+    description: "Multi-agent specializations — specializations TEXT (JSON array) on agents for task routing",
+    up: (db) => {
+      db.exec(`ALTER TABLE agents ADD COLUMN specializations TEXT;`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

@@ -16,7 +16,7 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 4;
+export const DB_VERSION = 11; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
@@ -28,6 +28,9 @@ export const DEFAULT_PAGINATION_LIMIT = 20;
 export const SNAPSHOT_TTL_MINUTES = 30;
 export const COMPACTION_THRESHOLD_SESSIONS = 50;
 export const BACKUP_DIR_NAME = "backups";
+export const FOCUS_MAX_ITEMS_PER_CATEGORY = 15;
+export const FILE_MTIME_STALE_HOURS = 24; // After this many hours of drift, confidence = "stale"
+export const FILE_LOCK_DEFAULT_TIMEOUT_MINUTES = 30; // Auto-expire file locks after this many minutes
 export const DEFAULT_RETENTION_DAYS = 90;
 export const MAX_BACKUP_COUNT = 10;
 

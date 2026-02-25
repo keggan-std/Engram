@@ -4,10 +4,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, now, getCurrentSessionId } from "../database.js";
+import { getDb, now, getCurrentSessionId, getRepos } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
 import type { ScheduledEventRow } from "../types.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerSchedulerTools(server: McpServer): void {
     // ─── SCHEDULE EVENT ──────────────────────────────────────────────────
@@ -41,7 +42,7 @@ Returns:
                 priority: z.enum(["critical", "high", "medium", "low"]).default("medium"),
                 requires_approval: z.boolean().default(true).describe("Whether user must approve"),
                 recurrence: z.enum(["once", "every_session", "daily", "weekly"]).optional().describe("Recurrence pattern"),
-                tags: z.array(z.string()).optional().describe("Tags"),
+                tags: coerceStringArray().optional().describe("Tags"),
             },
             annotations: {
                 readOnlyHint: false,
@@ -300,11 +301,18 @@ Returns:
         `${TOOL_PREFIX}_check_events`,
         {
             title: "Check Events",
-            description: `Check for events that have been triggered or are pending. Use this mid-session to see if any datetime triggers have fired or if there are events waiting for action. Lightweight — suitable for periodic polling.
+            description: `Check for triggered/pending events AND context pressure. Use mid-session to see if datetime triggers have fired or if context window is filling up. Pass context_tokens_used for precise pressure detection (Level 3 — most accurate). Without it, Engram uses byte-estimate or heuristics.
+
+Args:
+  - context_tokens_used (number, optional): Tokens consumed so far this session (agent-reported, most accurate)
+  - context_window_total (number, optional): Total context window size (default: configured value, usually 200000)
 
 Returns:
-  Array of triggered/pending events that need attention.`,
-            inputSchema: {},
+  Triggered/pending events + optional context_pressure warning at 50%/70%/85% thresholds.`,
+            inputSchema: {
+                context_tokens_used: z.number().int().optional().describe("Tokens consumed so far (agent-reported, most accurate)"),
+                context_window_total: z.number().int().optional().describe("Total context window size (default: configured value)"),
+            },
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -312,7 +320,7 @@ Returns:
                 openWorldHint: false,
             },
         },
-        async () => {
+        async ({ context_tokens_used, context_window_total }) => {
             const db = getDb();
             const timestamp = now();
 
@@ -333,20 +341,174 @@ Returns:
             const triggered = events.filter(e => e.status === "triggered");
             const pending = events.filter(e => e.status === "pending");
 
+            // ─── F3: Context Pressure Detection ─────────────────────────────────
+            const contextPressure = detectContextPressure(context_tokens_used, context_window_total);
+
             return success({
                 triggered_count: triggered.length,
                 pending_count: pending.length,
                 triggered_events: triggered,
                 pending_events: pending,
-                message: triggered.length > 0
-                    ? `${triggered.length} event(s) triggered and awaiting action.`
-                    : "No events triggered. All clear.",
+                context_pressure: contextPressure,
+                message: [
+                    triggered.length > 0
+                        ? `${triggered.length} event(s) triggered and awaiting action.`
+                        : "No events triggered.",
+                    contextPressure
+                        ? `⚠️ Context pressure [${contextPressure.severity.toUpperCase()}]: ${contextPressure.message}`
+                        : null,
+                ].filter(Boolean).join(" ") || "All clear.",
             });
+        }
+    );
+
+    // ─── ACCUMULATE BYTES (for Level 2 context pressure tracking) ────────
+    server.registerTool(
+        `${TOOL_PREFIX}_track_context`,
+        {
+            title: "Track Context",
+            description: `Update the byte-usage estimate for the current session. Call this periodically (e.g. every 5-10 tool calls) with the approximate sizes of tool inputs and outputs to improve context pressure accuracy. This enables Level 2 byte-estimate pressure detection in engram_check_events when agent-reported tokens are not available.
+
+Args:
+  - input_bytes (number): Approximate bytes in tool inputs this batch
+  - output_bytes (number): Approximate bytes in tool outputs this batch
+
+Returns:
+  Updated session byte totals and current pressure estimate.`,
+            inputSchema: {
+                input_bytes: z.number().int().min(0).describe("Approximate input bytes this batch"),
+                output_bytes: z.number().int().min(0).describe("Approximate output bytes this batch"),
+            },
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: false,
+            },
+        },
+        async ({ input_bytes, output_bytes }) => {
+            const sessionId = getCurrentSessionId();
+            if (!sessionId) return success({ message: "No active session." });
+
+            try {
+                db_upsertSessionBytes(sessionId, input_bytes, output_bytes);
+                const totals = db_getSessionBytes(sessionId);
+                const pressure = detectContextPressure(undefined, undefined, totals);
+                return success({
+                    session_id: sessionId,
+                    total_input_bytes: totals?.input_bytes ?? 0,
+                    total_output_bytes: totals?.output_bytes ?? 0,
+                    tool_calls: totals?.tool_calls ?? 0,
+                    estimated_tokens: Math.round(((totals?.input_bytes ?? 0) + (totals?.output_bytes ?? 0)) / 4),
+                    context_pressure: pressure,
+                    message: pressure
+                        ? `⚠️ Context pressure [${pressure.severity.toUpperCase()}]: ~${pressure.estimated_pct_used}% used.`
+                        : "Byte tracking updated. No pressure threshold crossed.",
+                });
+            } catch (e) {
+                return success({ message: `Byte tracking unavailable: ${e}` });
+            }
         }
     );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+interface SessionBytesRow { session_id: number; input_bytes: number; output_bytes: number; tool_calls: number; }
+
+function db_getSessionBytes(sessionId: number): SessionBytesRow | null {
+    try {
+        return getDb().prepare(
+            "SELECT session_id, input_bytes, output_bytes, tool_calls FROM session_bytes WHERE session_id = ?"
+        ).get(sessionId) as SessionBytesRow | null;
+    } catch { return null; }
+}
+
+function db_upsertSessionBytes(sessionId: number, inputBytes: number, outputBytes: number): void {
+    getDb().prepare(
+        `INSERT INTO session_bytes (session_id, input_bytes, output_bytes, tool_calls, updated_at)
+         VALUES (?, ?, ?, 1, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           input_bytes  = input_bytes  + excluded.input_bytes,
+           output_bytes = output_bytes + excluded.output_bytes,
+           tool_calls   = tool_calls   + 1,
+           updated_at   = excluded.updated_at`
+    ).run(sessionId, inputBytes, outputBytes, Date.now());
+}
+
+interface ContextPressureResult {
+    severity: "notice" | "warning" | "urgent";
+    estimated_pct_used: number;
+    source: "agent_reported" | "byte_estimate" | "heuristic";
+    message: string;
+    suggestions: string[];
+}
+
+/**
+ * Determine context pressure using the best available signal:
+ *   Level 3 (most accurate)  — agent passes context_tokens_used
+ *   Level 2 (byte estimate)  — session_bytes row from DB
+ *   Level 1 (heuristic)      — session duration in config / fallback
+ */
+function detectContextPressure(
+    agentTokensUsed?: number,
+    agentWindowTotal?: number,
+    sessionBytesOverride?: SessionBytesRow | null,
+): ContextPressureResult | null {
+    try {
+        const repos = getRepos();
+        const noticePct  = repos.config.getInt("context_pressure_notice_pct",  50);
+        const warningPct = repos.config.getInt("context_pressure_warning_pct", 70);
+        const urgentPct  = repos.config.getInt("context_pressure_urgent_pct",  85);
+        const windowSize = repos.config.getInt("context_window_size",     200_000);
+
+        let pct: number;
+        let source: ContextPressureResult["source"];
+
+        if (agentTokensUsed !== undefined) {
+            // Level 3: exact agent-reported value
+            const total = agentWindowTotal ?? windowSize;
+            pct = Math.round((agentTokensUsed / total) * 100);
+            source = "agent_reported";
+        } else {
+            // Level 2: byte estimate from session_bytes
+            const sessionId = getCurrentSessionId();
+            const bytes = sessionBytesOverride !== undefined
+                ? sessionBytesOverride
+                : (sessionId ? db_getSessionBytes(sessionId) : null);
+
+            if (bytes && (bytes.input_bytes + bytes.output_bytes) > 0) {
+                const estimatedTokens = Math.round((bytes.input_bytes + bytes.output_bytes) / 4);
+                pct = Math.round((estimatedTokens / windowSize) * 100);
+                source = "byte_estimate";
+            } else {
+                // Level 1: heuristic — not enough data
+                return null;
+            }
+        }
+
+        if (pct < noticePct) return null;
+
+        const severity: ContextPressureResult["severity"] =
+            pct >= urgentPct  ? "urgent"  :
+            pct >= warningPct ? "warning" : "notice";
+
+        const suggestions =
+            severity === "urgent"  ? ["engram_end_session", "engram_create_task"] :
+            severity === "warning" ? ["engram_create_task", "engram_end_session"] :
+                                     ["finish current sub-task before starting new ones"];
+
+        const messages = {
+            notice:  `~${pct}% of context window used (${source}). Finish current sub-task before starting new ones.`,
+            warning: `~${pct}% of context window used (${source}). Create tasks for incomplete work now.`,
+            urgent:  `~${pct}% of context window used (${source}). Call engram_end_session immediately.`,
+        };
+
+        return { severity, estimated_pct_used: pct, source, message: messages[severity], suggestions };
+    } catch {
+        return null; /* best effort */
+    }
+}
 
 function calculateNextTrigger(recurrence: string, currentValue: string | null): string {
     const base = currentValue ? new Date(currentValue) : new Date();

@@ -1,3 +1,386 @@
+# v1.6.0 — Agent Safety, Session Handoffs, Knowledge Graph & Diagnostics
+
+**Engram v1.6.0** delivers six feature tracks developed in parallel, focused on making multi-agent workflows safer, making cross-session context transfers seamless, and giving agents deeper visibility into what they and their peers are doing.
+
+Seven feature branches were developed and merged into `develop`:
+
+---
+
+## Breaking Changes
+
+None. v1.6.0 is fully backwards-compatible. All existing tool calls, IDE configs, and databases continue to work unchanged. The schema auto-migrates from V6 through V7–V11 on first startup.
+
+---
+
+## F1/F2 — Agent Safety (`feature/v1.6-agent-safety`)
+
+### File Locking
+
+Two new tools prevent concurrent write conflicts between parallel agents:
+
+- **`engram_lock_file`** — Acquires an exclusive write lock on a file with a reason and optional expiry. Fails immediately if another agent holds the lock, returning who holds it.
+- **`engram_unlock_file`** — Releases the lock. Locks auto-expire after 30 minutes (configurable via `FILE_LOCK_DEFAULT_TIMEOUT_MINUTES`).
+- **`engram_get_file_notes`** (updated) — Now surfaces `lock_status` for every file: `locked`, `expired`, or `none`. The locking agent's ID is included so other agents know whom to coordinate with.
+
+### Pending Work Intent
+
+- **`engram_begin_work`** — Record your intent before touching a file (agent ID, description, file list). Stored in a new `pending_work` table.
+- **`engram_end_work`** — Mark the intent complete or cancelled.
+- **`engram_start_session`** (updated) — Now surfaces `abandoned_work`: any `pending_work` records left open when a session ended unexpectedly. Automatically marks old items as `abandoned` so new sessions know what was interrupted.
+
+Schema change: V7 adds `file_locks` and `pending_work` tables.
+
+---
+
+## F3 — Context Pressure Detection (`feature/v1.6-context-pressure`)
+
+`engram_check_events` now includes a `context_pressure` event type with three severity levels:
+
+| Level | Threshold | Message |
+|-------|-----------|---------|
+| `notice` | ≥ 50% | Context filling — save progress soon |
+| `warning` | ≥ 70% | Context > 70% — consider ending session |
+| `urgent` | ≥ 85% | Context critical — end session now |
+
+Thresholds are stored in `config` and adjustable via `engram_config`. Byte estimates are tracked per-session in a new `session_bytes` table (V8).
+
+---
+
+## F4/F8 — Knowledge Graph Enhancements (`feature/v1.6-knowledge-graph`)
+
+### Branch-Aware File Notes (F4)
+
+`engram_set_file_notes` now captures the current `git_branch` at write time. On read, `engram_get_file_notes` detects if the stored branch differs from the current branch and returns a `branch_warning` field:
+
+```json
+{
+  "branch_warning": "Notes written on 'main' — you are on 'feature/auth'. File may differ."
+}
+```
+
+Schema change: V9 adds `git_branch TEXT` column to `file_notes`.
+
+### Decision Dependency Chains (F8)
+
+`engram_record_decision` accepts a new optional `depends_on` field — an array of decision IDs that must be in place for this decision to be valid. `engram_get_decisions` returns the dependency chain so agents can reason about which decisions block others.
+
+Schema change: V9 adds `depends_on TEXT` column to `decisions`.
+
+---
+
+## F6 — Session Handoffs (`feature/v1.6-session-handoff`)
+
+Two new tools enable graceful agent-to-agent context transfers when approaching context limits:
+
+- **`engram_handoff`** — The outgoing agent records a structured handoff packet: reason, instructions for the next agent, which tasks are open, the last file touched, and the current git branch. All context is auto-captured.
+- **`engram_acknowledge_handoff`** — The incoming agent marks the handoff read, clearing it from future `start_session` responses.
+
+`engram_start_session` (updated) — Returns `handoff_pending` in all verbosity modes if an unacknowledged handoff exists. The message includes the originating agent and a direct call to acknowledge.
+
+Schema change: V10 adds `handoffs` table.
+
+---
+
+## Q1/Q3/Q4/Q5 — Quick Wins (`feature/v1.6-quick-wins`)
+
+Four targeted improvements:
+
+**Q1 — Search Confidence Enrichment:** `engram_search` results that include `file_notes` now carry per-result `confidence` levels (`high`, `medium`, `stale`, `unknown`) matching the per-file staleness detection already in `engram_get_file_notes`.
+
+**Q3 — Per-Agent Metrics in Stats:** `engram_stats` now returns an `agents` array with per-agent session counts, changes recorded, decisions made, and last-active timestamp — useful for auditing which agent has been most productive.
+
+**Q4 — Unclosed Task Warning in End Session:** `engram_end_session` now warns if the ending agent has claimed tasks that are still open, listing each by ID and title. The session closes normally — the warning is surfaced in the response for the agent to act on.
+
+**Q5 — Suggested Focus:** `engram_start_session` now returns `suggested_focus` when no explicit `focus` parameter was provided. The suggestion is derived from: the most recently-touched file's parent directory, the highest-priority task title, and the most recent decision — whichever is most informative. Agents can pass this back as `focus` on the next call.
+
+---
+
+## F7 — Git Hook Auto-Recording (`feature/v1.6-automation`)
+
+The installer now supports automatic commit recording via git hooks:
+
+```bash
+npx -y engram-mcp-server install --install-hooks
+npx -y engram-mcp-server install --remove-hooks
+```
+
+`--install-hooks` writes a `post-commit` hook to `.git/hooks/` that runs `engram record-commit` after every commit. The new `record-commit` CLI command reads the last commit's changed files from `git show --name-only` and records them to the `changes` table automatically — no agent action required.
+
+```bash
+# Also available as a standalone command:
+npx -y engram-mcp-server record-commit
+```
+
+---
+
+## F10 — Session Replay & Diagnostics (`feature/v1.6-diagnostics`)
+
+### Tool Call Log
+
+Every MCP tool invocation is now logged to a new `tool_call_log` table (V11). The log captures session ID, agent ID, tool name, timestamp, outcome (`success`/`error`), and optional notes.
+
+### `engram_replay`
+
+A new tool reconstructs the complete timeline of a session in chronological order, interleaving:
+- Tool calls from `tool_call_log`
+- Changes from `changes`
+- Decisions from `decisions`
+- Tasks created/updated
+- Milestones
+
+Useful for post-session audits, debugging unexpected agent behaviour, and handoff documentation.
+
+```js
+engram_replay({ session_id: 14, limit: 50 })
+```
+
+Schema change: V11 adds `tool_call_log` table.
+
+---
+
+> Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence. [Full notes below →](#v150--multi-agent-coordination-trustworthy-context--knowledge-intelligence)
+
+---
+
+# v1.5.0 — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence
+
+**Engram v1.5.0** is the biggest feature release since v1.0. It transforms Engram from a single-agent memory store into a full **multi-agent coordination platform** — while simultaneously making every individual agent more trustworthy, context-efficient, and self-sufficient.
+
+Four major feature tracks were developed in parallel on separate branches and merged into `develop`:
+
+---
+
+## Breaking Changes
+
+None. v1.5.0 is fully backwards-compatible. All existing tool calls, IDE configs, and databases continue to work unchanged. The schema auto-migrates to V6 on first startup.
+
+---
+
+## F1 — Trustworthy Context
+
+*Branch: `feature/trustworthy-context`*
+
+The core problem: **can the agent trust what Engram tells it?** File notes written weeks ago may no longer reflect the file. Search results may reference stale architecture. This track makes every piece of returned memory carry a confidence signal.
+
+### File Note Staleness Detection
+
+`engram_set_file_notes` now captures the actual filesystem `mtime` (milliseconds since epoch) of the file at the moment notes are saved. On every subsequent `engram_get_file_notes`, Engram compares the stored mtime against the current filesystem mtime and returns:
+
+```json
+{
+  "confidence": "stale",
+  "stale": true,
+  "staleness_hours": 18
+}
+```
+
+| `confidence` | Meaning |
+|---|---|
+| `high` | File mtime unchanged since notes were written — fully trustworthy |
+| `medium` | File changed recently (< 24h) — notes likely still valid, re-read if editing |
+| `stale` | File changed significantly (> 24h) — treat notes as a hint, re-read before acting |
+| `unknown` | No mtime stored (legacy notes or file not found) |
+
+The agent is never blocked — notes are always returned. The confidence field lets the agent decide whether to trust or re-read.
+
+### `engram_start_session` — Focus Parameter
+
+A new optional `focus` parameter on `engram_start_session` allows agents to declare their working topic upfront:
+
+```js
+engram_start_session({ focus: "auth refactor" })
+```
+
+When provided, Engram runs **FTS5-ranked queries** against decisions, tasks, and changes — returning only the top-15 most relevant items per category instead of everything. Conventions are always returned in full.
+
+The response includes a `focus` metadata block:
+
+```json
+{
+  "focus": {
+    "query": "auth refactor",
+    "decisions_returned": 4,
+    "tasks_returned": 3,
+    "changes_returned": 7,
+    "note": "Context filtered to focus. Full memory available via engram_search."
+  }
+}
+```
+
+This can reduce session boot token cost by 60–80% when working on a specific sub-system.
+
+---
+
+## F2 — Smart Dump & Multi-Agent Coordination
+
+*Branch: `feature/smart-dump-coordination`*
+
+Engram now supports **multiple parallel agents** working on the same project simultaneously without stepping on each other. Schema V6 adds `agents` and `broadcasts` tables, plus task claiming columns.
+
+### `engram_dump` — Raw Brain Dump
+
+Agents can now paste raw research notes, findings, or thoughts into Engram without deciding where they belong:
+
+```js
+engram_dump({
+  content: "Found that the auth token is stored in localStorage — may be a security issue. Should use httpOnly cookies instead.",
+  hint: "auto"  // or "decision" | "task" | "convention" | "finding"
+})
+```
+
+Engram scores the content against keyword heuristics and classifies it as a `decision`, `task`, `convention`, or `finding` (stored as a change record). It **always** returns `extracted_items[]` showing exactly what was stored and where — the agent must verify, never trust blindly.
+
+### Atomic Task Claiming
+
+Two agents working in parallel will never pick up the same task:
+
+```js
+// Agent A
+engram_claim_task({ task_id: 42, agent_id: "claude-code-main" })
+// → success: Task #42 claimed
+
+// Agent B (same millisecond)
+engram_claim_task({ task_id: 42, agent_id: "subagent-auth" })
+// → error: Task #42 is already claimed by agent "claude-code-main"
+```
+
+The claim uses a single atomic `UPDATE WHERE claimed_by IS NULL` — no race condition possible with SQLite's WAL mode.
+
+### Agent Registry & Heartbeat
+
+```js
+engram_agent_sync({ agent_id: "subagent-auth", status: "working", current_task_id: 42 })
+```
+
+Agents register themselves and send periodic heartbeats. If an agent goes silent for >30 minutes, its task claims are automatically released and its status is set to `stale`. This prevents deadlocks in long-running multi-agent workflows.
+
+### Inter-Agent Broadcasting
+
+```js
+engram_broadcast({ from_agent: "main", message: "Auth module done — you can start the API integration now." })
+```
+
+All agents see unread broadcasts on their next `engram_agent_sync`. Messages expire after a configurable duration (default: 60 minutes).
+
+### New Coordination Tools Summary
+
+| Tool | Purpose |
+|---|---|
+| `engram_dump` | Auto-classify and store raw research content |
+| `engram_claim_task` | Atomically claim a task — safe for parallel agents |
+| `engram_release_task` | Release a claim back to the pool |
+| `engram_agent_sync` | Heartbeat + stale cleanup + unread broadcasts |
+| `engram_get_agents` | List all active agents and what they're working on |
+| `engram_broadcast` | Send a message all agents will see |
+
+---
+
+## F3 — Knowledge Intelligence
+
+*Branch: `feature/knowledge-intelligence`*
+
+### FTS5-Powered Conflict Detection
+
+`engram_record_decision` now uses FTS5 ranked queries (instead of LIKE) to find similar active decisions. If potential conflicts are found, they're returned as warnings alongside the newly recorded decision — without blocking the save:
+
+```json
+{
+  "decision_id": 31,
+  "warning": "Found 2 similar active decision(s). Review for potential conflicts.",
+  "similar_decisions": [
+    { "id": 12, "decision": "Use JWT for auth tokens...", "status": "active" }
+  ]
+}
+```
+
+### Cross-Project Global Knowledge Base
+
+Agents can now share battle-tested decisions and conventions across all projects on the machine via a **global knowledge base** at `~/.engram/global.db`.
+
+**Exporting knowledge:**
+```js
+engram_record_decision({
+  decision: "Always use httpOnly cookies for auth tokens — never localStorage.",
+  export_global: true   // mirrors to ~/.engram/global.db
+})
+
+engram_add_convention({
+  category: "security",
+  rule: "Auth tokens must use httpOnly cookies only.",
+  export_global: true
+})
+```
+
+**Reading global knowledge (on any project):**
+```js
+engram_get_global_knowledge({ query: "auth tokens" })
+// Returns decisions + conventions from ALL projects, with project_root provenance
+```
+
+The global DB has its own FTS5 index and is kept completely separate from per-project memory — it never pollutes or overwrites project-specific data.
+
+---
+
+## F4 — Quality of Life
+
+*Branch: `feature/quality-of-life`*
+
+### `engram_search` — Context Snippets
+
+The search tool now accepts a `context_chars` parameter (0–500). When set, each result gains a `context` field with a relevant text snippet from the record's content:
+
+```js
+engram_search({ query: "auth", context_chars: 150 })
+// Each result: { ...record, context: "...use httpOnly cookies for auth — never localStorage. Reason: XSS..." }
+```
+
+### `engram_generate_report`
+
+Generates a Markdown project report with configurable sections:
+
+```js
+engram_generate_report({
+  title: "Sprint 3 Handoff",
+  include_sections: ["tasks", "decisions", "changes", "conventions", "milestones"]
+})
+```
+
+Returns a formatted Markdown document ready to paste into a GitHub issue, PR description, or team wiki.
+
+### `engram_suggest_commit`
+
+Analyzes changes recorded in the current session and generates a conventional commit message:
+
+```js
+engram_suggest_commit()
+// Returns:
+// suggested_message: "feat(auth): implement httpOnly cookie token storage\n\n- src/auth/tokens.ts: replaced localStorage with httpOnly cookies\n..."
+// breakdown: { type: "feat", scope: "auth", files_changed: 3, change_types: { created: 1, modified: 2 } }
+```
+
+### Session Duration Statistics
+
+`engram_stats` now returns:
+- `avg_session_duration_minutes` — rolling average across all completed sessions
+- `longest_session_minutes` — the longest recorded session
+- `sessions_last_7_days` — activity pulse
+
+---
+
+## Internal Changes
+
+- **Schema V6:** `agents` table (id, name, last_seen, current_task_id, status), `broadcasts` table (id, from_agent, message, created_at, expires_at, read_by), `tasks.claimed_by`, `tasks.claimed_at`
+- **New repos:** `AgentsRepo`, `BroadcastsRepo` (follow existing repo conventions)
+- **New modules:** `src/global-db.ts` (lazy-initialized global KB), `src/tools/coordination.ts`, `src/tools/knowledge.ts`, `src/tools/report.ts`
+- **`findSimilar()` upgraded** from LIKE to FTS5 CTE with LIKE fallback
+- **All features merged** into `develop` via `--no-ff` merges. `main` is untouched pending further maturation on `develop`.
+
+---
+
+**Full Changelog**: https://github.com/keggan-std/Engram/compare/v1.4.1...develop
+
+---
+
 # v1.4.1 — Installer Infrastructure Audit: Path Fixes, Multi-IDE & Detection Improvements
 
 **Engram v1.4.1 is a targeted hotfix release.** A thorough audit of the entire installer infrastructure — verified against official documentation for every supported IDE — uncovered a series of critical and high-severity bugs that caused silent wrong-directory installs on macOS, invisible installs in Visual Studio, and unreliable IDE detection. All are fixed in this release, along with multi-IDE awareness and several UX improvements.

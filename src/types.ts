@@ -48,6 +48,18 @@ export interface FileNoteRow {
   last_modified_session: number | null;
   notes: string | null;
   complexity: Complexity | null;
+  file_mtime: number | null;      // Unix ms of file at time notes were saved
+  content_hash: string | null;    // SHA-256 of file content at note-write time
+  git_branch: string | null;      // git branch at note-write time
+  executive_summary: string | null; // 2-3 sentence Tier 1 micro summary
+}
+
+export type FileNoteConfidence = "high" | "medium" | "stale" | "unknown";
+
+export interface FileNoteWithStaleness extends FileNoteRow {
+  confidence: FileNoteConfidence;
+  stale: boolean;
+  staleness_hours?: number;       // Present when stale: true
 }
 
 export interface ConventionRow {
@@ -73,6 +85,26 @@ export interface TaskRow {
   tags: string | null;            // JSON array
   completed_at: string | null;
   blocked_by: string | null;      // JSON array of task IDs
+  claimed_by: string | null;      // Agent ID that claimed this task
+  claimed_at: number | null;      // Unix ms when claimed
+}
+
+export interface AgentRow {
+  id: string;
+  name: string;
+  last_seen: number;              // Unix ms
+  current_task_id: number | null;
+  status: AgentStatus;
+  specializations: string | null; // JSON array of skill tags e.g. ["typescript","database"]
+}
+
+export interface BroadcastRow {
+  id: number;
+  from_agent: string;
+  message: string;
+  created_at: number;             // Unix ms
+  expires_at: number | null;      // Unix ms
+  read_by: string;                // JSON array of agent IDs
 }
 
 export interface SnapshotRow {
@@ -181,6 +213,12 @@ export type TaskPriority =
   | "medium"
   | "low";
 
+export type AgentStatus =
+  | "idle"
+  | "working"
+  | "done"
+  | "stale";
+
 export type EventTriggerType =
   | "next_session"
   | "datetime"
@@ -203,6 +241,14 @@ export type EventRecurrence =
 
 // ─── Response Types ─────────────────────────────────────────────────────────
 
+export interface SessionFocusInfo {
+  query: string;
+  decisions_returned: number;
+  tasks_returned: number;
+  changes_returned: number;
+  note: string;
+}
+
 export interface SessionContext {
   session_id: number;
   previous_session: {
@@ -219,6 +265,7 @@ export interface SessionContext {
   active_conventions: ConventionRow[];
   open_tasks: TaskRow[];
   project_snapshot_age_minutes: number | null;
+  focus?: SessionFocusInfo;       // Present when focus param was used
   message: string;
 }
 

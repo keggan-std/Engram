@@ -4,9 +4,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getRepos } from "../database.js";
+import { now, getCurrentSessionId, getRepos, getProjectRoot } from "../database.js";
 import { TOOL_PREFIX } from "../constants.js";
 import { success, error } from "../response.js";
+import { writeGlobalDecision } from "../global-db.js";
+import { coerceStringArray } from "../utils.js";
 
 export function registerDecisionTools(server: McpServer): void {
     server.registerTool(
@@ -22,16 +24,19 @@ Args:
   - tags (array of strings, optional): Categorization tags (e.g., "architecture", "database", "ui", "api")
   - status: "active" | "experimental" (default: "active")
   - supersedes (number, optional): ID of a previous decision this replaces
+  - export_global (boolean, optional): Mirror this decision to the shared cross-project global KB at ~/.engram/global.db (default: false)
 
 Returns:
   Decision ID and confirmation. May include a warning if similar decisions exist.`,
             inputSchema: {
                 decision: z.string().min(5).describe("The decision that was made"),
                 rationale: z.string().optional().describe("Why — context, tradeoffs, alternatives considered"),
-                affected_files: z.array(z.string()).optional().describe("Files impacted by this decision"),
-                tags: z.array(z.string()).optional().describe("Tags for categorization"),
+                affected_files: coerceStringArray().optional().describe("Files impacted by this decision"),
+                tags: coerceStringArray().optional().describe("Tags for categorization"),
                 status: z.enum(["active", "experimental"]).default("active"),
                 supersedes: z.number().int().optional().describe("ID of a previous decision this replaces"),
+                depends_on: z.array(z.number().int()).optional().describe("IDs of decisions this one depends on. When those decisions are superseded, this one is surfaced as needing review."),
+                export_global: z.boolean().default(false).describe("Mirror to cross-project global KB at ~/.engram/global.db"),
             },
             annotations: {
                 readOnlyHint: false,
@@ -40,30 +45,47 @@ Returns:
                 openWorldHint: false,
             },
         },
-        async ({ decision, rationale, affected_files, tags, status, supersedes }) => {
+        async ({ decision, rationale, affected_files, tags, status, supersedes, depends_on, export_global }) => {
             const repos = getRepos();
             const timestamp = now();
             const sessionId = getCurrentSessionId();
 
             const newDecisionId = repos.decisions.create(
-                sessionId, timestamp, decision, rationale, affected_files, tags, status, supersedes
+                sessionId, timestamp, decision, rationale, affected_files, tags, status, supersedes, depends_on
             );
 
+            let reviewRequired: Array<{ id: number; decision: string }> = [];
             if (supersedes) {
                 repos.decisions.supersede(supersedes, newDecisionId);
+                // F8: find decisions that depend on the superseded one — they may need review
+                reviewRequired = repos.decisions.getDependents(supersedes).map(d => ({
+                    id: d.id,
+                    decision: d.decision,
+                }));
             }
 
-            // Check for similar existing decisions (deduplication signal)
+            // Mirror to global KB if requested
+            let globalId: number | null = null;
+            if (export_global) {
+                globalId = writeGlobalDecision({
+                    projectRoot: getProjectRoot(),
+                    decision, rationale, tags, timestamp,
+                });
+            }
+
+            // Check for similar existing decisions (deduplication / conflict signal via FTS5)
             const response: Record<string, unknown> = {
                 decision_id: newDecisionId,
-                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}.`,
+                message: `Decision #${newDecisionId} recorded${supersedes ? ` (supersedes #${supersedes})` : ""}${globalId != null ? " and exported to global KB." : "."}${reviewRequired.length > 0 ? ` ⚠️ ${reviewRequired.length} dependent decision(s) may need review (see review_required).` : ""}`,
                 decision,
+                exported_globally: globalId != null,
+                review_required: reviewRequired.length > 0 ? reviewRequired : undefined,
             };
 
             const similar = repos.decisions.findSimilar(decision, 5)
                 .filter(d => d.id !== newDecisionId);
             if (similar.length > 0) {
-                response.warning = `Found ${similar.length} similar active decision(s). Review for potential duplicates.`;
+                response.warning = `Found ${similar.length} similar active decision(s). Review for potential conflicts or duplicates.`;
                 response.similar_decisions = similar.map(d => ({
                     id: d.id,
                     decision: d.decision,
@@ -97,8 +119,8 @@ Returns:
                 decisions: z.array(z.object({
                     decision: z.string().min(5).describe("The decision"),
                     rationale: z.string().optional(),
-                    affected_files: z.array(z.string()).optional(),
-                    tags: z.array(z.string()).optional(),
+                    affected_files: coerceStringArray().optional(),
+                    tags: coerceStringArray().optional(),
                     status: z.enum(["active", "experimental"]).default("active"),
                 })).min(1).max(50).describe("Array of decisions to record"),
             },

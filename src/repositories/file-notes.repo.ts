@@ -20,15 +20,23 @@ export class FileNotesRepo {
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;
+            file_mtime?: number | null;
+            git_branch?: string | null;
+            content_hash?: string | null;
+            executive_summary?: string | null;
         }
     ): void {
         const normalizedPath = normalizePath(filePath);
         const deps = data.dependencies ? JSON.stringify(data.dependencies.map(d => normalizePath(d))) : null;
         const depnts = data.dependents ? JSON.stringify(data.dependents.map(d => normalizePath(d))) : null;
+        const mtime = data.file_mtime ?? null;
+        const branch = data.git_branch ?? null;
+        const hash = data.content_hash ?? null;
+        const exec_summary = data.executive_summary ?? null;
 
         this.db.prepare(`
-      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity, file_mtime, git_branch, content_hash, executive_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(file_path) DO UPDATE SET
         purpose = COALESCE(?, purpose),
         dependencies = COALESCE(?, dependencies),
@@ -37,16 +45,20 @@ export class FileNotesRepo {
         last_reviewed = ?,
         last_modified_session = COALESCE(?, last_modified_session),
         notes = COALESCE(?, notes),
-        complexity = COALESCE(?, complexity)
+        complexity = COALESCE(?, complexity),
+        file_mtime = COALESCE(?, file_mtime),
+        git_branch = COALESCE(?, git_branch),
+        content_hash = COALESCE(?, content_hash),
+        executive_summary = COALESCE(?, executive_summary)
     `).run(
             normalizedPath,
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null,
+            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
             // Update values
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null,
+            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
         );
     }
 
@@ -59,8 +71,11 @@ export class FileNotesRepo {
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;
-        }>,
-        timestamp: string,
+            file_mtime?: number | null;
+            git_branch?: string | null;
+            content_hash?: string | null;
+            executive_summary?: string | null;
+        }>,        timestamp: string,
         sessionId: number | null
     ): number {
         const tx = this.db.transaction(() => {
@@ -72,6 +87,10 @@ export class FileNotesRepo {
                     layer: entry.layer,
                     complexity: entry.complexity,
                     notes: entry.notes,
+                    file_mtime: entry.file_mtime,
+                    git_branch: entry.git_branch,
+                    content_hash: entry.content_hash,
+                    executive_summary: entry.executive_summary,
                 });
             }
         });
