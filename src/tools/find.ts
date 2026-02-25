@@ -6,6 +6,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { success } from "../response.js";
+import { getRepos } from "../database.js";
 
 // ─── Full Operation Catalog ───────────────────────────────────────────────────
 
@@ -110,17 +111,58 @@ export function registerFindTool(server: McpServer): void {
     "engram_find",
     {
       title: "Find Tool",
-      description: `Search the Engram tool catalog. Returns parameter schemas for engram_memory and engram_admin operations. Use this when you know what you want to do but need the exact parameter names.
+      description: `Search the Engram tool catalog or lint content against active conventions.
 
-Examples: "record a file change", "search memory", "get task list", "backup database"`,
+Actions:
+  - search (default): Find matching engram_memory / engram_admin operations by keyword.
+  - lint: Check a snippet of code or text against all active conventions. Returns matched violations.`,
       inputSchema: {
-        query: z.string().describe("What you want to do, e.g. 'record a file change', 'search memory', 'create a task'"),
+        query: z.string().optional().describe("Keyword query for search action."),
+        action: z.enum(["search", "lint"]).optional().default("search").describe("'search' = catalog lookup (default). 'lint' = check content against conventions."),
+        content: z.string().optional().describe("Code/text content to lint. For: lint."),
+        file_path: z.string().optional().describe("Optional file path for context. For: lint."),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ query }) => {
-      const matches = searchCatalog(query);
+    async ({ query, action, content, file_path }) => {
+      const op = action ?? "search";
 
+      if (op === "lint") {
+        if (!content) return success({ violations: [], message: "No content provided to lint." });
+        const repos = getRepos();
+        const conventions = repos.conventions.getActive();
+        const violations: Array<{ id: number; category: string; rule: string; severity: "warning" | "error" }> = [];
+        for (const conv of conventions) {
+          // Simple heuristic: check for keyword presence implying violation
+          const ruleText = conv.rule.toLowerCase();
+          const contentText = content.toLowerCase();
+          // Detect "never" or "must not" rules
+          const isProhibition = /\b(never|must not|do not|don'?t|avoid|forbidden)\b/.test(ruleText);
+          // Detect "always" or "required" rules
+          const isRequirement = /\b(always|must|required|every|all)\b/.test(ruleText);
+          // Extract key subject from rule (first noun phrase after the verb)
+          const keywords = ruleText.match(/\b[a-z_]{4,}\b/g)?.filter(w => !["always","never","must","every","file","with","that","this","when","from","into","call","have"].includes(w)) ?? [];
+          const topKeyword = keywords[0];
+          if (!topKeyword) continue;
+          if (isProhibition && contentText.includes(topKeyword)) {
+            violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });
+          } else if (isRequirement && !contentText.includes(topKeyword)) {
+            violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });
+          }
+        }
+        return success({
+          file_path: file_path ?? null,
+          violations,
+          conventions_checked: conventions.length,
+          message: violations.length === 0
+            ? `No convention violations detected (${conventions.length} conventions checked).`
+            : `${violations.length} potential violation(s) found against ${conventions.length} conventions.`,
+        });
+      }
+
+      // default: search
+      if (!query) return success({ matches: [], message: "Provide a query to search the tool catalog.", all_memory_actions: Object.keys(MEMORY_CATALOG), all_admin_actions: Object.keys(ADMIN_CATALOG) });
+      const matches = searchCatalog(query);
       if (matches.length === 0) {
         return success({
           query,
@@ -130,7 +172,6 @@ Examples: "record a file change", "search memory", "get task list", "backup data
           all_admin_actions: Object.keys(ADMIN_CATALOG),
         });
       }
-
       return success({
         query,
         matches: matches.map(m => ({

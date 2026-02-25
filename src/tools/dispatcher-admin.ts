@@ -18,6 +18,7 @@ const ADMIN_ACTIONS = [
   "stats", "health",
   "config",
   "scan_project",
+  "install_hooks", "remove_hooks",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -230,6 +231,36 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         case "scan_project": {
           const snapshot = services.scan.getOrRefresh(projectRoot, params.force_refresh ?? false, params.max_depth ?? 5);
           return success(snapshot as unknown as Record<string, unknown>);
+        }
+
+        // ─── INSTALL HOOKS ─────────────────────────────────────────────────
+        case "install_hooks": {
+          const gitDir = path.join(projectRoot, ".git");
+          if (!fs.existsSync(gitDir)) return error("No .git directory found at project root. Not a git repository.");
+          const hooksDir = path.join(gitDir, "hooks");
+          fs.mkdirSync(hooksDir, { recursive: true });
+          const hookPath = path.join(hooksDir, "post-commit");
+          const hookContent = `#!/bin/bash\n# Engram Post-Commit Hook\nENGRAM_DIR=".engram"\nCHANGE_LOG="$ENGRAM_DIR/git-changes.log"\nmkdir -p "$ENGRAM_DIR"\nHASH=$(git rev-parse --short HEAD)\nMSG=$(git log -1 --pretty=format:"%s")\nDATE=$(git log -1 --pretty=format:"%aI")\nFILES=$(git diff-tree --no-commit-id --name-status -r HEAD)\n{ echo "--- COMMIT $HASH ---"; echo "date: $DATE"; echo "message: $MSG"; echo "files:"; echo "$FILES"; echo "---"; echo ""; } >> "$CHANGE_LOG"\n`;
+          if (fs.existsSync(hookPath)) {
+            const existing = fs.readFileSync(hookPath, "utf-8");
+            if (existing.includes("Engram Post-Commit Hook")) return success({ message: "Engram post-commit hook already installed.", hook_path: hookPath });
+            fs.appendFileSync(hookPath, "\n\n" + hookContent);
+          } else {
+            fs.writeFileSync(hookPath, hookContent);
+          }
+          fs.chmodSync(hookPath, "755");
+          return success({ message: "Engram post-commit hook installed.", hook_path: hookPath });
+        }
+
+        case "remove_hooks": {
+          const hookPath2 = path.join(projectRoot, ".git", "hooks", "post-commit");
+          if (!fs.existsSync(hookPath2)) return success({ message: "No post-commit hook found." });
+          const existing2 = fs.readFileSync(hookPath2, "utf-8");
+          if (!existing2.includes("Engram Post-Commit Hook")) return success({ message: "Engram hook not found in existing post-commit hook." });
+          // Remove only the engram section
+          const cleaned = existing2.replace(/\n?\n?# Engram Post-Commit Hook[\s\S]*?\n---\n\n/g, "").trim();
+          if (cleaned) { fs.writeFileSync(hookPath2, cleaned + "\n"); } else { fs.unlinkSync(hookPath2); }
+          return success({ message: "Engram post-commit hook removed.", hook_path: hookPath2 });
         }
 
         default:
