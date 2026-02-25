@@ -1,0 +1,48 @@
+{
+    "name": "engram-universal-client",
+    "version": "1.6.0",
+    "description": "Universal thin client proxy for Engram — one-tool ~80 token schema, BM25 routing, works with every MCP-compatible agent (Cursor, Copilot, Windsurf, Gemini, GPT, Claude).",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "bin": {
+        "engram-universal-client": "dist/index.js"
+    },
+    "files": [
+        "dist/"
+    ],
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "tsc --watch"
+    },
+    "keywords": [
+        "engram",
+        "mcp",
+        "memory",
+        "ai",
+        "agent",
+        "thin-client",
+        "universal",
+        "cursor",
+        "copilot",
+        "windsurf",
+        "bm25"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/keggan-std/Engram"
+    },
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0",
+        "minisearch": "^7.1.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.0",
+        "typescript": "^5.7.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
