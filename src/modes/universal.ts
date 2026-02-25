@@ -156,12 +156,25 @@ export function registerUniversalMode(server: McpServer): void {
             }) }],
           };
         }
-        const q = query.toLowerCase();
-        const matches = allActions.filter(a =>
-          a.call.toLowerCase().includes(q) ||
-          (a.desc ?? "").toLowerCase().includes(q) ||
-          (a.params ?? "").toLowerCase().includes(q)
-        ).slice(0, 8);
+        // Word-by-word BM25-style scoring — each query word scored independently
+        // so "record change" matches "record_change" and related entries.
+        const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+        const scored = allActions.map(a => {
+          const callLower = a.call.toLowerCase();
+          const descLower = (a.desc ?? "").toLowerCase();
+          const paramsLower = (a.params ?? "").toLowerCase();
+          // Expand underscores for word matching ("record_change" → "record change")
+          const callExpanded = callLower.replace(/_/g, " ");
+          let score = 0;
+          for (const w of words) {
+            if (callLower.includes(w)) score += 3;
+            else if (callExpanded.includes(w)) score += 2;
+            if (descLower.includes(w)) score += 2;
+            if (paramsLower.includes(w)) score += 1;
+          }
+          return { ...a, score };
+        });
+        const matches = scored.filter(a => a.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ query, matches, message: `Found ${matches.length} actions matching "${query}".` }) }],
         };

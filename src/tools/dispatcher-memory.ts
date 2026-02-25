@@ -773,6 +773,11 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.since) {
             const last = db.prepare("SELECT ended_at FROM sessions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1").get() as { ended_at: string } | undefined;
             sinceTimestamp = last?.ended_at || new Date(Date.now() - 86400000).toISOString();
+          } else if (params.since === "session_start") {
+            // Resolve to the current session's started_at — prevents alphabetic-comparison bug
+            const sessionId = getCurrentSessionId();
+            const session = sessionId ? db.prepare("SELECT started_at FROM sessions WHERE id = ? LIMIT 1").get(sessionId) as { started_at: string } | undefined : undefined;
+            sinceTimestamp = session?.started_at || new Date(Date.now() - 3600000).toISOString();
           } else if (/^\d+[hdm]$/.test(params.since)) {
             const m = params.since.match(/^(\d+)([hdm])$/)!;
             const ms = m[2] === "h" ? +m[1] * 3600000 : m[2] === "d" ? +m[1] * 86400000 : +m[1] * 60000;
