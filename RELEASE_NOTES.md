@@ -1,3 +1,192 @@
+# v1.6.0 — Lean Surface, Dispatcher Architecture & 8 New Feature Tracks
+
+**Engram v1.6.0** is the largest release to date — fourteen combined feature tracks. This entry covers the **eight new tracks** delivered on top of the existing agent safety and session handoff infrastructure already documented below.
+
+---
+
+## Summary of New Tracks
+
+| # | Track | Branch |
+|---|-------|--------|
+| 1 | Lean 4-Tool Dispatcher (50+ → 4 tools, ~95% token reduction) | `feat/v1.6-lean-surface` |
+| 2 | Persistent Checkpoints (offload working memory mid-session) | `feat/v1.6-checkpoint` |
+| 3 | Hash-Based Staleness Detection (SHA-256 `content_hash`) | `feat/v1.6-staleness-enhanced` |
+| 4 | Tiered Verbosity + `nano` mode + `executive_summary` | `feat/v1.6-tiered-verbosity` |
+| 5 | Live Agent Rules from GitHub README (7-day cache) | `feat/v1.6-readme-rules` |
+| 6 | Quality: `lint` action, `install_hooks`/`remove_hooks`, cascade warning | `feat/v1.6-quality` |
+| 7 | Agent Specialization Routing + `route_task` + `match_score` | `feat/v1.6-multi-agent` |
+| 8 | Thin-Client Proxy for Anthropic `defer_loading` beta | `feat/v1.6-thin-client` |
+
+---
+
+## Track 1 — Lean 4-Tool Dispatcher (`feat/v1.6-lean-surface`)
+
+### Problem
+Engram exposed 50+ individual MCP tools. Every tool's full JSON Schema was injected into the model's context at session start, consuming ~32,500 tokens per call — roughly 8-17% of a typical context window, before any code was read.
+
+### Solution
+All tools collapsed into **4 dispatcher tools**, each routed via an `action` parameter:
+
+- **`engram_session`** — Session lifecycle (`start`, `end`, `handoff`, `acknowledge_handoff`, `get_history`)
+- **`engram_memory`** — All memory operations (34+ actions, see Tools Reference)
+- **`engram_admin`** — Maintenance, git hooks, backup, export, config
+- **`engram_find`** — Tool catalog search + convention linting
+
+### Impact
+- Schema token overhead: **~32,500 → ~1,600** (~95% reduction)
+- All previous tools still available — routed via `action` parameter
+- `engram_find` lets agents discover action names without memorising the full surface
+- Every existing tool behaviour is preserved
+
+---
+
+## Track 2 — Persistent Checkpoints (`feat/v1.6-checkpoint`)
+
+### New actions on `engram_memory`
+
+- **`checkpoint`** — Saves `current_understanding`, `progress_percentage`, `key_findings`, `next_steps`, and relevant `file_paths` to a new `checkpoints` DB table (V12 migration).
+- **`get_checkpoint`** — Retrieves the most recent checkpoint for the current session (or a specific `session_id`).
+
+### When to use
+Call `checkpoint` when approaching context limits without wanting to end the session. Future context can pick up from where the previous one left off.
+
+### Schema (V12)
+```sql
+CREATE TABLE checkpoints (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  current_understanding TEXT,
+  progress_percentage INTEGER,
+  key_findings TEXT,         -- JSON array
+  next_steps TEXT,           -- JSON array
+  relevant_files TEXT,       -- JSON array
+  created_at TEXT DEFAULT (datetime('now'))
+)
+```
+
+---
+
+## Track 3 — Hash-Based Staleness Detection (`feat/v1.6-staleness-enhanced`)
+
+### Problem
+`mtime`-based staleness missed edits where the file content changed but the timestamp did not (formatters, git ops, some editors).
+
+### Solution
+`set_file_notes` now accepts and stores a `content_hash` (SHA-256). `get_file_notes` computes a fresh hash and compares:
+
+| State | `confidence` |
+|-------|-------------|
+| hash matches mtime matches | `high` |
+| mtime matches but hash differs | `stale` (content silently changed) |
+| mtime changed | `medium` |
+| >7 days old | `low` |
+
+### Schema (V13)
+Added `content_hash TEXT` column to `file_notes`.
+
+---
+
+## Track 4 — Tiered Verbosity + `nano` + `executive_summary` (`feat/v1.6-tiered-verbosity`)
+
+### New verbosity level: `nano`
+Returns only session ID, record counts, `agent_rules`, and `tool_catalog`. Under 100 tokens. Use when context is critically constrained.
+
+### New `executive_summary` field
+`set_file_notes` now accepts `executive_summary`: a 2–3 sentence micro-summary of the file purpose. Surfaced in `get_file_notes` (`minimal`+ verbosity).
+
+### Schema (V14)
+Added `executive_summary TEXT` column to `file_notes`.
+
+### Verbosity matrix
+| Level | Returns |
+|-------|---------|
+| `nano` | session_id, counts, agent_rules, tool_catalog |
+| `minimal` | `nano` + summary, recently changed files, high-priority tasks |
+| `summary` | `minimal` + decisions, conventions, open tasks, suggested_focus |
+| `full` | everything including detailed file notes and all task tags |
+
+---
+
+## Track 5 — Live Agent Rules from GitHub README (`feat/v1.6-readme-rules`)
+
+### What changed
+`start_session` now returns an `agent_rules` array parsed dynamically from the Engram README hosted on GitHub.
+
+### Behaviour
+- On first call, fetches `https://raw.githubusercontent.com/…/README.md` and parses the JSON block between `<!-- AGENT_RULES_START -->` and `<!-- AGENT_RULES_END -->`.
+- Caches the result to `.engram/agent_rules_cache.json` for **7 days**.
+- Falls back to hardcoded AGENT_RULES in `src/tools/find.ts` if fetch fails or cache is expired but network is unavailable.
+- Rules update automatically when the README changes — no agent reinstall required.
+
+---
+
+## Track 6 — Quality Improvements (`feat/v1.6-quality`)
+
+### Convention Linting
+`engram_find(action:"lint", content:"...")` checks any code/text against all active project conventions and returns a `violations[]` array with rule references.
+
+### Git Hook Management via `engram_admin`
+- `engram_admin(action:"install_hooks")` — Writes the Engram `post-commit` hook to `.git/hooks/post-commit`
+- `engram_admin(action:"remove_hooks")` — Removes the Engram hook entry from `.git/hooks/post-commit`
+
+### Decision Cascade Warning
+`engram_memory(action:"update_decision")` now returns a `cascade_warning` field listing all decisions that have `depends_on` pointing at the changed decision, so agents know to review dependents.
+
+---
+
+## Track 7 — Agent Specialization Routing (`feat/v1.6-multi-agent`)
+
+### Changes to `agent_sync`
+Now accepts `specializations: string[]` — skill/domain tags for the agent (e.g. `["typescript","database","migration"]`). Stored in `agents` table (V15 migration: added `specializations TEXT` column).
+
+### New action: `route_task`
+`engram_memory({ action: "route_task", task_id })` finds the best-matched registered agent for a task by comparing task `tags` against registered agent `specializations` using intersection scoring.
+
+Returns: `{ best_match: { agent_id, agent_name, match_score }, all_candidates: [...] }`
+
+### Updated action: `claim_task`
+Now returns advisory `match_score` and optional `match_warning` comparing the claiming agent's specializations against the task's tags. Does not block claiming — advisory only.
+
+### Schema (V15)
+Added `specializations TEXT` column to `agents`.
+
+---
+
+## Track 8 — Thin-Client Proxy for Anthropic `defer_loading` (`feat/v1.6-thin-client`)
+
+### What it is
+A new separate package at `packages/engram-thin-client/` that proxies all Engram tool calls via the **Anthropic SDK** with `defer_loading: true` beta.
+
+### How it works
+Tools are registered using Anthropic's `defer_loading` beta flag, meaning **zero tool schema tokens** are consumed upfront. The model discovers tools on-demand. A BM25 search index lets the Claude model identify which Engram action to call based on natural language.
+
+### Who it's for
+**Anthropic API users only** (any agent using Claude models via the Anthropic TypeScript SDK directly). Cursor, Copilot, Gemini, and GPT agents continue to use the MCP server directly — they still benefit from the lean 4-tool surface but do not get zero-upfront-cost.
+
+### Installation
+```bash
+npm install engram-thin-client
+```
+
+---
+
+## Breaking Changes
+
+None. All eight new tracks are additive. Existing tool calls, IDE configs, and databases continue to work. The schema auto-migrates from any previous version through V12–V15 on first startup.
+
+---
+
+## Migration Summary (V12–V15)
+
+| Version | Change |
+|---------|--------|
+| V12 | `checkpoints` table (checkpoint, get_checkpoint) |
+| V13 | `file_notes.content_hash` column (hash-based staleness) |
+| V14 | `file_notes.executive_summary` column (tiered verbosity) |
+| V15 | `agents.specializations` column (route_task, match_score) |
+
+---
+
 # v1.6.0 — Agent Safety, Session Handoffs, Knowledge Graph & Diagnostics
 
 **Engram v1.6.0** delivers six feature tracks developed in parallel, focused on making multi-agent workflows safer, making cross-session context transfers seamless, and giving agents deeper visibility into what they and their peers are doing.

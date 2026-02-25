@@ -16,7 +16,8 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 11; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
+export const DB_VERSION = 15; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
+                              // V12 checkpoints, V13 content_hash, V14 executive_summary, V15 agent specializations
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;

@@ -17,6 +17,7 @@
 ---
 
 ## 📋 Table of Contents
+
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
@@ -33,7 +34,7 @@
 
 ## Overview
 
-**Engram** is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI coding agents persistent memory across sessions. Instead of re-reading files, re-discovering architecture, and re-learning conventions every time a session starts, the agent calls `engram_start_session` and instantly receives everything it needs.
+**Engram** is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI coding agents persistent memory across sessions. Instead of re-reading files, re-discovering architecture, and re-learning conventions every time a session starts, the agent calls `engram_session(action:"start")` and instantly receives everything it needs.
 
 It operates seamlessly as a background brain for popular AI tools like **Claude Code**, **Claude Desktop**, **Cursor**, **Windsurf**, **Cline**, **Trae IDE**, and **GitHub Copilot** (VS Code & Visual Studio).
 
@@ -42,6 +43,7 @@ It operates seamlessly as a background brain for popular AI tools like **Claude 
 ## Why Engram?
 
 Every AI coding agent is **stateless by default**. Each new session starts from scratch:
+
 - The agent re-reads file structures and re-discovers architecture.
 - Architectural decisions made in previous sessions are forgotten.
 - Conventions agreed upon are lost.
@@ -54,30 +56,65 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ## ✨ What's New in v1.6.0
 
-**v1.6.0** is a major feature release delivering seven capability tracks focused on agent safety, seamless handoffs, deeper memory intelligence, and session diagnostics.
+**v1.6.0** is the largest Engram release to date — fourteen feature tracks covering a complete lean-surface rearchitecture, deeper memory intelligence, smarter multi-agent coordination, and a new thin-client proxy.
+
+### ⚡ Lean 4-Tool Dispatcher Surface — ~95% Fewer Schema Tokens
+
+The MCP surface collapsed from 50+ individual tools to **4 dispatcher tools**: `engram_session`, `engram_memory`, `engram_admin`, `engram_find`. Every previous operation is still available — routed via `action` parameter. Token overhead drops from ~32,500 to ~1,600 per API call. Every AI agent benefits automatically with no configuration change.
+
+### 📸 Checkpoints — Offload Working Memory Mid-Session
+
+`engram_memory(action:"checkpoint")` saves current understanding, progress, and relevant files to a persistent `checkpoints` table. `get_checkpoint` restores it. Use when approaching context limits without ending the session.
+
+### 🔬 Hash-Based Staleness Detection
+
+File notes now store a **SHA-256 content hash** alongside `file_mtime`. When mtime matches but the hash differs, confidence is downgraded to `stale` — catching silent edits from formatters, git merges, and auto-saves that preserve timestamps.
+
+### 📊 Tiered Verbosity — `nano` Mode
+
+Four verbosity levels: `full`, `summary`, `minimal`, and the new **`nano`** — returns only session ID, counts, agent rules, and tool catalog. Under 100 tokens total. For ultra-lean session starts in constrained contexts.
+
+### 🗂️ Executive Summary on File Notes
+
+File notes now support an `executive_summary` field — a 2-3 sentence micro summary for Tier-1 reads. Agents can write it once; future sessions get instant context without opening the file.
+
+### 🛡️ Agent Rules — Live-Loaded from GitHub
+
+`start_session` now returns `agent_rules` fetched dynamically from the Engram README (7-day local cache at `.engram/agent_rules_cache.json`). Rules update automatically when the README changes — no agent reinstall required.
+
+### 🔍 Convention Linting in `engram_find`
+
+`engram_find(action:"lint", content:"...")` checks any code snippet against all active conventions and returns a `violations[]` array — useful before committing or during code review.
+
+### 🔧 Git Hook Install/Remove via `engram_admin`
+
+`engram_admin(action:"install_hooks")` and `remove_hooks` write/remove the Engram post-commit hook directly from within the MCP tool — no CLI needed.
+
+### 🌐 Multi-Agent Specialization Routing
+
+`engram_memory(action:"agent_sync", specializations:["typescript","database"])` stores agent skill tags. `claim_task` returns an advisory `match_score` comparing agent specializations vs task tags. New `route_task` action finds the best-matched agent for any task.
 
 ### 🔒 Agent Safety — File Locking & Pending Work
-Two new tools prevent concurrent write conflicts between parallel agents: `engram_lock_file` and `engram_unlock_file`. Locks auto-expire after 30 minutes and are surfaced in `engram_get_file_notes` via a `lock_status` field. A companion pair — `engram_begin_work` / `engram_end_work` — lets agents declare intent before touching a file. Abandoned work from crashed sessions surfaces in `engram_start_session` as `abandoned_work`.
+
+`engram_lock_file` / `engram_unlock_file` prevent concurrent write conflicts. `engram_begin_work` / `engram_end_work` declare intent before touching files. Abandoned work surfaces in `start_session` as `abandoned_work`.
 
 ### 🌡️ Context Pressure Detection
-`engram_check_events` now fires a `context_pressure` event at three thresholds (50%/70%/85%) so agents know when to wrap up and hand off before hitting the context wall.
 
-### 🌿 Branch-Aware File Notes & Decision Chains
-File notes now record the git branch they were written on. On a different branch, `engram_get_file_notes` warns that notes may not reflect the current file. Decisions now support a `depends_on` field linking them to prerequisite decisions.
+`check_events` fires `context_pressure` at 50%/70%/85% so agents know when to wrap up before hitting the context wall.
 
 ### 🤝 Session Handoffs
-`engram_handoff` lets an agent leaving due to context exhaustion package up everything the next agent needs: open tasks, last file touched, git branch, and instructions. `engram_acknowledge_handoff` clears it. All `start_session` verbosity modes surface `handoff_pending` when a handoff is waiting.
 
-### 💡 Smart Start Session (suggested_focus & more)
-`engram_start_session` now suggests a `suggested_focus` automatically when none is provided — derived from the most recent file change, highest-priority task, and latest decision. It also warns on abandoned_work and handoff_pending in a unified message per verbosity mode.
-
-### 🔗 Git Hook Auto-Recording
-`engram install --install-hooks` writes a `post-commit` git hook that automatically calls `engram record-commit` after every commit — recording changed files to Engram without any agent action.
+`engram_session(action:"handoff")` packages open tasks, last file touched, git branch, and instructions for the next agent. Auto-surfaced in `start_session` as `handoff_pending`.
 
 ### 🎬 Session Replay & Diagnostics
-Every MCP tool call is logged to a new `tool_call_log` table. The new `engram_replay` tool reconstructs the complete chronological timeline of any session: tool calls, changes, decisions, and tasks interleaved by timestamp.
 
-> Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence. [Full release notes →](RELEASE_NOTES.md)
+Every MCP tool call is logged to `tool_call_log`. `engram_replay` reconstructs the complete chronological timeline of any session.
+
+### 📦 `engram-thin-client` Package
+
+New `packages/engram-thin-client/` proxy enables Anthropic's `defer_loading` beta — tools are defined with `defer_loading: true` so **zero** schema tokens are consumed upfront. Claude discovers tools on demand via BM25 search. For agents using the Anthropic API directly.
+
+> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
 
 ---
 
@@ -90,14 +127,15 @@ Engram is published to the npm registry. **You do not need to download or compil
 Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, which includes a native C++ addon. On most systems this is handled automatically via prebuilt binaries. However, if no prebuilt binary matches your platform, npm will attempt to compile from source — which requires:
 
 - **Windows:** [Node.js](https://nodejs.org) (v18+) and [Windows Build Tools](https://github.com/nodejs/node-gyp#on-windows) (Visual C++ Build Tools + Python). Install them with:
-  ```bash
-  npm install -g windows-build-tools
-  ```
-  Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
+    ```bash
+    npm install -g windows-build-tools
+    ```
+    Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
 - **Mac:** Xcode Command Line Tools (`xcode-select --install`)
 - **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
 
 ### Option 1: The Magic Installer (Interactive)
+
 Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
 
 ```bash
@@ -105,16 +143,19 @@ npx -y engram-mcp-server --install
 ```
 
 **Non-interactive mode (CI/CD / Scripting):**
+
 ```bash
 npx -y engram-mcp-server install --ide vscode --yes
 ```
 
 **Clean removal:**
+
 ```bash
 npx -y engram-mcp-server install --remove --ide claudecode
 ```
 
 **Check installed version vs npm latest:**
+
 ```bash
 npx -y engram-mcp-server --check
 ```
@@ -138,127 +179,144 @@ If you prefer to configure manually, find your IDE below:
 <summary><strong>Claude Code (CLI)</strong></summary>
 
 Run this in your terminal:
+
 ```bash
 claude mcp add-json --scope=user engram '{"type":"stdio","command":"cmd","args":["/c","npx","-y","engram-mcp-server"]}'
 ```
-*(Omit `"command":"cmd"` and `"args":["/c", ...]` on Mac/Linux, use just `"command":"npx"`).*
+
+_(Omit `"command":"cmd"` and `"args":["/c", ...]` on Mac/Linux, use just `"command":"npx"`)._
+
 </details>
 
 <details>
 <summary><strong>Claude Desktop</strong></summary>
 
 Add to your `claude_desktop_config.json`:
+
 - **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 - **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>VS Code (GitHub Copilot)</strong></summary>
 
 Create `.vscode/mcp.json` in your project root, or add to your global user `settings.json`:
+
 ```json
 {
-  "servers": {
-    "engram": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "servers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>Cursor & Windsurf</strong></summary>
 
 For Cursor, edit `~/.cursor/mcp.json`. For Windsurf, edit `~/.codeium/windsurf/mcp_config.json`:
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>Visual Studio 2022/2026</strong></summary>
 
 Create `.vs/mcp.json` in your solution root:
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>Trae IDE</strong></summary>
 
 For Trae IDE, edit `.trae/mcp.json` in your project root:
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>JetBrains (Copilot Plugin)</strong></summary>
 
 Edit `~/.config/github-copilot/intellij/mcp.json` or use the built-in Settings → MCP Server:
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 <details>
 <summary><strong>Cline / Roo Code</strong></summary>
 
 In the extension settings → MCP Servers:
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
     }
-  }
 }
 ```
+
 </details>
 
 ---
@@ -324,78 +382,78 @@ graph TB
 
 ## Tools Reference
 
-Engram exposes 50+ tools. Here are the highlights:
+Engram v1.6.0 exposes **4 dispatcher tools**. Every operation routes through one of them via an `action` parameter. Token overhead is ~1,600 tokens — a ~95% reduction from the previous 50-tool surface.
 
-### Core Memory Tools
-| Tool | Purpose |
-|------|---------|
-| `engram_start_session` | Begin a session. Pass `focus` to FTS5-rank context. Returns `suggested_focus`, `abandoned_work`, `handoff_pending`. |
-| `engram_end_session` | End session, storing a summary. Warns on unclosed claimed tasks. |
-| `engram_record_change` | Record file changes with descriptions, impact scope, and diff summaries. |
-| `engram_set_file_notes` | Store intelligence about a file (purpose, deps, layer, complexity). Captures `file_mtime` and `git_branch`. |
-| `engram_get_file_notes` | Retrieve notes with staleness detection (`confidence`) and `branch_warning` if branch differs. Also returns `lock_status`. |
-| `engram_record_decision` | Log an architectural decision with optional `depends_on` dependency chain. |
-| `engram_record_decisions_batch` | Record multiple decisions in a single atomic call. |
-| `engram_add_convention` | Record a project convention. Use `export_global` to share cross-project. |
+> **Use `engram_find`** when you don't know the exact `action` name. It returns parameter schemas and descriptions for any operation.
 
-### Agent Safety
-| Tool | Purpose |
-|------|---------|
-| `engram_lock_file` | Acquire an exclusive write lock on a file. Returns lock status and holder if already locked. |
-| `engram_unlock_file` | Release a previously acquired lock. |
-| `engram_begin_work` | Record intent to work on a set of files before touching them. |
-| `engram_end_work` | Mark work intent complete or cancelled. |
+### `engram_session` — Session Lifecycle
 
-### Session Handoffs
-| Tool | Purpose |
-|------|---------|
-| `engram_handoff` | Package context (tasks, last file, git branch, instructions) for the next agent when approaching context limits. |
-| `engram_acknowledge_handoff` | Mark a pending handoff as read, clearing it from future `start_session` responses. |
+| Action                | Purpose                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `start`               | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. |
+| `end`                 | End session with a summary. Warns on unclosed claimed tasks.                                                   |
+| `get_history`         | Retrieve past session summaries.                                                                               |
+| `handoff`             | Package open tasks, git branch, and instructions for the next agent.                                           |
+| `acknowledge_handoff` | Clear a pending handoff from future start responses.                                                           |
 
-### Tasks & Scheduling
-| Tool | Purpose |
-|------|---------|
-| `engram_create_task` | Create a persistent work item with priority and tags. |
-| `engram_update_task` | Update task status, description, or mark complete. |
-| `engram_get_tasks` | Retrieve tasks filtered by status, priority, or tags. |
-| `engram_schedule_event` | Schedule deferred work with a trigger (`next_session`, `datetime`, etc). |
-| `engram_check_events` | Mid-session check for triggered events. Includes `context_pressure` at 50%/70%/85%. |
+### `engram_memory` — All Memory Operations
 
-### Multi-Agent Coordination
-| Tool | Purpose |
-|------|---------|
-| `engram_dump` | Submit unstructured text — auto-classified into decisions, tasks, conventions, findings. |
-| `engram_agent_sync` | Register agent heartbeat and receive pending broadcasts. |
-| `engram_claim_task` | Atomically claim a task to prevent duplicate work across agents. |
-| `engram_release_task` | Release a claimed task back to the pool. |
-| `engram_get_agents` | List all registered agents with status and last-seen time. |
-| `engram_broadcast` | Send a message to all agents working on this project. |
+| Action                   | Purpose                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `get_file_notes`         | Retrieve file notes with `confidence` (hash-based staleness), `branch_warning`, `lock_status`, `executive_summary`. |
+| `set_file_notes`         | Store file intelligence (purpose, layer, complexity, dependencies, `executive_summary`, `content_hash`).            |
+| `set_file_notes_batch`   | Store notes for multiple files atomically.                                                                          |
+| `record_change`          | Log file changes with `change_type`, `description`, `impact_scope`, `diff_summary`.                                 |
+| `get_file_history`       | Change history for a file.                                                                                          |
+| `record_decision`        | Log architectural decisions with `rationale`, `tags`, `affected_files`, `depends_on`, `supersedes`.                 |
+| `record_decisions_batch` | Record multiple decisions atomically.                                                                               |
+| `get_decisions`          | Retrieve decisions by status, tag, file, or dependency chain.                                                       |
+| `update_decision`        | Change decision status. Returns `cascade_warning` if dependents exist.                                              |
+| `add_convention`         | Record a project convention.                                                                                        |
+| `get_conventions`        | Retrieve active conventions.                                                                                        |
+| `create_task`            | Create a persistent work item with priority, tags, and blocking chains.                                             |
+| `update_task`            | Update task status, priority, description, or blocking.                                                             |
+| `get_tasks`              | Retrieve tasks by status, priority, or tag.                                                                         |
+| `checkpoint`             | Save current understanding + progress to a persistent checkpoint.                                                   |
+| `get_checkpoint`         | Restore the last saved checkpoint.                                                                                  |
+| `search`                 | FTS5-ranked full-text search across all memory. Results include `confidence`.                                       |
+| `what_changed`           | Diff report of all changes since a given time or session.                                                           |
+| `get_dependency_map`     | File dependency graph for a module.                                                                                 |
+| `record_milestone`       | Log a project milestone.                                                                                            |
+| `schedule_event`         | Schedule deferred work with a trigger type.                                                                         |
+| `check_events`           | Check triggered events including `context_pressure` at 50%/70%/85%.                                                 |
+| `agent_sync`             | Heartbeat — registers agent with optional `specializations[]`. Returns unread broadcasts.                           |
+| `claim_task`             | Atomically claim a task. Returns advisory `match_score` vs agent specializations.                                   |
+| `release_task`           | Release a claimed task back to the pool.                                                                            |
+| `get_agents`             | List all registered agents with status, last-seen, and specializations.                                             |
+| `route_task`             | Find the best-matched agent for a task based on specialization scoring.                                             |
+| `broadcast`              | Send a message to all agents.                                                                                       |
+| `dump`                   | Auto-classify unstructured text into decisions, tasks, conventions, findings.                                       |
 
-### Intelligence & Search
-| Tool | Purpose |
-|------|---------|
-| `engram_search` | FTS5-ranked full-text search. File note results include `confidence` levels. |
-| `engram_scan_project` | Scan and cache project structure automatically. |
-| `engram_get_decisions` | Retrieve decisions filtered by status, tag, affected file, or dependency chain. |
-| `engram_get_conventions` | Retrieve active conventions, optionally filtered by category. |
-| `engram_get_global_knowledge` | Query the cross-project global KB at `~/.engram/global.db`. |
-| `engram_get_dependency_map` | Get the file dependency graph for a module. |
-| `engram_what_changed` | Summarise all changes since a given timestamp or session. |
-| `engram_replay` | Reconstruct the complete tool-call + change + decision timeline for any session. |
+### `engram_admin` — Maintenance & Git Hooks
 
-### Utilities & Reports
-| Tool | Purpose |
-|------|---------|
-| `engram_generate_report` | Generate a Markdown project report (handoffs, PR descriptions). |
-| `engram_suggest_commit` | Generate a conventional commit message from session changes. |
-| `engram_stats` | Project stats including per-agent metrics (sessions, changes, decisions per agent). |
-| `engram_backup` | Create a database backup to any synced folder. |
-| `engram_restore` | Restore from a previous backup. |
-| `engram_compact` | Compress old session data to reduce database size. |
-| `engram_config` | Read or update runtime configuration values. |
-| `engram_health` | Run database health checks and report diagnostics. |
+| Action          | Purpose                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `backup`        | Create a database backup.                                  |
+| `restore`       | Restore from a backup.                                     |
+| `list_backups`  | List available backup files.                               |
+| `export`        | Export all memory to JSON.                                 |
+| `import`        | Import from exported JSON.                                 |
+| `compact`       | Compress old session data.                                 |
+| `clear`         | Clear memory tables (destructive — requires confirmation). |
+| `stats`         | Project stats with per-agent contribution metrics.         |
+| `health`        | Database health check and diagnostics.                     |
+| `config`        | Read or update runtime config values.                      |
+| `scan_project`  | Scan and cache project filesystem structure.               |
+| `install_hooks` | Write Engram post-commit git hook to `.git/hooks/`.        |
+| `remove_hooks`  | Remove Engram hook from `.git/hooks/post-commit`.          |
 
-*(Run the agent and ask to list available tools for the complete reference).*
+### `engram_find` — Discovery & Linting
+
+| Action               | Purpose                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------- |
+| `search` _(default)_ | Search the tool catalog by keyword. Returns action name, description, and param schema. |
+| `lint`               | Check a code/text snippet against all active conventions. Returns `violations[]`.       |
 
 ---
 
@@ -409,31 +467,39 @@ Add the following to your agent's system prompt or custom instructions — Curso
 
 ### 🟢 Session Start
 
-**Always call `engram_start_session` first** — before reading any file or taking any action. Pass `focus` when you know what you're about to work on — it FTS5-ranks returned context around that topic.
+**Always call `engram_session(action:"start")` first** — before reading any file or taking any action. Pass `focus` when you know what you're about to work on — it FTS5-ranks returned context around that topic.
 
 ```js
-engram_start_session({ focus: "authentication refactor" })
+engram_session({
+    action: "start",
+    agent_name: "claude",
+    verbosity: "summary",
+    focus: "authentication refactor",
+});
 ```
 
 Act on everything it returns:
 
-| Field | What to do |
-|-------|-----------|
-| `previous_session.summary` | Read immediately. Do not re-explore what is already known. |
-| `active_decisions` | Binding. Follow them; do not re-debate. Supersede with `engram_record_decision` if they must change. |
-| `active_conventions` | Enforce in every file you touch this session. |
-| `open_tasks` | Pending work items. Ask the user which to focus on if unclear. |
-| `abandoned_work` | Work items left open by a previous session that ended unexpectedly. Review and resume or close. |
-| `handoff_pending` | A structured handoff from the previous agent. Read instructions, then call `engram_acknowledge_handoff`. |
-| `suggested_focus` | Auto-derived topic hint. Pass as `focus` on the next `start_session` call for filtered context. |
-| `triggered_events` | Scheduled reminders or deferred work now triggered. Act on them. |
-| `update_available` | Tell the user: *"Engram v{available_version} is available (you have {installed_version}). Changes: {changelog}. Update, skip, or postpone?"* |
+| Field                      | What to do                                                                                                                 |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `previous_session.summary` | Read immediately. Do not re-explore what is already known.                                                                 |
+| `active_decisions`         | Binding. Follow them; do not re-debate. Supersede with `engram_memory(action:"record_decision")` if they must change.      |
+| `active_conventions`       | Enforce in every file you touch this session.                                                                              |
+| `open_tasks`               | Pending work items. Ask the user which to focus on if unclear.                                                             |
+| `abandoned_work`           | Work items left open by a previous session that ended unexpectedly. Review and resume or close.                            |
+| `handoff_pending`          | A structured handoff from the previous agent. Read instructions, then call `engram_session(action:"acknowledge_handoff")`. |
+| `suggested_focus`          | Auto-derived topic hint. Pass as `focus` on the next `start` call for filtered context.                                    |
+| `triggered_events`         | Scheduled reminders or deferred work now triggered. Act on them.                                                           |
+| `agent_rules`              | Live-loaded rules from the Engram README. Treat as binding session instructions.                                           |
+| `tool_catalog`             | Full list of available `engram_memory` and `engram_admin` actions with schemas.                                            |
+| `update_available`         | Tell the user: _"Engram v{available_version} is available. Update, skip, or postpone?"_                                    |
 
 If `update_available` is set, respond to the user's choice:
+
 - **Update** → `npx -y engram-mcp-server install`
-- **Skip** → `engram_config action=set key=auto_update_skip_version value={version}`
-- **Postpone** → `engram_config action=set key=auto_update_remind_after value=7d`
-- **Disable** → `engram_config action=set key=auto_update_check value=false`
+- **Skip** → `engram_admin({ action: "config", op: "set", key: "auto_update_skip_version", value: "{version}" })`
+- **Postpone** → `engram_admin({ action: "config", op: "set", key: "auto_update_remind_after", value: "7d" })`
+- **Disable** → `engram_admin({ action: "config", op: "set", key: "auto_update_check", value: "false" })`
 
 ---
 
@@ -442,7 +508,7 @@ If `update_available` is set, respond to the user's choice:
 Always check Engram before opening a file:
 
 ```js
-engram_get_file_notes({ file_paths: ["path/to/file.ts"] })
+engram_memory({ action: "get_file_notes", file_path: "path/to/file.ts" });
 ```
 
 - **`confidence: "high"`** → Use stored notes. Only open the file if you need to edit it.
@@ -459,20 +525,28 @@ engram_get_file_notes({ file_paths: ["path/to/file.ts"] })
 Before choosing an implementation approach, search for an existing decision:
 
 ```js
-engram_search({ query: "relevant keywords", scope: "decisions" })
-// or
-engram_get_global_knowledge({ query: "relevant keywords" })  // cross-project wisdom
+engram_memory({
+    action: "search",
+    query: "relevant keywords",
+    scope: "decisions",
+});
 ```
 
 - **Decision exists** → Follow it.
 - **Should change** → Explain why, then supersede:
-  ```js
-  engram_record_decision({ decision: "...", supersedes: <id> })
-  ```
+    ```js
+    engram_memory({ action: "record_decision", decision: "...", supersedes: <id> })
+    ```
 - **No decision exists** → Make the call and record it:
-  ```js
-  engram_record_decision({ decision, rationale, affected_files, tags, export_global: true })
-  ```
+    ```js
+    engram_memory({
+        action: "record_decision",
+        decision,
+        rationale,
+        affected_files,
+        tags,
+    });
+    ```
 
 ---
 
@@ -481,12 +555,17 @@ engram_get_global_knowledge({ query: "relevant keywords" })  // cross-project wi
 After every meaningful change, record it. Batch where possible:
 
 ```js
-engram_record_change({ changes: [{
-  file_path,
-  change_type,   // created | modified | refactored | deleted | renamed | moved | config_changed
-  description,   // What changed AND why — not just the action. Future sessions read this.
-  impact_scope   // local | module | cross_module | global
-}]})
+engram_memory({
+    action: "record_change",
+    changes: [
+        {
+            file_path,
+            change_type, // created | modified | refactored | deleted | renamed | moved | config_changed
+            description, // What changed AND why — not just the action. Future sessions read this.
+            impact_scope, // local | module | cross_module | global
+        },
+    ],
+});
 ```
 
 ---
@@ -496,12 +575,12 @@ engram_record_change({ changes: [{
 Search Engram before asking the user — they may have already explained it to a previous session:
 
 ```js
-engram_search({ query: "keywords", context_chars: 200 })  // inline snippets
-engram_scan_project()                                       // project structure questions
-engram_get_decisions()                                      // architecture / approach questions
-engram_get_conventions()                                    // style / pattern questions
-engram_get_file_notes({ file_paths: [...] })                // what is known about specific files
-engram_get_global_knowledge({ query: "..." })               // cross-project decisions/conventions
+engram_memory({ action: "search", query: "keywords", context_chars: 200 });
+engram_admin({ action: "scan_project" }); // project structure
+engram_memory({ action: "get_decisions" }); // architecture questions
+engram_memory({ action: "get_conventions" }); // style / pattern questions
+engram_memory({ action: "get_file_notes", file_path: "..." }); // what is known about a file
+engram_find({ query: "what I want to do" }); // discover the right action
 ```
 
 ---
@@ -510,16 +589,16 @@ engram_get_global_knowledge({ query: "..." })               // cross-project dec
 
 Before ending every session:
 
-1. Record all file changes not yet recorded (`engram_record_change`).
+1. Record all file changes not yet recorded.
 2. Create tasks for anything incomplete or blocked:
-   ```js
-   engram_create_task({ title, description, priority })
-   ```
-3. Call `engram_end_session` with a summary that includes:
-   - Exactly what was done — file names, function names, specific changes
-   - What is pending or blocked, and why
-   - Any new patterns, gotchas, or constraints discovered
-   - Which tasks were completed or partially done
+    ```js
+    engram_memory({ action: "create_task", title, description, priority });
+    ```
+3. Call `engram_session({ action: "end", summary: "..." })` with a summary that includes:
+    - Exactly what was done — file names, function names, specific changes
+    - What is pending or blocked, and why
+    - Any new patterns, gotchas, or constraints discovered
+    - Which tasks were completed or partially done
 
 A precise summary is what allows the next session to start immediately without re-reading files or re-asking the user for context.
 
@@ -531,78 +610,137 @@ When running multiple agents simultaneously on the same project, use the coordin
 
 ### Agent Registration & Heartbeat
 
-Each agent should call `engram_agent_sync` periodically to stay visible and receive broadcasts:
+Each agent should call `agent_sync` periodically to stay visible and receive broadcasts:
 
 ```js
 // On startup and every ~2 minutes
-engram_agent_sync({
-  agent_id: "agent-frontend",
-  name: "Frontend Specialist",
-  status: "working",
-  current_task_id: 42
-})
-// Returns: { broadcasts: [...] }  — messages from other agents
+engram_memory({
+    action: "agent_sync",
+    agent_id: "agent-frontend",
+    agent_name: "Frontend Specialist",
+    status: "working",
+    current_task_id: 42,
+    specializations: ["typescript", "react", "ui"], // ← new in v1.6.0
+});
+// Returns: { agent, unread_broadcasts: [...] }
 ```
 
 ### Atomic Task Claiming
 
-Use `engram_claim_task` to safely grab a task without duplicating work:
+Use `claim_task` to safely grab a task without duplicating work. Returns advisory `match_score`:
 
 ```js
-// Claim task 42 — atomic, fails if another agent already claimed it
-const result = await engram_claim_task({ task_id: 42, agent_id: "agent-frontend" })
-if (result.claimed) {
-  // Proceed with the task
-} else {
-  // result.claimed_by tells you who has it
-}
+engram_memory({
+    action: "claim_task",
+    task_id: 42,
+    agent_id: "agent-frontend",
+});
+// Returns: { task, match_score: 85, match_warning? }
+```
+
+### Find the Best Agent for a Task
+
+```js
+engram_memory({ action: "route_task", task_id: 42 });
+// Returns: { best_match: { agent_id, agent_name, match_score }, all_candidates: [...] }
 ```
 
 ### Broadcasting Between Agents
 
 ```js
-// Notify all agents of a breaking change
-engram_broadcast({
-  from_agent: "agent-backend",
-  message: "⚠️ auth.ts API changed — agents touching auth endpoints need to update",
-  expires_in_minutes: 60
-})
+engram_memory({
+    action: "broadcast",
+    from_agent: "agent-backend",
+    message:
+        "⚠️ auth.ts API changed — agents touching auth endpoints need to update",
+    expires_in_minutes: 60,
+});
 ```
 
-### The `engram_dump` Power Tool
-
-When context is too large or unstructured for individual tool calls, dump it all at once:
+### The `dump` Power Tool
 
 ```js
-engram_dump({
-  raw_text: `
-    We decided to use JWT for auth with 15-minute expiry.
+engram_memory({
+    action: "dump",
+    raw_text: `
+    We decided to use JWT with 15-minute expiry.
     TODO: add refresh token endpoint
-    TODO: write integration tests for login flow
-    Always use bcrypt cost factor 12 for password hashing.
-    Found: the existing session table uses unix timestamps not ISO strings.
+    Always use bcrypt cost factor 12.
   `,
-  agent_id: "agent-research"
-})
-// Engram auto-classifies into decisions, tasks, conventions, and findings
+    agent_id: "agent-research",
+});
+// Auto-classifies into decisions, tasks, conventions, findings
 ```
 
 ### Coordination Quick Reference
 
-| Situation | Tool |
-|-----------|------|
-| Register / heartbeat | `engram_agent_sync` |
-| Claim a task atomically | `engram_claim_task` |
-| Release a task | `engram_release_task` |
-| List active agents | `engram_get_agents` |
-| Send a team message | `engram_broadcast` |
-| Dump unstructured findings | `engram_dump` |
+| Situation                  | Call                                                      |
+| -------------------------- | --------------------------------------------------------- |
+| Register / heartbeat       | `engram_memory(action:"agent_sync")`                      |
+| Find best agent for task   | `engram_memory(action:"route_task", task_id)`             |
+| Claim a task atomically    | `engram_memory(action:"claim_task", task_id, agent_id)`   |
+| Release a task             | `engram_memory(action:"release_task", task_id, agent_id)` |
+| List active agents         | `engram_memory(action:"get_agents")`                      |
+| Send a team message        | `engram_memory(action:"broadcast", message, from_agent)`  |
+| Dump unstructured findings | `engram_memory(action:"dump", raw_text, agent_id)`        |
+
+---
+
+<!-- AGENT_RULES_START -->
+
+```json
+[
+    {
+        "priority": "CRITICAL",
+        "rule": "Call engram_session(action:'start', verbosity:'summary') FIRST — before reading any file or taking any action."
+    },
+    {
+        "priority": "CRITICAL",
+        "rule": "Call engram_memory(action:'get_file_notes', file_path) before opening any file. Use notes to skip re-reading already-analysed files."
+    },
+    {
+        "priority": "CRITICAL",
+        "rule": "Call engram_memory(action:'record_change') after every file edit — changes, file_path, change_type, description, impact_scope."
+    },
+    {
+        "priority": "CRITICAL",
+        "rule": "Call engram_session(action:'end', summary) before terminating — be specific about what was done, what is pending, and any blockers."
+    },
+    {
+        "priority": "HIGH",
+        "rule": "Call engram_memory(action:'record_decision') for every architectural or design choice — even small ones."
+    },
+    {
+        "priority": "HIGH",
+        "rule": "Check engram_memory(action:'get_decisions') before starting any implementation to avoid contradicting existing decisions."
+    },
+    {
+        "priority": "HIGH",
+        "rule": "Use engram_find(query) when unsure which action to call — never guess parameter names."
+    },
+    {
+        "priority": "MEDIUM",
+        "rule": "Use engram_memory(action:'checkpoint') when approaching context limits — save current_understanding and progress before losing context."
+    },
+    {
+        "priority": "MEDIUM",
+        "rule": "Respect active_conventions returned by start_session — enforce them in every file touched this session."
+    },
+    {
+        "priority": "MEDIUM",
+        "rule": "Use verbosity:'nano' or 'minimal' for start_session when context is tight; use 'summary' (default) for normal sessions."
+    }
+]
+```
+
+<!-- AGENT_RULES_END -->
 
 ---
 
 ## Contributing
 
 We welcome contributions!
+
 1. Fork the repo and create your branch (`git checkout -b feature/amazing-idea`).
 2. Install dependencies: `npm install`.
 3. Build the project: `npm run build`.
