@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { execSync } from "child_process";
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
@@ -282,6 +283,23 @@ export function getFileMtime(filePath: string, projectRoot?: string): number | n
         ? path.join(projectRoot, filePath)
         : filePath;
     return fs.statSync(resolved).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute a SHA-256 hex digest of a file's contents.
+ * Returns null if the file cannot be read.
+ */
+export function getFileHash(filePath: string, projectRoot?: string): string | null {
+  try {
+    const resolved =
+      projectRoot && !path.isAbsolute(filePath)
+        ? path.join(projectRoot, filePath)
+        : filePath;
+    const content = fs.readFileSync(resolved);
+    return createHash("sha256").update(content).digest("hex");
   } catch {
     return null;
   }
