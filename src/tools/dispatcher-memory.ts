@@ -16,7 +16,7 @@ import { success, error } from "../response.js";
 import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
-  MAX_SEARCH_RESULTS, SNAPSHOT_TTL_MINUTES,
+  MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
 } from "../constants.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness, ScheduledEventRow } from "../types.js";
 
@@ -202,10 +202,25 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         dependents: coerceStringArray().optional(),
         notes: z.string().optional(),
         executive_summary: z.string().optional().describe("2-3 sentence micro summary for fast Tier-1 reads (set_file_notes)."),
-        files: z.array(z.any()).optional(),
+        files: z.array(z.object({
+          file_path: z.string(),
+          purpose: z.string().optional(),
+          layer: z.string().optional(),
+          complexity: z.string().optional(),
+          notes: z.string().optional(),
+          executive_summary: z.string().optional(),
+          dependencies: z.array(z.string()).optional(),
+          dependents: z.array(z.string()).optional(),
+        }).passthrough()).optional(),
         task_focus: z.string().optional(),
         // Changes
-        changes: z.array(z.any()).optional(),
+        changes: z.array(z.object({
+          file_path: z.string(),
+          change_type: z.string(),
+          description: z.string(),
+          diff_summary: z.string().optional(),
+          impact_scope: z.string().optional(),
+        }).passthrough()).optional(),
         description: z.string().optional(),
         agent_id: z.string().optional(),
         // Decisions
@@ -217,7 +232,12 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         supersedes: z.number().int().optional(),
         depends_on: z.array(z.number().int()).optional(),
         export_global: z.boolean().optional(),
-        decisions: z.array(z.any()).optional(),
+        decisions: z.array(z.object({
+          decision: z.string(),
+          rationale: z.string().optional(),
+          tags: z.array(z.string()).optional(),
+          affected_files: z.array(z.string()).optional(),
+        }).passthrough()).optional(),
         // Filters
         tag: z.string().optional(),
         file_path_filter: z.string().optional(),
@@ -343,7 +363,14 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             executive_summary: params.executive_summary as string | null | undefined,
           });
           acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES);
-          return success({ message: `File notes saved for ${fp}.`, file_mtime_captured: file_mtime !== null, git_branch_captured: git_branch, content_hash_captured: content_hash !== null });
+          const missingExecSummary = !params.executive_summary;
+          return success({
+            message: `File notes saved for ${fp}.`,
+            file_mtime_captured: file_mtime !== null,
+            git_branch_captured: git_branch,
+            content_hash_captured: content_hash !== null,
+            ...(missingExecSummary ? { hint: "Tip: Include executive_summary (2-3 sentences) for instant context in future sessions without re-reading the file." } : {}),
+          });
         }
 
         case "set_file_notes_batch": {
@@ -403,7 +430,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.description) return error("description required for begin_work.");
           if (!params.files || !Array.isArray(params.files)) return error("files array required for begin_work.");
           const sessionId = getCurrentSessionId();
-          const normalizedFiles = (params.files as string[]).map(f => normalizePath(f));
+          const normalizedFiles = (params.files as unknown as string[]).map(f => normalizePath(String(f)));
           try {
             const result = db.prepare(
               `INSERT INTO pending_work (agent_id, session_id, description, files, started_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`
@@ -648,7 +675,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "search": {
           if (!params.query) return error("query required for search.");
           const scope = params.scope ?? "all";
-          const limit = params.limit ?? 20;
+          const limit = params.limit ?? DEFAULT_SEARCH_LIMIT;
           const context_chars = params.context_chars ?? 0;
           const useFts = hasFts();
           const oversample = Math.min(limit * 2, MAX_SEARCH_RESULTS);

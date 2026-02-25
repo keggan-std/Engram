@@ -23,6 +23,7 @@ export const DB_VERSION = 15; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-
 export const MAX_FILE_TREE_DEPTH = 5;
 export const MAX_FILE_TREE_ENTRIES = 500;
 export const MAX_SEARCH_RESULTS = 50;
+export const DEFAULT_SEARCH_LIMIT = 8; // 8 gives headroom for noise; 50 (max) is available via explicit limit param
 export const MAX_GIT_LOG_ENTRIES = 50;
 export const MAX_RESPONSE_LENGTH = 50000;
 export const DEFAULT_PAGINATION_LIMIT = 20;
