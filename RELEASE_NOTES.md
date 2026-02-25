@@ -1,3 +1,43 @@
+# v1.6.1 — Universal Thin Client & Test Infrastructure Fix
+
+**Released:** patch bump on top of v1.6.0.
+
+## What's New
+
+### `engram-universal-client` Package (`packages/engram-universal-thin-client/`)
+
+A new optional companion package that acts as an **MCP proxy facade** for token-constrained environments. Instead of exposing 4 dispatcher tools (~1,600 token schema), it exposes a **single `engram` tool** (~80 tokens) and routes requests to the upstream dispatcher via BM25 semantic action matching.
+
+**Architecture:**
+- `src/router.ts` — ROUTE_TABLE mapping 60+ action names to the correct upstream dispatcher tool
+- `src/bm25.ts` — MiniSearch BM25 index; `resolveAction()` exact-matches or fuzzy-resolves any action, `suggestActions()` returns ranked alternatives
+- `src/server.ts` — MCP facade server; proxies to the real Engram MCP subprocess, handles both nested (`{action, params}`) and flat (`{action, ...}`) parameter shapes
+- `index.ts` — CLI entry point: `npx engram-universal-client --project-root <path>`
+
+**Install (Claude Desktop / Cursor / Windsurf):**
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "npx",
+      "args": ["-y", "engram-universal-client", "--project-root", "/your/project"]
+    }
+  }
+}
+```
+
+> **Note:** This package is a proof-of-concept. Known limitations and planned improvements are tracked in `docs/engram-token-efficiency-master-plan.md`.
+
+---
+
+### Test Infrastructure — Schema Sync Fix
+
+`tests/helpers/test-db.ts` previously hand-rolled a v4-era schema inline. Any migration past v4 that added columns (`file_mtime` at v5, `content_hash` at v13, `executive_summary` at v14) caused 13 test failures across `batch.test.ts` and `repos.test.ts`.
+
+**Fix:** `createTestDb()` now calls `runMigrations(db)` directly — the test database is always at the current schema version with zero manual maintenance.
+
+---
+
 # v1.6.0 — Lean Surface, Dispatcher Architecture & 8 New Feature Tracks
 
 **Engram v1.6.0** is the largest release to date — fourteen combined feature tracks. This entry covers the **eight new tracks** delivered on top of the existing agent safety and session handoff infrastructure already documented below.
