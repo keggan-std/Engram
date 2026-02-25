@@ -1,60 +1,60 @@
 {
-  "name": "engram-mcp-server",
-  "version": "1.6.1",
-  "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
-  "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "engram": "dist/index.js",
-    "engram-mcp-server": "dist/index.js"
-  },
-  "files": [
-    "dist/",
-    "scripts/"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/keggan-std/Engram"
-  },
-  "releaseNotes": "# v1.4.1 — Installer Infrastructure Audit: Path Fixes, Multi-IDE & Detection Improvements\n\n**Engram v1.4.1 is a targeted hotfix release.** A thorough audit of the entire installer infrastructure — verified against official documentation for every supported IDE — uncovered a series of critical and high-severity bugs that caused silent wrong-directory installs on macOS, invisible installs in Visual Studio, and unreliable IDE detection. All are fixed in this release, along with multi-IDE awareness and several UX improvements.\n\n---\n\n## Breaking Changes\n\nNone. v1.4.1 is fully backwards-compatible. Existing IDE config entries are unaffected.\n\n---\n\n## Fixes\n\n### Critical — macOS Install Path Wrong for All APPDATA-Based IDEs\n\n**Root cause:** `process.env.APPDATA` is Windows-only. The fallback `|| path.join(HOME, '.config')` accidentally produced the right path on Linux but the **wrong path on macOS** — `~/.config` instead of `~/Library/Application Support`.\n\n**Impact:** On every Mac, installs for VS Code, Cline/Roo Code, and Claude Desktop were written to `~/.config/...` instead of `~/Library/Application Support/...`. The IDE never read from that path. Re-running the installer returned \"Already installed — nothing to do\" on every subsequent run because the wrong file now existed.\n\n**Fix:** The `APPDATA` constant is now OS-aware:\n- **Windows:** `%APPDATA%` (e.g. `C:\\Users\\User\\AppData\\Roaming`)\n- **macOS:** `~/Library/Application Support`\n- **Linux:** `~/.config` (XDG Base Directory spec)\n\nThis resolves the correct global config path for VS Code, Cline/Roo Code, Claude Desktop, and JetBrains on all three platforms in a single change.\n\n### Critical — Visual Studio Received Wrong Config Key\n\n**Root cause:** Visual Studio uses the `\"servers\"` JSON key — not `\"mcpServers\"`. The installer was writing `{ \"mcpServers\": { \"engram\": {...} } }` to `~/.mcp.json`.\n\n**Impact:** Every Visual Studio install silently wrote to a key VS never reads. Engram was permanently invisible in Visual Studio on all platforms.\n\n**Fix:** `configKey` for Visual Studio is now `\"servers\"`, confirmed against [official Microsoft docs](https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers).\n\n### High — VS Code, Cursor, and Windsurf Had Wrong Secondary Global Paths\n\nThree IDEs had incorrect fallback paths that would never exist on any real machine:\n\n| IDE | Wrong path (removed) | Correct path (kept) |\n|-----|----------------------|---------------------|\n| **VS Code** | `~/.vscode/mcp.json` (extensions dir) | `APPDATA/Code/User/mcp.json` |\n| **Cursor** | `APPDATA/Cursor/mcp.json` | `~/.cursor/mcp.json` |\n| **Windsurf** | `APPDATA/Windsurf/mcp.json` (wrong dir + wrong filename) | `~/.codeium/windsurf/mcp_config.json` |\n\nAll three wrong paths have been removed. Sources: [VS Code docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers), [Cursor docs](https://cursor.com/docs/context/mcp), [Windsurf docs](https://docs.windsurf.com/windsurf/cascade/mcp).\n\n### High — `--check` Compared Against Wrong Reference Version\n\n**Root cause:** `--check` compared IDE config versions against the running binary version, not npm latest. If the installer ran from local source (e.g. `v1.2.5`), an IDE config stamped `v1.4.0` would show \"update available (v1.2.5)\" — completely backwards.\n\n**Fix:** `--check` now fetches npm latest **first**, before entering the IDE loop. All comparisons use `npmLatest ?? currentVersion` as the reference. Pre-release scenarios (running ahead of npm) are correctly labelled `⚡ running pre-release`.\n\n---\n\n## Improvements\n\n### Multi-IDE Awareness\n\nThe installer now understands that most developers have multiple IDEs installed simultaneously. Behavior change summary:\n\n- **`--yes` without `--ide`:** Scans all installed IDEs via filesystem and installs to **all of them** in one pass (previously errored if no IDE was detected in the terminal env).\n- **Auto-detect:** When a terminal IDE is detected, a filesystem scan runs in parallel. Additional IDEs are displayed (\"Also found: Cursor, Claude Code (CLI)\") and included in the default install.\n- **Interactive menu:** The \"Install to ALL\" option now shows exactly which IDEs were found on the machine before the user confirms.\n- **New `detectInstalledIdes()`:** Filesystem-based scan independent of terminal env vars — finds all IDEs whose config file or parent directory exists.\n\n### Improved IDE Detection Reliability\n\n- **Cursor:** Now checks `CURSOR_TRACE_ID` env var and `process.execPath` for the word `\"cursor\"` before falling back to fragile `PATH`/`VSCODE_CWD` string matching. Handles custom install directories on Windows.\n- **Visual Studio:** Added detection via `VSINSTALLDIR` and `VisualStudioVersion` env vars (set by the VS Developer Command Prompt / PowerShell).\n\n### CWD Source Conflict Warning\n\nWhen `npx` resolves to the **local Engram source directory** (because the `CWD`'s `package.json` name matches `engram-mcp-server`), the installer now prints a clear warning before doing anything:\n\n```\n⚠️  Running from the engram source directory.\n   Version shown reflects the local build — not the published npm package.\n   For an accurate check: npm install -g engram-mcp-server@latest && engram --check\n```\n\n### JetBrains Install Warning\n\nThe official JetBrains documentation does not publish a file-based global config path for MCP. Configuration is managed through **Settings › Tools › AI Assistant › Model Context Protocol** in the IDE. When installing for JetBrains, the installer now prints a warning and directs users to the Settings UI. The file-based path is retained as a best-effort fallback for configurations where it may work.\n\n### Claude Code CLI Hint — Argument Order Fixed\n\nThe native CLI install hint for Claude Code displayed the wrong argument order. Positional arguments (`name`, `json`) must come before optional flags (`--scope`):\n\n```bash\n# Before (broken — flag before positional args)\nclaude mcp add-json --scope=user engram '{...}'\n\n# After (correct)\nclaude mcp add-json engram '{...}' --scope user\n```\n\n---\n\n## Fixes & Internal\n\n- Added `Roo Code` (`rooveterinaryinc.roo-cline`) as a second Cline config path alongside `saoudrizwan.claude-dev`\n- Inline source URL comments added to every IDE config path for future maintainability\n- Fixed test asserting `InstallResult` value `\"updated\"` (invalid) — corrected to `\"legacy-upgraded\"`; added new test for `\"upgraded\"` scenario\n- Fixed `IDE_CONFIGS.visualstudio` test asserting `configKey === \"mcpServers\"` — corrected to `\"servers\"`\n\n---\n\n**Full Changelog**: https://github.com/keggan-std/Engram/compare/v1.4.0...v1.4.1\n\n---",
-  "scripts": {
-    "build": "tsc",
-    "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "start": "node dist/index.js",
-    "dev": "tsc --watch",
-    "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
-    "install-hooks": "node dist/scripts/install-hooks.js",
-    "install-mcp": "node scripts/install-mcp.js",
-    "install-mcp:list": "node scripts/install-mcp.js --list",
-    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
-  },
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "ai-memory",
-    "coding-agent",
-    "persistent-memory",
-    "session-continuity"
-  ],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "better-sqlite3": "^12.6.2",
-    "zod": "^3.24.0"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^4.0.18"
-  },
-  "overrides": {
-    "prebuild-install": "7.1.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "engram-mcp-server",
+    "version": "1.7.0",
+    "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "engram": "dist/index.js",
+        "engram-mcp-server": "dist/index.js"
+    },
+    "files": [
+        "dist/",
+        "scripts/"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/keggan-std/Engram"
+    },
+    "releaseNotes": "# v1.7.0 — Token Efficiency & Intelligence Overhaul\n\nSix improvement tracks, zero breaking changes.\n\n**P1.1** — Fixed MCP validation crash: `z.array(z.unknown())` replaced with typed schemas on `files`/`changes`/`decisions` inputs. Fixes silent failures on VS Code Copilot and Cursor.\n\n**P1.3** — Default search limit 20→8 (`DEFAULT_SEARCH_LIMIT`). Override with explicit `limit` param.\n\n**P1.4** — Convention capping by verbosity: nano=0, minimal=5, summary=10, full=all. Sorted enforced-first.\n\n**P2** — Tiered tool catalog: Tier 0 (~80t names only) / Tier 1 (~400t with descriptions) / Tier 2 (~1,200t full params). Per-agent delivery tracking — new agents get Tier 2 once, then step down.\n\n**P3** — `agent_role:\"sub\"` + `task_id` on `start` returns task-scoped context (~300-500 tokens) instead of full session boilerplate.\n\n**P4** — `--mode=universal` / `ENGRAM_MODE=universal`: expose a single `engram` tool (~80t schema) with BM25 fuzzy routing and `discover` action, built into the main server.\n\n**P5** — Deleted 660-line dead `registerSessionTools()`. `sessions.ts`: 904→316 lines.\n\n**P6** — Lint: backtick-token extraction, whole-word regex matching, expanded STOP_WORDS. `set_file_notes` nudges for `executive_summary`. AR-06 updated.",
+    "scripts": {
+        "build": "tsc",
+        "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "start": "node dist/index.js",
+        "dev": "tsc --watch",
+        "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
+        "install-hooks": "node dist/scripts/install-hooks.js",
+        "install-mcp": "node scripts/install-mcp.js",
+        "install-mcp:list": "node scripts/install-mcp.js --list",
+        "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+    },
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "ai-memory",
+        "coding-agent",
+        "persistent-memory",
+        "session-continuity"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0",
+        "better-sqlite3": "^12.6.2",
+        "zod": "^3.24.0"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.10.0",
+        "typescript": "^5.7.0",
+        "vitest": "^4.0.18"
+    },
+    "overrides": {
+        "prebuild-install": "7.1.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
 }

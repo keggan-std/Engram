@@ -12,11 +12,18 @@ interface McpToolResponse {
 }
 
 /**
- * Return a successful JSON response.
+ * JSON replacer that strips null values — reduces response token cost by 3-8%.
+ */
+function stripNulls(_key: string, value: unknown): unknown {
+    return value === null ? undefined : value;
+}
+
+/**
+ * Return a successful JSON response (compact, no whitespace, nulls stripped).
  */
 export function success(data: Record<string, unknown>): McpToolResponse {
     return {
-        content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(data, stripNulls) }],
     };
 }
 
@@ -40,11 +47,11 @@ export function error(message: string): McpToolResponse {
 }
 
 /**
- * Return an error response with structured data.
+ * Return an error response with structured data (compact, nulls stripped).
  */
 export function errorWithData(message: string, data: Record<string, unknown>): McpToolResponse {
     return {
         isError: true,
-        content: [{ type: "text", text: JSON.stringify({ error: message, ...data }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify({ error: message, ...data }, stripNulls) }],
     };
 }

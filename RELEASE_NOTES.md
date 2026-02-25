@@ -1,3 +1,109 @@
+# v1.7.0 — Token Efficiency & Intelligence Overhaul
+
+**Released:** v1.7.0
+
+## Overview
+
+v1.7.0 is a focused precision release with **six improvement tracks**, all targeting token efficiency, MCP compatibility, and agent intelligence — with zero breaking changes to the existing 4-dispatcher API surface.
+
+| Track | Improvement                                         | Token Impact                                             |
+| ----- | --------------------------------------------------- | -------------------------------------------------------- |
+| P1.1  | Fixed MCP validation crash (`z.array(z.unknown())`) | Unblocks Copilot/Cursor clients                          |
+| P1.3  | Default search limit 20 → 8                         | ~60% fewer search tokens                                 |
+| P1.4  | Convention capping by verbosity                     | Up to 100% fewer convention tokens in nano/minimal modes |
+| P2    | Tiered tool catalog (Tier 0/1/2)                    | ~93% catalog reduction after first session               |
+| P3    | Sub-agent mode (`agent_role:"sub"`)                 | ~80% smaller session start (~300-500t vs ~2,000t)        |
+| P4    | Universal mode (`--mode=universal`)                 | Single 80-token tool schema for constrained clients      |
+| P5    | Deleted 660 lines of dead legacy code               | Smaller footprint, cleaner codebase                      |
+| P6    | Smarter lint, exec_summary hints, AR-06 update      | Better conventions signal-to-noise                       |
+
+---
+
+## What's New
+
+### 🔧 P1.1 — MCP Validation Crash Fix (Critical)
+
+`z.array(z.unknown())` generates a JSON Schema without an `items` property. Some MCP clients (VS Code Copilot, Cursor) validate tool input schemas strictly and reject calls with malformed array schemas, producing a silent crash.
+
+**Fix:** All three affected input arrays in `engram_memory` (`files`, `changes`, `decisions`) now use fully typed Zod schemas with `.passthrough()` — generating valid `{type: "array", items: {...}}` JSON Schema output.
+
+### ⚡ P1.3 — Default Search Limit: 20 → 8
+
+Introduced `DEFAULT_SEARCH_LIMIT = 8` in `constants.ts`. All `engram_memory(action:"search")` calls now default to returning 8 results instead of 20. Agents rarely need more than 8 hits for a lookup. Still overridable via explicit `limit` param (up to `MAX_SEARCH_RESULTS = 50`).
+
+### 📋 P1.4 — Convention Capping by Verbosity
+
+Active conventions are now sorted (enforced-first, then most-recent-first) and capped before delivery:
+
+| Verbosity | Convention cap |
+| --------- | -------------- |
+| `nano`    | 0              |
+| `minimal` | 5              |
+| `summary` | 10             |
+| `full`    | all            |
+
+`total_conventions` count and a hint are always returned so agents know when the cap is active.
+
+### 🗂️ P2 — Tiered Tool Catalog
+
+`buildToolCatalog(tier: 0|1|2)` replaces the previous flat catalog:
+
+- **Tier 0** — Action names only, list format (~80 tokens)
+- **Tier 1** — Names + one-line descriptions (~400 tokens)
+- **Tier 2** — Full parameter documentation (~1,200 tokens)
+
+`selectCatalogTier(agent_name, verbosity)` tracks delivery history per agent. New agents get Tier 2 once, then drop to Tier 1, then Tier 0 on repeat calls. Agents can always request a higher tier via `engram_find(action:"catalog")`.
+
+### 🤖 P3 — Sub-Agent Session Mode
+
+New `agent_role:"sub"` + `task_id` parameters on `engram_session(action:"start")`. When set, returns a focused context slice instead of the full session boilerplate:
+
+- The specified task's full details
+- Files declared in `begin_work` for that task
+- Recent decisions matching task tags
+- Conventions (capped at 5)
+
+Results in ~300-500 token session starts vs ~2,000+ for full context. Ideal for sub-agents spawned to handle a specific task within a larger orchestrated workflow.
+
+### 🌐 P4 — Universal Mode (`--mode=universal`)
+
+New server-level opt-in mode that exposes a **single `engram` tool** (~80 token schema) instead of the standard 4-dispatcher surface:
+
+```bash
+# CLI activation
+npx engram-mcp-server --mode=universal --project-root /your/project
+
+# Environment variable activation
+ENGRAM_MODE=universal npx engram-mcp-server --project-root /your/project
+```
+
+**Architecture (`src/modes/universal.ts`):**
+
+- `HandlerCapturer` — duck-typed SDK server stub captures handler callbacks from all 4 dispatcher registrations without creating actual MCP tools. Zero subprocess overhead.
+- `fuzzyResolveAction()` — BM25-style substring scoring routes unknown action names to the best match (threshold 0.5), with ranked alternatives in `suggestions[]`.
+- `universalizeResponse()` — rewrites all `engram_memory(action:"X")` refs in response text to `engram({action:"X"})` for consistency.
+- `discover` action — filtered catalog search within the single tool.
+
+Standard 4-dispatcher behaviour is completely unchanged when the flag is absent.
+
+### 🗑️ P5 — Dead Code Removal (660 Lines)
+
+`registerSessionTools()` — a 660-line legacy function that registered the old v1.5 individual tools (`engram_start_session`, `engram_end_session`, `engram_record_change`, etc.) — was deleted. It was exported but had zero call-sites in `index.ts` since the v1.6 dispatcher migration. Confirmed dead via full codebase grep.
+
+`sessions.ts` shrinks from **904 → 316 lines**.
+
+### 🔍 P6 — Intelligence Improvements
+
+**P6.3 — `executive_summary` nudge:** When `set_file_notes` is called without providing `executive_summary`, the success response now includes a `hint` field explaining the value of writing one. AR-06 in the live agent rules also updated to make the requirement explicit.
+
+**P6.4 — Smarter convention linting:** `engram_find(action:"lint")` now:
+
+- Extracts backtick-quoted identifiers as high-priority match tokens (exact symbol matching)
+- Uses whole-word regex instead of substring includes (no more false positives on shared stems)
+- Expanded STOP_WORDS list for cleaner scoring
+
+---
+
 # v1.6.1 — Universal Thin Client & Test Infrastructure Fix
 
 **Released:** patch bump on top of v1.6.0.
@@ -9,20 +115,27 @@
 A new optional companion package that acts as an **MCP proxy facade** for token-constrained environments. Instead of exposing 4 dispatcher tools (~1,600 token schema), it exposes a **single `engram` tool** (~80 tokens) and routes requests to the upstream dispatcher via BM25 semantic action matching.
 
 **Architecture:**
+
 - `src/router.ts` — ROUTE_TABLE mapping 60+ action names to the correct upstream dispatcher tool
 - `src/bm25.ts` — MiniSearch BM25 index; `resolveAction()` exact-matches or fuzzy-resolves any action, `suggestActions()` returns ranked alternatives
 - `src/server.ts` — MCP facade server; proxies to the real Engram MCP subprocess, handles both nested (`{action, params}`) and flat (`{action, ...}`) parameter shapes
 - `index.ts` — CLI entry point: `npx engram-universal-client --project-root <path>`
 
 **Install (Claude Desktop / Cursor / Windsurf):**
+
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "npx",
-      "args": ["-y", "engram-universal-client", "--project-root", "/your/project"]
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "engram-universal-client",
+                "--project-root",
+                "/your/project"
+            ]
+        }
     }
-  }
 }
 ```
 
@@ -46,25 +159,27 @@ A new optional companion package that acts as an **MCP proxy facade** for token-
 
 ## Summary of New Tracks
 
-| # | Track | Branch |
-|---|-------|--------|
-| 1 | Lean 4-Tool Dispatcher (50+ → 4 tools, ~95% token reduction) | `feat/v1.6-lean-surface` |
-| 2 | Persistent Checkpoints (offload working memory mid-session) | `feat/v1.6-checkpoint` |
-| 3 | Hash-Based Staleness Detection (SHA-256 `content_hash`) | `feat/v1.6-staleness-enhanced` |
-| 4 | Tiered Verbosity + `nano` mode + `executive_summary` | `feat/v1.6-tiered-verbosity` |
-| 5 | Live Agent Rules from GitHub README (7-day cache) | `feat/v1.6-readme-rules` |
-| 6 | Quality: `lint` action, `install_hooks`/`remove_hooks`, cascade warning | `feat/v1.6-quality` |
-| 7 | Agent Specialization Routing + `route_task` + `match_score` | `feat/v1.6-multi-agent` |
-| 8 | Thin-Client Proxy for Anthropic `defer_loading` beta | `feat/v1.6-thin-client` |
+| #   | Track                                                                   | Branch                         |
+| --- | ----------------------------------------------------------------------- | ------------------------------ |
+| 1   | Lean 4-Tool Dispatcher (50+ → 4 tools, ~95% token reduction)            | `feat/v1.6-lean-surface`       |
+| 2   | Persistent Checkpoints (offload working memory mid-session)             | `feat/v1.6-checkpoint`         |
+| 3   | Hash-Based Staleness Detection (SHA-256 `content_hash`)                 | `feat/v1.6-staleness-enhanced` |
+| 4   | Tiered Verbosity + `nano` mode + `executive_summary`                    | `feat/v1.6-tiered-verbosity`   |
+| 5   | Live Agent Rules from GitHub README (7-day cache)                       | `feat/v1.6-readme-rules`       |
+| 6   | Quality: `lint` action, `install_hooks`/`remove_hooks`, cascade warning | `feat/v1.6-quality`            |
+| 7   | Agent Specialization Routing + `route_task` + `match_score`             | `feat/v1.6-multi-agent`        |
+| 8   | Thin-Client Proxy for Anthropic `defer_loading` beta                    | `feat/v1.6-thin-client`        |
 
 ---
 
 ## Track 1 — Lean 4-Tool Dispatcher (`feat/v1.6-lean-surface`)
 
 ### Problem
+
 Engram exposed 50+ individual MCP tools. Every tool's full JSON Schema was injected into the model's context at session start, consuming ~32,500 tokens per call — roughly 8-17% of a typical context window, before any code was read.
 
 ### Solution
+
 All tools collapsed into **4 dispatcher tools**, each routed via an `action` parameter:
 
 - **`engram_session`** — Session lifecycle (`start`, `end`, `handoff`, `acknowledge_handoff`, `get_history`)
@@ -73,6 +188,7 @@ All tools collapsed into **4 dispatcher tools**, each routed via an `action` par
 - **`engram_find`** — Tool catalog search + convention linting
 
 ### Impact
+
 - Schema token overhead: **~32,500 → ~1,600** (~95% reduction)
 - All previous tools still available — routed via `action` parameter
 - `engram_find` lets agents discover action names without memorising the full surface
@@ -88,9 +204,11 @@ All tools collapsed into **4 dispatcher tools**, each routed via an `action` par
 - **`get_checkpoint`** — Retrieves the most recent checkpoint for the current session (or a specific `session_id`).
 
 ### When to use
+
 Call `checkpoint` when approaching context limits without wanting to end the session. Future context can pick up from where the previous one left off.
 
 ### Schema (V12)
+
 ```sql
 CREATE TABLE checkpoints (
   id INTEGER PRIMARY KEY,
@@ -109,19 +227,22 @@ CREATE TABLE checkpoints (
 ## Track 3 — Hash-Based Staleness Detection (`feat/v1.6-staleness-enhanced`)
 
 ### Problem
+
 `mtime`-based staleness missed edits where the file content changed but the timestamp did not (formatters, git ops, some editors).
 
 ### Solution
+
 `set_file_notes` now accepts and stores a `content_hash` (SHA-256). `get_file_notes` computes a fresh hash and compares:
 
-| State | `confidence` |
-|-------|-------------|
-| hash matches mtime matches | `high` |
+| State                          | `confidence`                       |
+| ------------------------------ | ---------------------------------- |
+| hash matches mtime matches     | `high`                             |
 | mtime matches but hash differs | `stale` (content silently changed) |
-| mtime changed | `medium` |
-| >7 days old | `low` |
+| mtime changed                  | `medium`                           |
+| >7 days old                    | `low`                              |
 
 ### Schema (V13)
+
 Added `content_hash TEXT` column to `file_notes`.
 
 ---
@@ -129,30 +250,36 @@ Added `content_hash TEXT` column to `file_notes`.
 ## Track 4 — Tiered Verbosity + `nano` + `executive_summary` (`feat/v1.6-tiered-verbosity`)
 
 ### New verbosity level: `nano`
+
 Returns only session ID, record counts, `agent_rules`, and `tool_catalog`. Under 100 tokens. Use when context is critically constrained.
 
 ### New `executive_summary` field
+
 `set_file_notes` now accepts `executive_summary`: a 2–3 sentence micro-summary of the file purpose. Surfaced in `get_file_notes` (`minimal`+ verbosity).
 
 ### Schema (V14)
+
 Added `executive_summary TEXT` column to `file_notes`.
 
 ### Verbosity matrix
-| Level | Returns |
-|-------|---------|
-| `nano` | session_id, counts, agent_rules, tool_catalog |
-| `minimal` | `nano` + summary, recently changed files, high-priority tasks |
+
+| Level     | Returns                                                         |
+| --------- | --------------------------------------------------------------- |
+| `nano`    | session_id, counts, agent_rules, tool_catalog                   |
+| `minimal` | `nano` + summary, recently changed files, high-priority tasks   |
 | `summary` | `minimal` + decisions, conventions, open tasks, suggested_focus |
-| `full` | everything including detailed file notes and all task tags |
+| `full`    | everything including detailed file notes and all task tags      |
 
 ---
 
 ## Track 5 — Live Agent Rules from GitHub README (`feat/v1.6-readme-rules`)
 
 ### What changed
+
 `start_session` now returns an `agent_rules` array parsed dynamically from the Engram README hosted on GitHub.
 
 ### Behaviour
+
 - On first call, fetches `https://raw.githubusercontent.com/…/README.md` and parses the JSON block between `<!-- AGENT_RULES_START -->` and `<!-- AGENT_RULES_END -->`.
 - Caches the result to `.engram/agent_rules_cache.json` for **7 days**.
 - Falls back to hardcoded AGENT_RULES in `src/tools/find.ts` if fetch fails or cache is expired but network is unavailable.
@@ -163,13 +290,16 @@ Added `executive_summary TEXT` column to `file_notes`.
 ## Track 6 — Quality Improvements (`feat/v1.6-quality`)
 
 ### Convention Linting
+
 `engram_find(action:"lint", content:"...")` checks any code/text against all active project conventions and returns a `violations[]` array with rule references.
 
 ### Git Hook Management via `engram_admin`
+
 - `engram_admin(action:"install_hooks")` — Writes the Engram `post-commit` hook to `.git/hooks/post-commit`
 - `engram_admin(action:"remove_hooks")` — Removes the Engram hook entry from `.git/hooks/post-commit`
 
 ### Decision Cascade Warning
+
 `engram_memory(action:"update_decision")` now returns a `cascade_warning` field listing all decisions that have `depends_on` pointing at the changed decision, so agents know to review dependents.
 
 ---
@@ -177,17 +307,21 @@ Added `executive_summary TEXT` column to `file_notes`.
 ## Track 7 — Agent Specialization Routing (`feat/v1.6-multi-agent`)
 
 ### Changes to `agent_sync`
+
 Now accepts `specializations: string[]` — skill/domain tags for the agent (e.g. `["typescript","database","migration"]`). Stored in `agents` table (V15 migration: added `specializations TEXT` column).
 
 ### New action: `route_task`
+
 `engram_memory({ action: "route_task", task_id })` finds the best-matched registered agent for a task by comparing task `tags` against registered agent `specializations` using intersection scoring.
 
 Returns: `{ best_match: { agent_id, agent_name, match_score }, all_candidates: [...] }`
 
 ### Updated action: `claim_task`
+
 Now returns advisory `match_score` and optional `match_warning` comparing the claiming agent's specializations against the task's tags. Does not block claiming — advisory only.
 
 ### Schema (V15)
+
 Added `specializations TEXT` column to `agents`.
 
 ---
@@ -195,15 +329,19 @@ Added `specializations TEXT` column to `agents`.
 ## Track 8 — Thin-Client Proxy for Anthropic `defer_loading` (`feat/v1.6-thin-client`)
 
 ### What it is
+
 A new separate package at `packages/engram-thin-client/` that proxies all Engram tool calls via the **Anthropic SDK** with `defer_loading: true` beta.
 
 ### How it works
+
 Tools are registered using Anthropic's `defer_loading` beta flag, meaning **zero tool schema tokens** are consumed upfront. The model discovers tools on-demand. A BM25 search index lets the Claude model identify which Engram action to call based on natural language.
 
 ### Who it's for
+
 **Anthropic API users only** (any agent using Claude models via the Anthropic TypeScript SDK directly). Cursor, Copilot, Gemini, and GPT agents continue to use the MCP server directly — they still benefit from the lean 4-tool surface but do not get zero-upfront-cost.
 
 ### Installation
+
 ```bash
 npm install engram-thin-client
 ```
@@ -218,12 +356,12 @@ None. All eight new tracks are additive. Existing tool calls, IDE configs, and d
 
 ## Migration Summary (V12–V15)
 
-| Version | Change |
-|---------|--------|
-| V12 | `checkpoints` table (checkpoint, get_checkpoint) |
-| V13 | `file_notes.content_hash` column (hash-based staleness) |
-| V14 | `file_notes.executive_summary` column (tiered verbosity) |
-| V15 | `agents.specializations` column (route_task, match_score) |
+| Version | Change                                                    |
+| ------- | --------------------------------------------------------- |
+| V12     | `checkpoints` table (checkpoint, get_checkpoint)          |
+| V13     | `file_notes.content_hash` column (hash-based staleness)   |
+| V14     | `file_notes.executive_summary` column (tiered verbosity)  |
+| V15     | `agents.specializations` column (route_task, match_score) |
 
 ---
 
@@ -265,11 +403,11 @@ Schema change: V7 adds `file_locks` and `pending_work` tables.
 
 `engram_check_events` now includes a `context_pressure` event type with three severity levels:
 
-| Level | Threshold | Message |
-|-------|-----------|---------|
-| `notice` | ≥ 50% | Context filling — save progress soon |
-| `warning` | ≥ 70% | Context > 70% — consider ending session |
-| `urgent` | ≥ 85% | Context critical — end session now |
+| Level     | Threshold | Message                                 |
+| --------- | --------- | --------------------------------------- |
+| `notice`  | ≥ 50%     | Context filling — save progress soon    |
+| `warning` | ≥ 70%     | Context > 70% — consider ending session |
+| `urgent`  | ≥ 85%     | Context critical — end session now      |
 
 Thresholds are stored in `config` and adjustable via `engram_config`. Byte estimates are tracked per-session in a new `session_bytes` table (V8).
 
@@ -283,7 +421,7 @@ Thresholds are stored in `config` and adjustable via `engram_config`. Byte estim
 
 ```json
 {
-  "branch_warning": "Notes written on 'main' — you are on 'feature/auth'. File may differ."
+    "branch_warning": "Notes written on 'main' — you are on 'feature/auth'. File may differ."
 }
 ```
 
@@ -351,6 +489,7 @@ Every MCP tool invocation is now logged to a new `tool_call_log` table (V11). Th
 ### `engram_replay`
 
 A new tool reconstructs the complete timeline of a session in chronological order, interleaving:
+
 - Tool calls from `tool_call_log`
 - Changes from `changes`
 - Decisions from `decisions`
@@ -360,7 +499,7 @@ A new tool reconstructs the complete timeline of a session in chronological orde
 Useful for post-session audits, debugging unexpected agent behaviour, and handoff documentation.
 
 ```js
-engram_replay({ session_id: 14, limit: 50 })
+engram_replay({ session_id: 14, limit: 50 });
 ```
 
 Schema change: V11 adds `tool_call_log` table.
@@ -387,7 +526,7 @@ None. v1.5.0 is fully backwards-compatible. All existing tool calls, IDE configs
 
 ## F1 — Trustworthy Context
 
-*Branch: `feature/trustworthy-context`*
+_Branch: `feature/trustworthy-context`_
 
 The core problem: **can the agent trust what Engram tells it?** File notes written weeks ago may no longer reflect the file. Search results may reference stale architecture. This track makes every piece of returned memory carry a confidence signal.
 
@@ -397,18 +536,18 @@ The core problem: **can the agent trust what Engram tells it?** File notes writt
 
 ```json
 {
-  "confidence": "stale",
-  "stale": true,
-  "staleness_hours": 18
+    "confidence": "stale",
+    "stale": true,
+    "staleness_hours": 18
 }
 ```
 
-| `confidence` | Meaning |
-|---|---|
-| `high` | File mtime unchanged since notes were written — fully trustworthy |
-| `medium` | File changed recently (< 24h) — notes likely still valid, re-read if editing |
-| `stale` | File changed significantly (> 24h) — treat notes as a hint, re-read before acting |
-| `unknown` | No mtime stored (legacy notes or file not found) |
+| `confidence` | Meaning                                                                           |
+| ------------ | --------------------------------------------------------------------------------- |
+| `high`       | File mtime unchanged since notes were written — fully trustworthy                 |
+| `medium`     | File changed recently (< 24h) — notes likely still valid, re-read if editing      |
+| `stale`      | File changed significantly (> 24h) — treat notes as a hint, re-read before acting |
+| `unknown`    | No mtime stored (legacy notes or file not found)                                  |
 
 The agent is never blocked — notes are always returned. The confidence field lets the agent decide whether to trust or re-read.
 
@@ -417,7 +556,7 @@ The agent is never blocked — notes are always returned. The confidence field l
 A new optional `focus` parameter on `engram_start_session` allows agents to declare their working topic upfront:
 
 ```js
-engram_start_session({ focus: "auth refactor" })
+engram_start_session({ focus: "auth refactor" });
 ```
 
 When provided, Engram runs **FTS5-ranked queries** against decisions, tasks, and changes — returning only the top-15 most relevant items per category instead of everything. Conventions are always returned in full.
@@ -426,13 +565,13 @@ The response includes a `focus` metadata block:
 
 ```json
 {
-  "focus": {
-    "query": "auth refactor",
-    "decisions_returned": 4,
-    "tasks_returned": 3,
-    "changes_returned": 7,
-    "note": "Context filtered to focus. Full memory available via engram_search."
-  }
+    "focus": {
+        "query": "auth refactor",
+        "decisions_returned": 4,
+        "tasks_returned": 3,
+        "changes_returned": 7,
+        "note": "Context filtered to focus. Full memory available via engram_search."
+    }
 }
 ```
 
@@ -442,7 +581,7 @@ This can reduce session boot token cost by 60–80% when working on a specific s
 
 ## F2 — Smart Dump & Multi-Agent Coordination
 
-*Branch: `feature/smart-dump-coordination`*
+_Branch: `feature/smart-dump-coordination`_
 
 Engram now supports **multiple parallel agents** working on the same project simultaneously without stepping on each other. Schema V6 adds `agents` and `broadcasts` tables, plus task claiming columns.
 
@@ -452,9 +591,10 @@ Agents can now paste raw research notes, findings, or thoughts into Engram witho
 
 ```js
 engram_dump({
-  content: "Found that the auth token is stored in localStorage — may be a security issue. Should use httpOnly cookies instead.",
-  hint: "auto"  // or "decision" | "task" | "convention" | "finding"
-})
+    content:
+        "Found that the auth token is stored in localStorage — may be a security issue. Should use httpOnly cookies instead.",
+    hint: "auto", // or "decision" | "task" | "convention" | "finding"
+});
 ```
 
 Engram scores the content against keyword heuristics and classifies it as a `decision`, `task`, `convention`, or `finding` (stored as a change record). It **always** returns `extracted_items[]` showing exactly what was stored and where — the agent must verify, never trust blindly.
@@ -465,11 +605,11 @@ Two agents working in parallel will never pick up the same task:
 
 ```js
 // Agent A
-engram_claim_task({ task_id: 42, agent_id: "claude-code-main" })
+engram_claim_task({ task_id: 42, agent_id: "claude-code-main" });
 // → success: Task #42 claimed
 
 // Agent B (same millisecond)
-engram_claim_task({ task_id: 42, agent_id: "subagent-auth" })
+engram_claim_task({ task_id: 42, agent_id: "subagent-auth" });
 // → error: Task #42 is already claimed by agent "claude-code-main"
 ```
 
@@ -478,7 +618,11 @@ The claim uses a single atomic `UPDATE WHERE claimed_by IS NULL` — no race con
 ### Agent Registry & Heartbeat
 
 ```js
-engram_agent_sync({ agent_id: "subagent-auth", status: "working", current_task_id: 42 })
+engram_agent_sync({
+    agent_id: "subagent-auth",
+    status: "working",
+    current_task_id: 42,
+});
 ```
 
 Agents register themselves and send periodic heartbeats. If an agent goes silent for >30 minutes, its task claims are automatically released and its status is set to `stale`. This prevents deadlocks in long-running multi-agent workflows.
@@ -486,27 +630,30 @@ Agents register themselves and send periodic heartbeats. If an agent goes silent
 ### Inter-Agent Broadcasting
 
 ```js
-engram_broadcast({ from_agent: "main", message: "Auth module done — you can start the API integration now." })
+engram_broadcast({
+    from_agent: "main",
+    message: "Auth module done — you can start the API integration now.",
+});
 ```
 
 All agents see unread broadcasts on their next `engram_agent_sync`. Messages expire after a configurable duration (default: 60 minutes).
 
 ### New Coordination Tools Summary
 
-| Tool | Purpose |
-|---|---|
-| `engram_dump` | Auto-classify and store raw research content |
-| `engram_claim_task` | Atomically claim a task — safe for parallel agents |
-| `engram_release_task` | Release a claim back to the pool |
-| `engram_agent_sync` | Heartbeat + stale cleanup + unread broadcasts |
-| `engram_get_agents` | List all active agents and what they're working on |
-| `engram_broadcast` | Send a message all agents will see |
+| Tool                  | Purpose                                            |
+| --------------------- | -------------------------------------------------- |
+| `engram_dump`         | Auto-classify and store raw research content       |
+| `engram_claim_task`   | Atomically claim a task — safe for parallel agents |
+| `engram_release_task` | Release a claim back to the pool                   |
+| `engram_agent_sync`   | Heartbeat + stale cleanup + unread broadcasts      |
+| `engram_get_agents`   | List all active agents and what they're working on |
+| `engram_broadcast`    | Send a message all agents will see                 |
 
 ---
 
 ## F3 — Knowledge Intelligence
 
-*Branch: `feature/knowledge-intelligence`*
+_Branch: `feature/knowledge-intelligence`_
 
 ### FTS5-Powered Conflict Detection
 
@@ -514,11 +661,15 @@ All agents see unread broadcasts on their next `engram_agent_sync`. Messages exp
 
 ```json
 {
-  "decision_id": 31,
-  "warning": "Found 2 similar active decision(s). Review for potential conflicts.",
-  "similar_decisions": [
-    { "id": 12, "decision": "Use JWT for auth tokens...", "status": "active" }
-  ]
+    "decision_id": 31,
+    "warning": "Found 2 similar active decision(s). Review for potential conflicts.",
+    "similar_decisions": [
+        {
+            "id": 12,
+            "decision": "Use JWT for auth tokens...",
+            "status": "active"
+        }
+    ]
 }
 ```
 
@@ -527,22 +678,25 @@ All agents see unread broadcasts on their next `engram_agent_sync`. Messages exp
 Agents can now share battle-tested decisions and conventions across all projects on the machine via a **global knowledge base** at `~/.engram/global.db`.
 
 **Exporting knowledge:**
+
 ```js
 engram_record_decision({
-  decision: "Always use httpOnly cookies for auth tokens — never localStorage.",
-  export_global: true   // mirrors to ~/.engram/global.db
-})
+    decision:
+        "Always use httpOnly cookies for auth tokens — never localStorage.",
+    export_global: true, // mirrors to ~/.engram/global.db
+});
 
 engram_add_convention({
-  category: "security",
-  rule: "Auth tokens must use httpOnly cookies only.",
-  export_global: true
-})
+    category: "security",
+    rule: "Auth tokens must use httpOnly cookies only.",
+    export_global: true,
+});
 ```
 
 **Reading global knowledge (on any project):**
+
 ```js
-engram_get_global_knowledge({ query: "auth tokens" })
+engram_get_global_knowledge({ query: "auth tokens" });
 // Returns decisions + conventions from ALL projects, with project_root provenance
 ```
 
@@ -552,14 +706,14 @@ The global DB has its own FTS5 index and is kept completely separate from per-pr
 
 ## F4 — Quality of Life
 
-*Branch: `feature/quality-of-life`*
+_Branch: `feature/quality-of-life`_
 
 ### `engram_search` — Context Snippets
 
 The search tool now accepts a `context_chars` parameter (0–500). When set, each result gains a `context` field with a relevant text snippet from the record's content:
 
 ```js
-engram_search({ query: "auth", context_chars: 150 })
+engram_search({ query: "auth", context_chars: 150 });
 // Each result: { ...record, context: "...use httpOnly cookies for auth — never localStorage. Reason: XSS..." }
 ```
 
@@ -569,9 +723,15 @@ Generates a Markdown project report with configurable sections:
 
 ```js
 engram_generate_report({
-  title: "Sprint 3 Handoff",
-  include_sections: ["tasks", "decisions", "changes", "conventions", "milestones"]
-})
+    title: "Sprint 3 Handoff",
+    include_sections: [
+        "tasks",
+        "decisions",
+        "changes",
+        "conventions",
+        "milestones",
+    ],
+});
 ```
 
 Returns a formatted Markdown document ready to paste into a GitHub issue, PR description, or team wiki.
@@ -581,7 +741,7 @@ Returns a formatted Markdown document ready to paste into a GitHub issue, PR des
 Analyzes changes recorded in the current session and generates a conventional commit message:
 
 ```js
-engram_suggest_commit()
+engram_suggest_commit();
 // Returns:
 // suggested_message: "feat(auth): implement httpOnly cookie token storage\n\n- src/auth/tokens.ts: replaced localStorage with httpOnly cookies\n..."
 // breakdown: { type: "feat", scope: "auth", files_changed: 3, change_types: { created: 1, modified: 2 } }
@@ -590,6 +750,7 @@ engram_suggest_commit()
 ### Session Duration Statistics
 
 `engram_stats` now returns:
+
 - `avg_session_duration_minutes` — rolling average across all completed sessions
 - `longest_session_minutes` — the longest recorded session
 - `sessions_last_7_days` — activity pulse
@@ -631,6 +792,7 @@ None. v1.4.1 is fully backwards-compatible. Existing IDE config entries are unaf
 **Impact:** On every Mac, installs for VS Code, Cline/Roo Code, and Claude Desktop were written to `~/.config/...` instead of `~/Library/Application Support/...`. The IDE never read from that path. Re-running the installer returned "Already installed — nothing to do" on every subsequent run because the wrong file now existed.
 
 **Fix:** The `APPDATA` constant is now OS-aware:
+
 - **Windows:** `%APPDATA%` (e.g. `C:\Users\User\AppData\Roaming`)
 - **macOS:** `~/Library/Application Support`
 - **Linux:** `~/.config` (XDG Base Directory spec)
@@ -649,10 +811,10 @@ This resolves the correct global config path for VS Code, Cline/Roo Code, Claude
 
 Three IDEs had incorrect fallback paths that would never exist on any real machine:
 
-| IDE | Wrong path (removed) | Correct path (kept) |
-|-----|----------------------|---------------------|
-| **VS Code** | `~/.vscode/mcp.json` (extensions dir) | `APPDATA/Code/User/mcp.json` |
-| **Cursor** | `APPDATA/Cursor/mcp.json` | `~/.cursor/mcp.json` |
+| IDE          | Wrong path (removed)                                     | Correct path (kept)                   |
+| ------------ | -------------------------------------------------------- | ------------------------------------- |
+| **VS Code**  | `~/.vscode/mcp.json` (extensions dir)                    | `APPDATA/Code/User/mcp.json`          |
+| **Cursor**   | `APPDATA/Cursor/mcp.json`                                | `~/.cursor/mcp.json`                  |
 | **Windsurf** | `APPDATA/Windsurf/mcp.json` (wrong dir + wrong filename) | `~/.codeium/windsurf/mcp_config.json` |
 
 All three wrong paths have been removed. Sources: [VS Code docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers), [Cursor docs](https://cursor.com/docs/context/mcp), [Windsurf docs](https://docs.windsurf.com/windsurf/cascade/mcp).
@@ -740,11 +902,11 @@ None. v1.4.0 is fully backwards-compatible. Existing IDE config entries (without
 
 Every IDE config entry written by the installer is now stamped with `_engram_version`. On re-install, the installer detects one of four states and reports it clearly:
 
-| State | Meaning |
-|-------|---------|
-| `added` | Fresh install — no prior entry existed |
-| `exists` | Already installed at this version — nothing written |
-| `upgraded` | Updated from a known older version to the current one |
+| State             | Meaning                                                                  |
+| ----------------- | ------------------------------------------------------------------------ |
+| `added`           | Fresh install — no prior entry existed                                   |
+| `exists`          | Already installed at this version — nothing written                      |
+| `upgraded`        | Updated from a known older version to the current one                    |
 | `legacy-upgraded` | Entry existed without a version stamp (pre-v1.4.0) — adopted and stamped |
 
 The old `"updated"` status has been replaced by the more precise `"upgraded"` and `"legacy-upgraded"` outcomes.
@@ -752,6 +914,7 @@ The old `"updated"` status has been replaced by the more precise `"upgraded"` an
 ### Background Auto-Update Check
 
 Engram now checks for new versions silently after the MCP server connects. The check is:
+
 - **Fire-and-forget:** runs via `setImmediate`, never blocks startup or any tool call
 - **Throttled:** runs at most once per 24 hours
 - **Opt-out:** disabled via `engram_config set auto_update_check false`
@@ -773,6 +936,7 @@ When a newer version is available, `engram_start_session` includes an `update_av
 ```
 
 The agent presents this to the user, who can respond with any of:
+
 - **Update** → agent tells user to run `npx -y engram-mcp-server install`
 - **Skip this version** → `engram_config set auto_update_skip_version 1.4.0`
 - **Postpone** → `engram_config set auto_update_remind_after 7d`
@@ -781,6 +945,7 @@ The agent presents this to the user, who can respond with any of:
 ### Two-Source Changelog Delivery
 
 Update notifications include the release changelog fetched from:
+
 1. **npm registry** (`https://registry.npmjs.org/engram-mcp-server/latest`) — includes the `releaseNotes` field injected at publish time by the new pre-publish script
 2. **GitHub Releases API** — fallback when the registry is unreachable or `releaseNotes` is absent
 
@@ -794,11 +959,11 @@ npx -y engram-mcp-server install --check
 
 Shows the installed version for every detected IDE, fetches the npm latest, and correctly handles three scenarios:
 
-| Scenario | Label |
-|----------|-------|
-| Running == npm latest | `✅ up to date` |
-| Running > npm latest | `⚡ running pre-release (vX.Y.Z > npm vA.B.C)` |
-| Running < npm latest | `⬆  npm has vX.Y.Z — run: npx -y engram-mcp-server install` |
+| Scenario              | Label                                                       |
+| --------------------- | ----------------------------------------------------------- |
+| Running == npm latest | `✅ up to date`                                             |
+| Running > npm latest  | `⚡ running pre-release (vX.Y.Z > npm vA.B.C)`              |
+| Running < npm latest  | `⬆  npm has vX.Y.Z — run: npx -y engram-mcp-server install` |
 
 ### `engram_stats` — Version & Update Status
 
@@ -806,10 +971,14 @@ Shows the installed version for every detected IDE, fetches the npm latest, and 
 
 ```json
 {
-  "server_version": "1.4.0",
-  "update_status": { "available": true, "version": "1.5.0", "releases_url": "..." },
-  "auto_update_check": "enabled",
-  "last_update_check": "2026-02-23T00:00:00.000Z"
+    "server_version": "1.4.0",
+    "update_status": {
+        "available": true,
+        "version": "1.5.0",
+        "releases_url": "..."
+    },
+    "auto_update_check": "enabled",
+    "last_update_check": "2026-02-23T00:00:00.000Z"
 }
 ```
 
@@ -817,12 +986,12 @@ Shows the installed version for every detected IDE, fetches the npm latest, and 
 
 Four new keys are now accepted by `engram_config`:
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `auto_update_check` | `true`/`false` | Enable/disable background update checks |
-| `auto_update_skip_version` | string | Version to permanently silence (e.g., `1.4.1`) |
-| `auto_update_remind_after` | duration or ISO date | Snooze updates (`7d`, `2w`, `1m`, or ISO string) |
-| `auto_update_notify_level` | `major`/`minor`/`patch` | Minimum bump size to trigger a notification |
+| Key                        | Type                    | Description                                      |
+| -------------------------- | ----------------------- | ------------------------------------------------ |
+| `auto_update_check`        | `true`/`false`          | Enable/disable background update checks          |
+| `auto_update_skip_version` | string                  | Version to permanently silence (e.g., `1.4.1`)   |
+| `auto_update_remind_after` | duration or ISO date    | Snooze updates (`7d`, `2w`, `1m`, or ISO string) |
+| `auto_update_notify_level` | `major`/`minor`/`patch` | Minimum bump size to trigger a notification      |
 
 ### Pre-publish Release Notes Injection
 
@@ -857,25 +1026,30 @@ None. v1.3.0 is fully backwards-compatible. All existing tool calls and configur
 ## What's New
 
 ### Session Verbosity Control
+
 `engram_start_session` now accepts a `verbosity` parameter:
 
-| Value | Description | Token Savings |
-|-------|-------------|---------------|
-| `"minimal"` | Counts only — no raw rows | ~90% fewer |
+| Value       | Description                      | Token Savings |
+| ----------- | -------------------------------- | ------------- |
+| `"minimal"` | Counts only — no raw rows        | ~90% fewer    |
 | `"summary"` | Truncated recent items (default) | ~60–80% fewer |
-| `"full"` | Full context including file tree | Unchanged |
+| `"full"`    | Full context including file tree | Unchanged     |
 
 Agents working on large projects no longer need to burn their context window just to start a session.
 
 ### New Tool: `engram_config`
+
 Read or update Engram's runtime configuration directly from agent tools — no file edits required:
+
 - `auto_compact` (true/false)
 - `compact_threshold` (number of sessions)
 - `retention_days`
 - `max_backups`
 
 ### New Tool: `engram_health`
+
 On-demand database diagnostics:
+
 - SQLite integrity check
 - Schema version
 - FTS5 availability
@@ -884,10 +1058,13 @@ On-demand database diagnostics:
 - Active config dump
 
 ### Batch Operations
+
 Both `engram_record_decision` and `engram_set_file_notes` now accept arrays. Multiple entries are written in a single atomic SQLite transaction — faster and safer when documenting a batch of changes at once.
 
 ### Path Normalization
+
 File paths are now normalized on write and lookup:
+
 - Backslashes → forward slashes
 - `./` prefix stripped
 - Consecutive slashes collapsed
@@ -896,15 +1073,19 @@ File paths are now normalized on write and lookup:
 This fixes silent mismatches on Windows where agents use `\` and lookups fail against stored `/` paths.
 
 ### Similar Decision Detection
+
 When calling `engram_record_decision`, Engram now checks for semantically similar active decisions using keyword matching. A `similar_decisions` warning is returned if matches are found — helping agents avoid creating duplicate entries.
 
 ### Unified Response Helpers
+
 All 30+ tools now return responses through shared `success()` / `error()` helpers. The output shape is now consistent and predictable across every tool, making response parsing reliable for agent integrations.
 
 ### Services Layer
+
 Internal refactoring: `CompactionService`, `EventTriggerService`, `GitService`, and `ProjectScanService` are now initialized as proper singletons via `getServices()` and injected into tools — separating business logic from raw SQL.
 
 ### Expanded Test Suite
+
 - `tests/repositories/batch.test.ts` — covers `upsertBatch` and `createBatch`
 - `tests/unit/normalize-path.test.ts` — covers all `normalizePath()` edge cases
 - `tests/unit/repos.test.ts` — covers repository layer methods
@@ -917,11 +1098,11 @@ Total automated tests now exceed **50**.
 
 These patch releases shipped between v1.2.6 and v1.3.0:
 
-| Version | Fix |
-|---------|-----|
-| v1.2.7 | Include `dist/` in the published npm package; document Windows build requirements for native SQLite binaries |
-| v1.2.8 | Correct IDE detection logic and fix local install path default |
-| v1.2.9 | Installer UX improvements; remove package bloat; sync version across files; pin `prebuild-install` to 7.1.3 |
+| Version | Fix                                                                                                          |
+| ------- | ------------------------------------------------------------------------------------------------------------ |
+| v1.2.7  | Include `dist/` in the published npm package; document Windows build requirements for native SQLite binaries |
+| v1.2.8  | Correct IDE detection logic and fix local install path default                                               |
+| v1.2.9  | Installer UX improvements; remove package bloat; sync version across files; pin `prebuild-install` to 7.1.3  |
 
 ---
 

@@ -21,7 +21,8 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.6.0](#-whats-new-in-v160)
+- [✨ What's New in v1.7.0](#-whats-new-in-v170)
+- [What's New in v1.6.0](#-whats-new-in-v160)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
@@ -51,6 +52,62 @@ Every AI coding agent is **stateless by default**. Each new session starts from 
 - **Time, tokens, and patience are wasted on repeated discovery.**
 
 Engram solves this by providing a **persistent brain** using a native SQLite (WAL mode) database. An AI agent should only need to deeply review a file once. When you ask it to change something, it should already know where to go.
+
+---
+
+## ✨ What's New in v1.7.0
+
+**v1.7.0** is a precision token-efficiency release — six improvement tracks with zero breaking changes to the 4-dispatcher API surface.
+
+### 🔧 MCP Validation Crash Fix (Critical)
+
+`z.array(z.unknown())` produced invalid JSON Schema (missing `items`) on `files`, `changes`, and `decisions` input arrays — causing silent validation crashes on VS Code Copilot and Cursor. **Fixed** with fully typed Zod schemas in all three affected inputs.
+
+### ⚡ Default Search Limit: 20 → 8
+
+`engram_memory(action:"search")` now defaults to 8 results (`DEFAULT_SEARCH_LIMIT`). Typ­ical lookups rarely need more. Still overridable via explicit `limit` param (up to 50).
+
+### 📋 Convention Capping by Verbosity
+
+Active conventions are sorted (enforced-first) and capped per verbosity: `nano`=0, `minimal`=5, `summary`=10, `full`=all. Total count + hint always returned.
+
+### 🗂️ Tiered Tool Catalog (P2)
+
+`buildToolCatalog(tier)` delivers the right detail level per agent:
+
+- **Tier 2** (new agents) — full params ~1,200 tokens, once
+- **Tier 1** (returning agents) — names + descriptions ~400 tokens
+- **Tier 0** (familiar agents) — names only ~80 tokens
+
+Delivery history tracked per `agent_name`. Recoverable anytime via `engram_find(action:"catalog")`.
+
+### 🤖 Sub-Agent Session Mode (P3)
+
+`engram_session(action:"start", agent_role:"sub", task_id:"T-42")` returns a focused context slice (~300-500 tokens) scoped to that task — instead of the full session boilerplate. Ideal for sub-agents spawned within an orchestrated multi-agent workflow.
+
+### 🌐 Built-In Universal Mode (P4)
+
+A single `engram` tool with an ~80 token schema — now available **inside the main server** without a separate proxy package:
+
+```bash
+# CLI flag
+npx -y engram-mcp-server --mode=universal --project-root /your/project
+
+# Environment variable
+ENGRAM_MODE=universal npx -y engram-mcp-server --project-root /your/project
+```
+
+BM25 routing and fuzzy action resolution built-in. Use when you want minimal token overhead without running a separate proxy.
+
+### 🗑️ 660 Lines of Dead Code Removed (P5)
+
+`sessions.ts` shrank from 904 → 316 lines. The deleted `registerSessionTools()` registered old v1.5 individual tools that were never called post-v1.6 migration.
+
+### 🔍 Smarter Convention Linting (P6)
+
+`engram_find(action:"lint")` now extracts backtick-quoted identifiers for high-priority matching, uses whole-word regex (no false positives on shared stems), and has an expanded STOP_WORDS list. AR-06 agent rule updated to require `executive_summary` on `set_file_notes`.
+
+> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
@@ -118,12 +175,13 @@ New `packages/engram-thin-client/` proxy enables Anthropic's `defer_loading` bet
 
 New `packages/engram-universal-thin-client/` proxy exposes Engram as a **single MCP tool** with an ~80-token schema — works with **every** MCP-compatible agent (Cursor, VS Code Copilot, Windsurf, Gemini CLI, GPT-based IDEs, Claude). BM25 routing maps free-text or near-miss action strings to the correct dispatcher. No Anthropic API required.
 
-| Approach | Schema tokens/call | Works universally |
-|---|---|---|
-| v1.5 (50+ tools) | ~32,500 | ✅ |
-| v1.6 dispatcher (4 tools) | ~1,600 | ✅ |
-| `engram-thin-client` | ~0 (deferred) | ⚠️ Anthropic only |
-| **`engram-universal-client`** | **~80** | ✅ **All agents** |
+| Approach                        | Schema tokens/call | Works universally            |
+| ------------------------------- | ------------------ | ---------------------------- |
+| v1.5 (50+ tools)                | ~32,500            | ✅                           |
+| v1.6 dispatcher (4 tools)       | ~1,600             | ✅                           |
+| `engram-thin-client`            | ~0 (deferred)      | ⚠️ Anthropic only            |
+| `engram-universal-client` proxy | ~80                | ✅ All agents                |
+| **v1.7 `--mode=universal`**     | **~80**            | ✅ **All agents (built-in)** |
 
 > Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
 
@@ -182,30 +240,70 @@ engram install --ide <your-ide>
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
-### Option 3: Universal Thin Client (All Agents — ~80 Token Schema)
+### Option 3: Universal Mode — Built-In Single-Tool Mode (v1.7+)
 
-For maximum token efficiency across **any** MCP-compatible agent, use the universal thin client. It wraps Engram in a single `engram` tool with an ~80-token schema. BM25 routing handles action resolution internally.
-
-**Cursor** (`~/.cursor/mcp.json`):
-```json
-{
-    "mcpServers": {
-        "engram": {
-            "command": "npx",
-            "args": ["-y", "engram-universal-client", "--project-root", "/absolute/path/to/project"]
-        }
-    }
-}
-```
+Starting with v1.7.0, the main server itself can expose a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
 
 **VS Code Copilot** (`.vscode/mcp.json`):
+
 ```json
 {
     "servers": {
         "engram": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "engram-universal-client", "--project-root", "${workspaceFolder}"]
+            "args": [
+                "-y",
+                "engram-mcp-server",
+                "--mode=universal",
+                "--project-root",
+                "${workspaceFolder}"
+            ]
+        }
+    }
+}
+```
+
+**Cursor** (`~/.cursor/mcp.json`), **Claude Desktop**, **Windsurf** — same pattern with `--mode=universal` added to `args`.
+
+Or set `ENGRAM_MODE=universal` as an environment variable instead of using the flag.
+
+### Option 4: Universal Thin Client Package (Legacy — v1.6.x)
+
+The original separate proxy package for maximum token efficiency. Still works; prefer Option 3 for v1.7+ installs.
+
+**Cursor** (`~/.cursor/mcp.json`):
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "engram-universal-client",
+                "--project-root",
+                "/absolute/path/to/project"
+            ]
+        }
+    }
+}
+```
+
+**VS Code Copilot** (`.vscode/mcp.json`):
+
+```json
+{
+    "servers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "engram-universal-client",
+                "--project-root",
+                "${workspaceFolder}"
+            ]
         }
     }
 }
@@ -215,7 +313,7 @@ For maximum token efficiency across **any** MCP-compatible agent, use the univer
 
 > The agent should call `engram({"action":"start"})` first. The response includes `tool_catalog` with all available actions.
 
-### Option 4: Manual Configuration
+### Option 5: Manual Configuration
 
 If you prefer to configure manually, find your IDE below:
 
@@ -425,19 +523,20 @@ graph TB
 
 ## Tools Reference
 
-Engram v1.6.0 exposes **4 dispatcher tools**. Every operation routes through one of them via an `action` parameter. Token overhead is ~1,600 tokens — a ~95% reduction from the previous 50-tool surface.
+Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). Every operation routes through one of them via an `action` parameter. Token overhead is ~1,600 tokens for the standard surface, or ~80 tokens in universal mode — a ~95-99% reduction from the previous 50-tool surface.
 
 > **Use `engram_find`** when you don't know the exact `action` name. It returns parameter schemas and descriptions for any operation.
 
 ### `engram_session` — Session Lifecycle
 
-| Action                | Purpose                                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `start`               | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. |
-| `end`                 | End session with a summary. Warns on unclosed claimed tasks.                                                   |
-| `get_history`         | Retrieve past session summaries.                                                                               |
-| `handoff`             | Package open tasks, git branch, and instructions for the next agent.                                           |
-| `acknowledge_handoff` | Clear a pending handoff from future start responses.                                                           |
+| Action                       | Purpose                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`                      | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth.     |
+| `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. |
+| `end`                        | End session with a summary. Warns on unclosed claimed tasks.                                                                                                   |
+| `get_history`                | Retrieve past session summaries.                                                                                                                               |
+| `handoff`                    | Package open tasks, git branch, and instructions for the next agent.                                                                                           |
+| `acknowledge_handoff`        | Clear a pending handoff from future start responses.                                                                                                           |
 
 ### `engram_memory` — All Memory Operations
 
