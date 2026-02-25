@@ -23,6 +23,7 @@ export class FileNotesRepo {
             file_mtime?: number | null;
             git_branch?: string | null;
             content_hash?: string | null;
+            executive_summary?: string | null;
         }
     ): void {
         const normalizedPath = normalizePath(filePath);
@@ -31,10 +32,11 @@ export class FileNotesRepo {
         const mtime = data.file_mtime ?? null;
         const branch = data.git_branch ?? null;
         const hash = data.content_hash ?? null;
+        const exec_summary = data.executive_summary ?? null;
 
         this.db.prepare(`
-      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity, file_mtime, git_branch, content_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO file_notes (file_path, purpose, dependencies, dependents, layer, last_reviewed, last_modified_session, notes, complexity, file_mtime, git_branch, content_hash, executive_summary)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(file_path) DO UPDATE SET
         purpose = COALESCE(?, purpose),
         dependencies = COALESCE(?, dependencies),
@@ -46,16 +48,17 @@ export class FileNotesRepo {
         complexity = COALESCE(?, complexity),
         file_mtime = COALESCE(?, file_mtime),
         git_branch = COALESCE(?, git_branch),
-        content_hash = COALESCE(?, content_hash)
+        content_hash = COALESCE(?, content_hash),
+        executive_summary = COALESCE(?, executive_summary)
     `).run(
             normalizedPath,
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null, mtime, branch, hash,
+            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
             // Update values
             data.purpose || null, deps, depnts,
             data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null, mtime, branch, hash,
+            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
         );
     }
 
@@ -71,6 +74,7 @@ export class FileNotesRepo {
             file_mtime?: number | null;
             git_branch?: string | null;
             content_hash?: string | null;
+            executive_summary?: string | null;
         }>,        timestamp: string,
         sessionId: number | null
     ): number {
@@ -86,6 +90,7 @@ export class FileNotesRepo {
                     file_mtime: entry.file_mtime,
                     git_branch: entry.git_branch,
                     content_hash: entry.content_hash,
+                    executive_summary: entry.executive_summary,
                 });
             }
         });
