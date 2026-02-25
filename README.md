@@ -96,7 +96,7 @@ File notes now support an `executive_summary` field — a 2-3 sentence micro sum
 
 ### 🔒 Agent Safety — File Locking & Pending Work
 
-`engram_lock_file` / `engram_unlock_file` prevent concurrent write conflicts. `engram_begin_work` / `engram_end_work` declare intent before touching files. Abandoned work surfaces in `start_session` as `abandoned_work`.
+`engram_memory(action:"lock_file")` / `unlock_file` prevent concurrent write conflicts. `engram_memory(action:"begin_work")` / `end_work` declare intent before touching files. Abandoned work surfaces in `start_session` as `abandoned_work`.
 
 ### 🌡️ Context Pressure Detection
 
@@ -108,7 +108,7 @@ File notes now support an `executive_summary` field — a 2-3 sentence micro sum
 
 ### 🎬 Session Replay & Diagnostics
 
-Every MCP tool call is logged to `tool_call_log`. `engram_replay` reconstructs the complete chronological timeline of any session.
+Every MCP tool call is logged to `tool_call_log`. Session Replay reconstructs the complete chronological timeline of any session.
 
 ### 📦 `engram-thin-client` Package
 
@@ -325,11 +325,10 @@ In the extension settings → MCP Servers:
 
 - 🧠 **Session Continuity:** Each session automatically receives the previous session's summary, changes, decisions, and full project context. Use the `focus` parameter to FTS5-rank all context around the topic you're about to work on. `suggested_focus` is returned automatically when no focus is provided.
 - 🔐 **Trustworthy Context:** File notes track `file_mtime` and `git_branch` at write time. Returns `confidence` (`high`, `medium`, `stale`, `unknown`) and a `branch_warning` when the current branch differs from when notes were stored.
-- 🔒 **Agent Safety:** `engram_lock_file` / `engram_unlock_file` prevent concurrent write conflicts. `engram_begin_work` / `engram_end_work` record intent before touching files. Abandoned work from prior sessions surfaces in `start_session`.
-- 🤖 **Multi-Agent Coordination:** Multiple agents can collaborate simultaneously. Atomic task claiming prevents duplicate work. Agent heartbeat registry tracks who is alive and idle.
-- 🤝 **Session Handoffs:** `engram_handoff` packages all necessary context (tasks, files, git branch, instructions) for graceful agent-to-agent transfers at context limits. `engram_acknowledge_handoff` clears the pending handoff.
-- 🌡️ **Context Pressure Detection:** `engram_check_events` fires at 50%/70%/85% context fill — giving agents advance warning before hitting the context wall.
-- 🌐 **Global Knowledge Base:** Export decisions and conventions to a shared cross-project store at `~/.engram/global.db`. Query it from any project with `engram_get_global_knowledge`.
+- 🔒 **Agent Safety:** `engram_memory(action:"lock_file")` / `unlock_file` prevent concurrent write conflicts. `begin_work` / `end_work` declare intent before touching files. Abandoned work from prior sessions surfaces in `start_session`.
+- 🤖 **Multi-Agent Coordination:** Multiple agents collaborate simultaneously. Atomic task claiming prevents duplicates. `route_task` finds the best-matched agent. `agent_sync` tracks who is alive and their specializations.
+- 🤝 **Session Handoffs:** `engram_session(action:"handoff")` packages context (tasks, files, git branch, instructions) for graceful agent-to-agent transfers. `acknowledge_handoff` clears the pending handoff.
+- 🌡️ **Context Pressure Detection:** `engram_memory(action:"check_events")` fires at 50%/70%/85% context fill — giving agents advance warning before hitting the context wall.
 - ⏰ **Scheduled Events:** Postpone tasks or set reminders. Triggers include `next_session`, `datetime`, or `task_complete`.
 - 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history. Git hook integration (`--install-hooks`) auto-records commits.
 - 🏗️ **Architectural Decision Records:** Logs design decisions with rationale, affected files, and tags forever. `depends_on` field models prerequisite decision chains. FTS5 deduplication warns on similar existing decisions.
@@ -337,8 +336,8 @@ In the extension settings → MCP Servers:
 - 📐 **Convention Tracking:** Records and enforces project conventions (naming, testing, styling).
 - ✅ **Task Management:** Work items persist across sessions with priority, status, and multi-agent claiming. End-session warns on unclosed claimed tasks.
 - 🔍 **Precise Full-Text Search (FTS5):** High-performance ranked search across all memory, with `context_chars` enrichment and per-result `confidence` levels for file note results.
-- 🎬 **Session Replay:** `engram_replay` reconstructs the complete tool-call + change + decision timeline for any session via the new `tool_call_log` table.
-- 💾 **Backup & Restore:** `engram_backup` creates timestamped SQLite copies to any path (like Dropbox/OneDrive) for cross-machine portability.
+- 🎬 **Session Replay:** Reconstructs the complete tool-call + change + decision timeline for any session via the `tool_call_log` table.
+- 💾 **Backup & Restore:** `engram_admin(action:"backup")` creates timestamped SQLite copies to any path (like Dropbox/OneDrive) for cross-machine portability.
 - 📊 **Reports, Stats & Commit Suggestions:** Generate Markdown project reports, per-agent activity metrics, and conventional commit messages from session data.
 
 ---
@@ -514,7 +513,7 @@ engram_memory({ action: "get_file_notes", file_path: "path/to/file.ts" });
 - **`confidence: "high"`** → Use stored notes. Only open the file if you need to edit it.
 - **`confidence: "medium"`** → Notes exist but the file may have minor changes. Use as a guide; open if precision matters.
 - **`confidence: "stale"`** → The file has changed significantly since notes were stored. Re-read and update notes.
-- **No notes** → Read the file, then immediately call `engram_set_file_notes` with `file_path`, `purpose`, `dependencies`, `dependents`, `layer`, `complexity`, `notes`. Batch multiple files in one call.
+- **No notes** → Read the file, then immediately call `engram_memory(action:"set_file_notes")` with `file_path`, `purpose`, `dependencies`, `dependents`, `layer`, `complexity`, `notes`. Batch multiple files with `set_file_notes_batch`.
 
 > **Rule:** Never read a file already analysed in a previous session without checking Engram first.
 
