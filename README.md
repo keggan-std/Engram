@@ -1003,6 +1003,58 @@ engram_memory({
 
 ---
 
+## Troubleshooting
+
+### Windows: `'engram' is not recognized` when using `npx`
+
+If your Windows username contains special characters (tildes `~`, spaces, accented letters, etc.), `npx` may fail to resolve the binary:
+
+```
+'engram' is not recognized as an internal or external command,
+operable program or batch file.
+```
+
+**Cause:** `npx` downloads packages to a temp directory under your user profile (e.g., `C:\Users\~ RG\AppData\Local\npm-cache\_npx\...`). Special characters — especially tildes — are misinterpreted as DOS 8.3 short-path prefixes, and spaces compound the issue. The generated `.cmd` shim fails to resolve its own path.
+
+**Fix — use a global install instead of `npx`:**
+
+```bash
+npm install -g engram-mcp-server
+```
+
+Then update your MCP config to use the binary directly:
+
+```jsonc
+// .vscode/mcp.json (or equivalent for your IDE)
+{
+    "servers": {
+        "engram": {
+            "type": "stdio",
+            "command": "engram-mcp-server",
+            "args": ["--mode=universal", "--project-root", "${workspaceFolder}"]
+        }
+    }
+}
+```
+
+**Note:** With a global install, you won't get automatic version updates. After publishing a new version, update manually:
+
+```bash
+npm install -g engram-mcp-server@latest
+```
+
+### Database locked or corrupted
+
+If you see `SQLITE_BUSY` or corruption errors:
+
+1. Stop all IDE instances using Engram
+2. Delete the project-local database: `rm -rf .engram/`
+3. Restart — Engram will re-create the database and run all migrations automatically
+
+The global database at `~/.engram/memory.db` can be reset the same way if needed.
+
+---
+
 ## Contributing
 
 We welcome contributions!
