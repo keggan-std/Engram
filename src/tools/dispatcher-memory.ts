@@ -171,7 +171,7 @@ const MEMORY_ACTIONS = [
   "search", "what_changed", "get_dependency_map",
   "record_milestone", "get_milestones",
   "schedule_event", "get_scheduled_events", "update_scheduled_event", "acknowledge_event", "check_events",
-  "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast",
+  "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast", "route_task",
 ] as const;
 
 // ─── Dispatcher ────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ begin_work, record_decision, record_decisions_batch, get_decisions, update_decis
 add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
 checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
 get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
-check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast.
+check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task.
 
 Use engram_find(query: "...") to look up exact param schemas.`,
       inputSchema: {
@@ -273,6 +273,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         message: z.string().optional(),
         expires_in_minutes: z.number().int().optional(),
         timeout_minutes: z.number().int().optional(),
+        specializations: z.array(z.string()).optional(),
         session_id: z.number().int().optional(),
         include_tool_log: z.boolean().optional(),
       },
@@ -953,7 +954,23 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             if (task.claimed_by) return error(`Task #${params.task_id} is already claimed by "${task.claimed_by}".`);
             return error(`Task #${params.task_id} could not be claimed.`);
           }
-          return success({ message: `Task #${params.task_id} claimed by "${agentId}".`, task: db.prepare("SELECT * FROM tasks WHERE id = ?").get(params.task_id) });
+          const claimedTask = db.prepare("SELECT * FROM tasks WHERE id = ?").get(params.task_id) as { tags?: string | null } | null;
+          // Advisory specialization match score
+          let matchScore: number | undefined;
+          let matchWarning: string | undefined;
+          try {
+            const agent = db.prepare("SELECT specializations FROM agents WHERE id = ?").get(agentId) as { specializations: string | null } | undefined;
+            if (agent?.specializations) {
+              const specs: string[] = JSON.parse(agent.specializations);
+              const taskTags: string[] = claimedTask?.tags ? JSON.parse(claimedTask.tags) : [];
+              if (specs.length > 0 && taskTags.length > 0) {
+                const overlap = taskTags.filter(t => specs.some(s => s.toLowerCase() === t.toLowerCase()));
+                matchScore = Math.round((overlap.length / taskTags.length) * 100);
+                if (matchScore === 0) matchWarning = `No specialization overlap (agent: [${specs.join(", ")}], task tags: [${taskTags.join(", ")}]).`;
+              }
+            }
+          } catch { /* advisory only, never hard-block */ }
+          return success({ message: `Task #${params.task_id} claimed by "${agentId}".${matchWarning ? ` ⚠️ ${matchWarning}` : ""}`, task: claimedTask, match_score: matchScore, match_warning: matchWarning });
         }
 
         case "release_task": {
@@ -975,9 +992,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.agent_id) return error("agent_id required for agent_sync.");
           const nowMs = Date.now();
           try {
+            const specsJson = params.specializations ? JSON.stringify(params.specializations) : null;
             db.prepare(
-              `INSERT INTO agents (id, name, last_seen, current_task_id, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), last_seen = excluded.last_seen, current_task_id = excluded.current_task_id, status = excluded.status`
-            ).run(params.agent_id, params.agent_name ?? params.agent_id, nowMs, params.current_task_id ?? null, params.status ?? "idle");
+              `INSERT INTO agents (id, name, last_seen, current_task_id, status, specializations) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), last_seen = excluded.last_seen, current_task_id = excluded.current_task_id, status = excluded.status, specializations = COALESCE(excluded.specializations, specializations)`
+            ).run(params.agent_id, params.agent_name ?? params.agent_id, nowMs, params.current_task_id ?? null, params.status ?? "idle", specsJson);
           } catch { return error("Agent coordination tables not yet initialised."); }
           const STALE_MS = 30 * 60 * 1000;
           try {
@@ -995,6 +1013,23 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             }
           } catch { /* best effort */ }
           return success({ agent: db.prepare("SELECT * FROM agents WHERE id = ?").get(params.agent_id), unread_broadcasts: broadcasts, message: broadcasts.length > 0 ? `Agent "${params.agent_id}" synced. ${broadcasts.length} unread broadcast(s).` : `Agent "${params.agent_id}" synced.` });
+        }
+
+        case "route_task": {
+          if (!params.task_id) return error("task_id required for route_task.");
+          const taskRow = db.prepare("SELECT * FROM tasks WHERE id = ?").get(params.task_id) as { tags?: string | null; title: string; status: string } | undefined;
+          if (!taskRow) return error(`Task #${params.task_id} not found.`);
+          const taskTags: string[] = taskRow.tags ? (() => { try { return JSON.parse(taskRow.tags!); } catch { return []; } })() : [];
+          let agents: Array<{ id: string; name: string; status: string; last_seen: number; specializations: string | null }> = [];
+          try { agents = db.prepare("SELECT id, name, status, last_seen, specializations FROM agents WHERE status != 'stale' ORDER BY last_seen DESC").all() as typeof agents; } catch { return error("Agent coordination tables not initialised. Run agent_sync first."); }
+          const scored = agents.map(a => {
+            const specs: string[] = a.specializations ? (() => { try { return JSON.parse(a.specializations!); } catch { return []; } })() : [];
+            const overlap = taskTags.length > 0 ? taskTags.filter(t => specs.some(s => s.toLowerCase() === t.toLowerCase())).length : 0;
+            const score = taskTags.length > 0 ? Math.round((overlap / taskTags.length) * 100) : (a.status === "idle" ? 50 : 10);
+            return { agent_id: a.id, agent_name: a.name, status: a.status, specializations: specs, match_score: score };
+          }).sort((a, b) => b.match_score - a.match_score || (a.status === "idle" ? -1 : 1));
+          const best = scored[0] ?? null;
+          return success({ task_id: params.task_id, task_title: taskRow.title, task_tags: taskTags, best_match: best, all_candidates: scored, message: best ? `Best agent for task #${params.task_id}: "${best.agent_name}" (score: ${best.match_score}%).` : "No active agents available." });
         }
 
         case "get_agents": {

@@ -95,6 +95,7 @@ export interface AgentRow {
   last_seen: number;              // Unix ms
   current_task_id: number | null;
   status: AgentStatus;
+  specializations: string | null; // JSON array of skill tags e.g. ["typescript","database"]
 }
 
 export interface BroadcastRow {

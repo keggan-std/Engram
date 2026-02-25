@@ -52,8 +52,9 @@ const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = {
   dump:                 { desc: "Smart dump: auto-classifies free-text into memory categories.", params: "{ description: string, hint?: string }" },
   claim_task:           { desc: "Atomically claim a task for exclusive work.", params: "{ task_id: number, agent_id?: string }" },
   release_task:         { desc: "Release a claimed task.", params: "{ task_id: number, agent_id?: string }" },
-  agent_sync:           { desc: "Register agent heartbeat and specializations.", params: "{ agent_id: string, specializations?, last_seen_ms? }" },
+  agent_sync:           { desc: "Register agent heartbeat and specializations.", params: "{ agent_id: string, specializations?: string[], agent_name?: string, status?: string, current_task_id?: number }" },
   get_agents:           { desc: "List all registered agents.", params: "{}" },
+  route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
   broadcast:            { desc: "Send a message to all or specific agents.", params: "{ message: string, target_agents? }" },
 };
 
@@ -69,9 +70,10 @@ const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   health:             { desc: "Database health check.", params: "{}" },
   config:             { desc: "Read or write Engram config values.", params: "{ key?: string, value?: string }" },
   scan_project:       { desc: "Scan filesystem and cache project structure.", params: "{ force_refresh?, max_depth? }" },
+  install_hooks:      { desc: "Install Engram git post-commit hook into .git/hooks/.", params: "{}" },
+  remove_hooks:       { desc: "Remove Engram git hook from .git/hooks/post-commit.", params: "{}" },
   generate_report:    { desc: "Generate a comprehensive project memory report.", params: "{}" },
   get_global_knowledge: { desc: "Retrieve cross-project global KB entries.", params: "{}" },
-  install_hooks:      { desc: "Install git post-commit hook for auto change recording.", params: "{}" },
 };
 
 // ─── BM25-style keyword search over catalog entries ──────────────────────────

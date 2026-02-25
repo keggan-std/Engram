@@ -533,6 +533,15 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE file_notes ADD COLUMN executive_summary TEXT;`);
     },
   },
+
+  // ─── V15: Multi-Agent Specializations ───────────────────────────
+  {
+    version: 15,
+    description: "Multi-agent specializations — specializations TEXT (JSON array) on agents for task routing",
+    up: (db) => {
+      db.exec(`ALTER TABLE agents ADD COLUMN specializations TEXT;`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
