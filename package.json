@@ -1,60 +1,60 @@
 {
-  "name": "engram-mcp-server",
-  "version": "1.7.0",
-  "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
-  "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "engram": "dist/index.js",
-    "engram-mcp-server": "dist/index.js"
-  },
-  "files": [
-    "dist/",
-    "scripts/"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/keggan-std/Engram"
-  },
-  "releaseNotes": "# v1.7.0 — Token Efficiency & Intelligence Overhaul\n\nSix improvement tracks, zero breaking changes.\n\n**P1.1** — Fixed MCP validation crash: `z.array(z.unknown())` replaced with typed schemas on `files`/`changes`/`decisions` inputs. Fixes silent failures on VS Code Copilot and Cursor.\n\n**P1.3** — Default search limit 20→8 (`DEFAULT_SEARCH_LIMIT`). Override with explicit `limit` param.\n\n**P1.4** — Convention capping by verbosity: nano=0, minimal=5, summary=10, full=all. Sorted enforced-first.\n\n**P2** — Tiered tool catalog: Tier 0 (~80t names only) / Tier 1 (~400t with descriptions) / Tier 2 (~1,200t full params). Per-agent delivery tracking — new agents get Tier 2 once, then step down.\n\n**P3** — `agent_role:\"sub\"` + `task_id` on `start` returns task-scoped context (~300-500 tokens) instead of full session boilerplate.\n\n**P4** — `--mode=universal` / `ENGRAM_MODE=universal`: expose a single `engram` tool (~80t schema) with BM25 fuzzy routing and `discover` action, built into the main server.\n\n**P5** — Deleted 660-line dead `registerSessionTools()`. `sessions.ts`: 904→316 lines.\n\n**P6** — Lint: backtick-token extraction, whole-word regex matching, expanded STOP_WORDS. `set_file_notes` nudges for `executive_summary`. AR-06 updated.",
-  "scripts": {
-    "build": "tsc",
-    "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "start": "node dist/index.js",
-    "dev": "tsc --watch",
-    "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
-    "install-hooks": "node dist/scripts/install-hooks.js",
-    "install-mcp": "node scripts/install-mcp.js",
-    "install-mcp:list": "node scripts/install-mcp.js --list",
-    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
-  },
-  "keywords": [
-    "mcp",
-    "model-context-protocol",
-    "ai-memory",
-    "coding-agent",
-    "persistent-memory",
-    "session-continuity"
-  ],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
-    "better-sqlite3": "^12.6.2",
-    "zod": "^3.24.0"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^4.0.18"
-  },
-  "overrides": {
-    "prebuild-install": "7.1.3"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+    "name": "engram-mcp-server",
+    "version": "1.7.0",
+    "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
+    "type": "module",
+    "main": "dist/index.js",
+    "bin": {
+        "engram": "dist/index.js",
+        "engram-mcp-server": "dist/index.js"
+    },
+    "files": [
+        "dist/",
+        "scripts/"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/keggan-std/Engram"
+    },
+    "releaseNotes": "# v1.7.0 — Token Efficiency & Intelligence Overhaul\n\nSix improvement tracks, zero breaking changes.\n\n**P1.1** — Fixed MCP validation crash: `z.array(z.unknown())` replaced with typed schemas on `files`/`changes`/`decisions` inputs. Fixes silent failures on VS Code Copilot and Cursor.\n\n**P1.3** — Default search limit 20→8 (`DEFAULT_SEARCH_LIMIT`). Override with explicit `limit` param.\n\n**P1.4** — Convention capping by verbosity: nano=0, minimal=5, summary=10, full=all. Sorted enforced-first.\n\n**P2** — Tiered tool catalog: Tier 0 (~80t names only) / Tier 1 (~400t with descriptions) / Tier 2 (~1,200t full params). Per-agent delivery tracking — new agents get Tier 2 once, then step down.\n\n**P3** — `agent_role:\"sub\"` + `task_id` on `start` returns task-scoped context (~300-500 tokens) instead of full session boilerplate.\n\n**P4** — `--mode=universal` / `ENGRAM_MODE=universal`: expose a single `engram` tool (~80t schema) with BM25 fuzzy routing and `discover` action, built into the main server.\n\n**P5** — Deleted 660-line dead `registerSessionTools()`. `sessions.ts`: 904→316 lines.\n\n**P6** — Lint: backtick-token extraction, whole-word regex matching, expanded STOP_WORDS. `set_file_notes` nudges for `executive_summary`. AR-06 updated.",
+    "scripts": {
+        "build": "tsc",
+        "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "start": "node dist/index.js",
+        "dev": "tsc --watch",
+        "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
+        "install-hooks": "node dist/scripts/install-hooks.js",
+        "install-mcp": "node scripts/install-mcp.js",
+        "install-mcp:list": "node scripts/install-mcp.js --list",
+        "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+    },
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "ai-memory",
+        "coding-agent",
+        "persistent-memory",
+        "session-continuity"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.12.0",
+        "better-sqlite3": "^12.6.2",
+        "zod": "^3.24.0"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^22.10.0",
+        "typescript": "^5.7.0",
+        "vitest": "^4.0.18"
+    },
+    "overrides": {
+        "prebuild-install": "7.1.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
 }

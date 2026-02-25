@@ -74,6 +74,7 @@ Active conventions are sorted (enforced-first) and capped per verbosity: `nano`=
 ### 🗂️ Tiered Tool Catalog (P2)
 
 `buildToolCatalog(tier)` delivers the right detail level per agent:
+
 - **Tier 2** (new agents) — full params ~1,200 tokens, once
 - **Tier 1** (returning agents) — names + descriptions ~400 tokens
 - **Tier 0** (familiar agents) — names only ~80 tokens
@@ -174,13 +175,13 @@ New `packages/engram-thin-client/` proxy enables Anthropic's `defer_loading` bet
 
 New `packages/engram-universal-thin-client/` proxy exposes Engram as a **single MCP tool** with an ~80-token schema — works with **every** MCP-compatible agent (Cursor, VS Code Copilot, Windsurf, Gemini CLI, GPT-based IDEs, Claude). BM25 routing maps free-text or near-miss action strings to the correct dispatcher. No Anthropic API required.
 
-| Approach | Schema tokens/call | Works universally |
-|---|---|---|
-| v1.5 (50+ tools) | ~32,500 | ✅ |
-| v1.6 dispatcher (4 tools) | ~1,600 | ✅ |
-| `engram-thin-client` | ~0 (deferred) | ⚠️ Anthropic only |
-| `engram-universal-client` proxy | ~80 | ✅ All agents |
-| **v1.7 `--mode=universal`** | **~80** | ✅ **All agents (built-in)** |
+| Approach                        | Schema tokens/call | Works universally            |
+| ------------------------------- | ------------------ | ---------------------------- |
+| v1.5 (50+ tools)                | ~32,500            | ✅                           |
+| v1.6 dispatcher (4 tools)       | ~1,600             | ✅                           |
+| `engram-thin-client`            | ~0 (deferred)      | ⚠️ Anthropic only            |
+| `engram-universal-client` proxy | ~80                | ✅ All agents                |
+| **v1.7 `--mode=universal`**     | **~80**            | ✅ **All agents (built-in)** |
 
 > Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
 
@@ -244,13 +245,20 @@ engram install --ide <your-ide>
 Starting with v1.7.0, the main server itself can expose a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
 
 **VS Code Copilot** (`.vscode/mcp.json`):
+
 ```json
 {
     "servers": {
         "engram": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "engram-mcp-server", "--mode=universal", "--project-root", "${workspaceFolder}"]
+            "args": [
+                "-y",
+                "engram-mcp-server",
+                "--mode=universal",
+                "--project-root",
+                "${workspaceFolder}"
+            ]
         }
     }
 }
@@ -265,25 +273,37 @@ Or set `ENGRAM_MODE=universal` as an environment variable instead of using the f
 The original separate proxy package for maximum token efficiency. Still works; prefer Option 3 for v1.7+ installs.
 
 **Cursor** (`~/.cursor/mcp.json`):
+
 ```json
 {
     "mcpServers": {
         "engram": {
             "command": "npx",
-            "args": ["-y", "engram-universal-client", "--project-root", "/absolute/path/to/project"]
+            "args": [
+                "-y",
+                "engram-universal-client",
+                "--project-root",
+                "/absolute/path/to/project"
+            ]
         }
     }
 }
 ```
 
 **VS Code Copilot** (`.vscode/mcp.json`):
+
 ```json
 {
     "servers": {
         "engram": {
             "type": "stdio",
             "command": "npx",
-            "args": ["-y", "engram-universal-client", "--project-root", "${workspaceFolder}"]
+            "args": [
+                "-y",
+                "engram-universal-client",
+                "--project-root",
+                "${workspaceFolder}"
+            ]
         }
     }
 }
@@ -509,14 +529,14 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 
 ### `engram_session` — Session Lifecycle
 
-| Action                | Purpose                                                                                                        |
-| --------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `start`               | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth. |
+| Action                       | Purpose                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `start`                      | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth.     |
 | `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. |
-| `end`                 | End session with a summary. Warns on unclosed claimed tasks.                                                   |
-| `get_history`         | Retrieve past session summaries.                                                                               |
-| `handoff`             | Package open tasks, git branch, and instructions for the next agent.                                           |
-| `acknowledge_handoff` | Clear a pending handoff from future start responses.                                                           |
+| `end`                        | End session with a summary. Warns on unclosed claimed tasks.                                                                                                   |
+| `get_history`                | Retrieve past session summaries.                                                                                                                               |
+| `handoff`                    | Package open tasks, git branch, and instructions for the next agent.                                                                                           |
+| `acknowledge_handoff`        | Clear a pending handoff from future start responses.                                                                                                           |
 
 ### `engram_memory` — All Memory Operations
 

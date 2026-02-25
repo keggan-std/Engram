@@ -6,16 +6,16 @@
 
 v1.7.0 is a focused precision release with **six improvement tracks**, all targeting token efficiency, MCP compatibility, and agent intelligence — with zero breaking changes to the existing 4-dispatcher API surface.
 
-| Track | Improvement | Token Impact |
-|---|---|---|
-| P1.1 | Fixed MCP validation crash (`z.array(z.unknown())`) | Unblocks Copilot/Cursor clients |
-| P1.3 | Default search limit 20 → 8 | ~60% fewer search tokens |
-| P1.4 | Convention capping by verbosity | Up to 100% fewer convention tokens in nano/minimal modes |
-| P2 | Tiered tool catalog (Tier 0/1/2) | ~93% catalog reduction after first session |
-| P3 | Sub-agent mode (`agent_role:"sub"`) | ~80% smaller session start (~300-500t vs ~2,000t) |
-| P4 | Universal mode (`--mode=universal`) | Single 80-token tool schema for constrained clients |
-| P5 | Deleted 660 lines of dead legacy code | Smaller footprint, cleaner codebase |
-| P6 | Smarter lint, exec_summary hints, AR-06 update | Better conventions signal-to-noise |
+| Track | Improvement                                         | Token Impact                                             |
+| ----- | --------------------------------------------------- | -------------------------------------------------------- |
+| P1.1  | Fixed MCP validation crash (`z.array(z.unknown())`) | Unblocks Copilot/Cursor clients                          |
+| P1.3  | Default search limit 20 → 8                         | ~60% fewer search tokens                                 |
+| P1.4  | Convention capping by verbosity                     | Up to 100% fewer convention tokens in nano/minimal modes |
+| P2    | Tiered tool catalog (Tier 0/1/2)                    | ~93% catalog reduction after first session               |
+| P3    | Sub-agent mode (`agent_role:"sub"`)                 | ~80% smaller session start (~300-500t vs ~2,000t)        |
+| P4    | Universal mode (`--mode=universal`)                 | Single 80-token tool schema for constrained clients      |
+| P5    | Deleted 660 lines of dead legacy code               | Smaller footprint, cleaner codebase                      |
+| P6    | Smarter lint, exec_summary hints, AR-06 update      | Better conventions signal-to-noise                       |
 
 ---
 
@@ -36,11 +36,11 @@ Introduced `DEFAULT_SEARCH_LIMIT = 8` in `constants.ts`. All `engram_memory(acti
 Active conventions are now sorted (enforced-first, then most-recent-first) and capped before delivery:
 
 | Verbosity | Convention cap |
-|---|---|
-| `nano` | 0 |
-| `minimal` | 5 |
-| `summary` | 10 |
-| `full` | all |
+| --------- | -------------- |
+| `nano`    | 0              |
+| `minimal` | 5              |
+| `summary` | 10             |
+| `full`    | all            |
 
 `total_conventions` count and a hint are always returned so agents know when the cap is active.
 
@@ -97,6 +97,7 @@ Standard 4-dispatcher behaviour is completely unchanged when the flag is absent.
 **P6.3 — `executive_summary` nudge:** When `set_file_notes` is called without providing `executive_summary`, the success response now includes a `hint` field explaining the value of writing one. AR-06 in the live agent rules also updated to make the requirement explicit.
 
 **P6.4 — Smarter convention linting:** `engram_find(action:"lint")` now:
+
 - Extracts backtick-quoted identifiers as high-priority match tokens (exact symbol matching)
 - Uses whole-word regex instead of substring includes (no more false positives on shared stems)
 - Expanded STOP_WORDS list for cleaner scoring
