@@ -27,6 +27,9 @@ import { registerMemoryDispatcher } from "./tools/dispatcher-memory.js";
 import { registerAdminDispatcher } from "./tools/dispatcher-admin.js";
 import { registerFindTool } from "./tools/find.js";
 
+// ─── v1.7 Universal Mode — 1 tool ~80 token schema ──────────────────────────
+import { registerUniversalMode } from "./modes/universal.js";
+
 // ─── F7: record-commit — git hook handler ────────────────────────────
 // Called by the Engram post-commit git hook after each git commit.
 // Reads the last commit's changed files and records them in Engram's DB
@@ -141,14 +144,22 @@ async function main(): Promise<void> {
     version: SERVER_VERSION,
   });
 
-  // ─── Register All Tools ──────────────────────────────────────────
+  // ─── Register Tools (mode-dependent) ──────────────────────────────────
 
-  registerSessionDispatcher(server);  // engram_session: start, end, get_history, handoff
-  registerMemoryDispatcher(server);   // engram_memory: all memory operations via action enum
-  registerAdminDispatcher(server);    // engram_admin: backup, restore, stats, health, config, scan
-  registerFindTool(server);           // engram_find: catalog keyword search
+  const isUniversalMode = args.includes("--mode=universal") || process.env.ENGRAM_MODE === "universal";
 
-  log.info(`${SERVER_NAME} v${SERVER_VERSION} — all tools registered`);
+  if (isUniversalMode) {
+    // Universal mode: 1 "engram" tool, ~80 schema tokens. All agents.
+    registerUniversalMode(server);
+    log.info(`${SERVER_NAME} v${SERVER_VERSION} — universal mode (1 tool, ~80 schema tokens)`);
+  } else {
+    // Standard mode: 4 dispatcher tools, ~1,600 schema tokens.
+    registerSessionDispatcher(server);  // engram_session: start, end, get_history, handoff
+    registerMemoryDispatcher(server);   // engram_memory: all memory operations via action enum
+    registerAdminDispatcher(server);    // engram_admin: backup, restore, stats, health, config, scan
+    registerFindTool(server);           // engram_find: catalog keyword search
+    log.info(`${SERVER_NAME} v${SERVER_VERSION} — standard mode (4 tools, ~1,600 schema tokens)`);
+  }
 
   // ─── Connect Transport ───────────────────────────────────────────
 
