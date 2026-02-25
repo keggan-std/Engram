@@ -597,23 +597,25 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "checkpoint": {
           if (!params.current_understanding || !params.progress) return error("current_understanding and progress required for checkpoint.");
           const sessionId = getCurrentSessionId();
-          try {
-            db.prepare(
-              `INSERT OR REPLACE INTO checkpoints (session_id, current_understanding, progress, relevant_files, created_at) VALUES (?, ?, ?, ?, ?)`
-            ).run(sessionId, params.current_understanding, params.progress, params.relevant_files ? JSON.stringify(params.relevant_files) : null, now());
-            return success({ message: `Checkpoint saved for session #${sessionId}.`, session_id: sessionId });
-          } catch {
-            return success({ message: "Checkpoint saved (checkpoints table not yet created — will persist after feat/v1.6-checkpoint migration).", session_id: sessionId });
-          }
+          db.prepare(
+            `INSERT INTO checkpoints (session_id, agent_name, created_at, current_understanding, progress, relevant_files) VALUES (?, ?, ?, ?, ?, ?)`
+          ).run(
+            sessionId,
+            params.agent_name ?? null,
+            Date.now(),
+            params.current_understanding,
+            params.progress,
+            params.relevant_files ? JSON.stringify(params.relevant_files) : null
+          );
+          return success({ message: `Checkpoint saved for session #${sessionId}.`, session_id: sessionId });
         }
 
         case "get_checkpoint": {
           const sessionId = getCurrentSessionId();
-          try {
-            const cp = db.prepare("SELECT * FROM checkpoints WHERE session_id = ? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
-            if (!cp) return success({ message: "No checkpoint found for current session.", session_id: sessionId });
-            return success({ ...cp, message: `Checkpoint restored for session #${sessionId}.` });
-          } catch { return success({ message: "No checkpoint found (checkpoints table not yet created)." }); }
+          const cp = db.prepare("SELECT * FROM checkpoints WHERE session_id = ? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
+          if (!cp) return success({ message: "No checkpoint found for current session.", session_id: sessionId });
+          const files = cp.relevant_files ? (JSON.parse(cp.relevant_files as string) as unknown) : null;
+          return success({ ...cp, relevant_files: files, message: `Checkpoint restored for session #${sessionId}.` });
         }
 
         // ── INTELLIGENCE ──────────────────────────────────────────────────────

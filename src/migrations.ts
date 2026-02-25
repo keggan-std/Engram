@@ -494,6 +494,27 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V12: Checkpoints ─────────────────────────────────────────────
+  {
+    version: 12,
+    description: "Checkpoints — working memory offload table for agent context preservation across sessions",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS checkpoints (
+          id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id           INTEGER NOT NULL,
+          agent_name           TEXT,
+          created_at           INTEGER NOT NULL,
+          current_understanding TEXT NOT NULL,
+          progress             TEXT NOT NULL,
+          relevant_files       TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id);
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_time    ON checkpoints(created_at DESC);
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
