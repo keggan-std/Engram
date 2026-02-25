@@ -1,10 +1,10 @@
-# v1.7.1 — Hotfix: Enum Validation, Targeted Broadcasts & API Correctness
+# v1.7.2 — Hotfix: Enum Validation, Targeted Broadcasts & API Correctness
 
-**Released:** v1.7.1
+**Released:** v1.7.2
 
 ## Overview
 
-v1.7.1 is a hotfix release addressing **20 bugs** discovered during a systematic functional audit of the v1.7.0 tool surface. No new features — only correctness and reliability fixes. Zero breaking changes.
+v1.7.2 is a hotfix release addressing **20 bugs** discovered during a systematic functional audit of the v1.7.0 tool surface. No new features — only correctness and reliability fixes. Zero breaking changes.
 
 | ID       | Area                 | Fix                                                              | Commit    |
 | -------- | -------------------- | ---------------------------------------------------------------- | --------- |
@@ -54,6 +54,17 @@ The `"session_start"` sentinel is now resolved to the session's `started_at` ISO
 - `NoActiveSessionError` message uses the correct v1.7 syntax
 - `checkpoint { progress: string }` accepts plain strings in `progress`
 - `update_task { id: N }` uses `id` (not `task_id`)
+
+---
+
+# v1.7.1 — Passthrough Schema Fix & Universal Installer Flag
+
+**Released:** v1.7.1
+
+Patch release addressing two regressions from v1.7.0.
+
+- **Universal Mode passthrough schema fix** — `z.passthrough()` now correctly applied; unrecognized fields are forwarded instead of stripped
+- **`--universal` installer flag** — `npx engram-mcp-server install --universal` now correctly writes `--mode=universal` into MCP config files
 
 ---
 

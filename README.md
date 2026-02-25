@@ -21,7 +21,7 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.7.1](#-whats-new-in-v171)
+- [✨ What's New in v1.7.2](#-whats-new-in-v172)
 - [What's New in v1.7.0](#-whats-new-in-v170)
 - [What's New in v1.6.0](#-whats-new-in-v160)
 - [Features](#features)
@@ -56,9 +56,9 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ---
 
-## ✨ What's New in v1.7.1
+## ✨ What's New in v1.7.2
 
-**v1.7.1** is a hotfix release addressing 20 bugs found during a systematic functional audit of the v1.7.0 tool surface.
+**v1.7.2** is a hotfix release addressing 20 bugs found during a systematic functional audit of the v1.7.0 tool surface.
 
 ### 🔒 Enum Validation for Change, Task, and Scope Fields
 
