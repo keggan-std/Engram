@@ -102,10 +102,10 @@ export function registerUniversalMode(server: McpServer): void {
     {
       title: "Engram",
       description: `Persistent memory for AI agents. Pass any action + relevant params. Examples: engram({action:"start", agent_name:"claude", verbosity:"summary"}) — engram({action:"record_change", changes:[{...}]}) — engram({action:"search", query:"auth"}).`,
-      inputSchema: {
+      inputSchema: z.object({
         action: z.string().describe("Operation name. Examples: start, end, record_change, get_file_notes, set_file_notes, search, record_decision, create_task, backup. Use action:'discover' + query to look up any action."),
         query: z.string().optional().describe("For action:'discover' — search the action catalog."),
-      },
+      }).passthrough(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (rawParams: Record<string, unknown>) => {

@@ -55,6 +55,7 @@ export async function runInstaller(args: string[]) {
     } catch { /* ignore — detection is best-effort */ }
 
     const nonInteractive = args.includes("--yes") || args.includes("-y") || !isTTY();
+    const universalMode = args.includes("--universal");
 
     // ─── --version ───────────────────────────────────────────────────
     if (args.includes("--version") || args.includes("-v")) {
@@ -74,6 +75,7 @@ Usage:
 
 Options:
   --ide <name>      Install for a specific IDE
+  --universal       Install in universal mode (~80 token single-tool schema)
   --yes, -y         Non-interactive mode (requires --ide if no IDE is detected)
   --remove          Remove Engram from an IDE config (requires --ide)
   --list            Show all supported IDEs and their detection/install status
@@ -89,6 +91,7 @@ Supported IDEs:
 Examples:
   engram install                               Auto-detect IDE, install interactively
   engram install --ide vscode                  Install for VS Code
+  engram install --ide vscode --universal    Install universal mode for VS Code
   engram install --ide claudecode --yes        Non-interactive install for Claude Code
   engram install --remove --ide cursor         Remove Engram from Cursor
   engram install --list                        Show IDE detection and install status
@@ -125,7 +128,10 @@ Examples:
         }
 
         console.log("\n  For manual setup, the Engram entry looks like:");
-        console.log(`  ${JSON.stringify(makeEngramEntry(IDE_CONFIGS.cursor), null, 2).replace(/\n/g, "\n  ")}`);
+        console.log(`  ${JSON.stringify(makeEngramEntry(IDE_CONFIGS.cursor, universalMode), null, 2).replace(/\n/g, "\n  ")}`);
+        if (universalMode) {
+            console.log("\n  ℹ️  Universal mode: single 'engram' tool (~80 token schema).");
+        }
         process.exit(0);
     }
 
@@ -285,7 +291,7 @@ Examples:
             console.error(`Unknown IDE: "${targetIde}". Options: ${Object.keys(IDE_CONFIGS).join(", ")}`);
             process.exit(1);
         }
-        await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], nonInteractive);
+        await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], nonInteractive, universalMode);
         return;
     }
 
@@ -308,9 +314,9 @@ Examples:
 
         if (nonInteractive) {
             // Install to current IDE first, then all other detected IDEs automatically.
-            await performInstallationForIde(currentIde, IDE_CONFIGS[currentIde], true);
+            await performInstallationForIde(currentIde, IDE_CONFIGS[currentIde], true, universalMode);
             for (const id of otherDetected) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], true);
+                await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode);
             }
             return;
         }
@@ -324,7 +330,7 @@ Examples:
         const ans = await askQuestion(prompt);
         if (ans.trim().toLowerCase() !== 'n') {
             for (const id of targetIds) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], false);
+                await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode);
             }
             return;
         }
@@ -334,7 +340,7 @@ Examples:
         if (allDetected.length > 0) {
             console.log(`🔍 Found ${allDetected.length} installed IDE(s): ${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
             for (const id of allDetected) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], true);
+                await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode);
             }
             return;
         }
@@ -379,7 +385,7 @@ Examples:
         // Prefer detected IDEs; fall back to all if none found.
         const targets = allDetected.length > 0 ? allDetected : Object.keys(IDE_CONFIGS);
         for (const id of targets) {
-            await performInstallationForIde(id, IDE_CONFIGS[id], true);
+            await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode);
         }
     } else if (choice === customOpt) {
         const customPath = await askQuestion("Enter the absolute path to your MCP config JSON file: ");
@@ -395,10 +401,10 @@ Examples:
             requiresCmdWrapper: false,
             scopes: {},
         };
-        await installToPath(customPath.trim(), customIde);
+        await installToPath(customPath.trim(), customIde, universalMode);
     } else if (choice >= 1 && choice <= ideKeys.length) {
         const selectedKey = ideKeys[choice - 1];
-        await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false);
+        await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false, universalMode);
     } else {
         console.log("\nInvalid selection. Exiting.");
         process.exit(1);
@@ -407,7 +413,7 @@ Examples:
 
 // ─── Per-IDE Installation ────────────────────────────────────────────
 
-async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean) {
+async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean, universal = false) {
     const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
     const supportsGlobal = ide.scopes?.global && ide.scopes.global.length > 0;
 
@@ -423,7 +429,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
 
     // Show CLI hint for IDEs that support native CLI install
     if (ide.scopes.cli) {
-        const entryJson = JSON.stringify(makeEngramEntry(ide));
+        const entryJson = JSON.stringify(makeEngramEntry(ide, universal));
         const quotedEntry = process.platform === "win32"
             ? `"${entryJson.replace(/"/g, '\\"')}"`
             : `'${entryJson}'`;
@@ -447,7 +453,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
 
     if (targetScope === "global" && supportsGlobal) {
         const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
-        await installToPath(configPath, ide);
+        await installToPath(configPath, ide, universal);
     } else if (targetScope === "local") {
         if (nonInteractive) {
             // Use cwd as the project root
@@ -455,7 +461,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             let configFileName = "mcp.json";
             if (localDirPrefix === "") configFileName = ".mcp.json";
             const configPath = path.join(process.cwd(), localDirPrefix, configFileName);
-            await installToPath(configPath, ide);
+            await installToPath(configPath, ide, universal);
         } else {
             const cwd = process.cwd();
             const solutionDir = await askQuestion(`Enter the absolute path to your ${ide.name} project directory:\n  [${cwd}]: `);
@@ -464,16 +470,16 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             let configFileName = "mcp.json";
             if (localDirPrefix === "") configFileName = ".mcp.json";
             const configPath = path.join(resolvedDir, localDirPrefix, configFileName);
-            await installToPath(configPath, ide);
+            await installToPath(configPath, ide, universal);
         }
     } else if (!supportsGlobal && !supportsLocal) {
         console.log(`\n⚠️  ${ide.name} — No auto-install paths configured.`);
     }
 }
 
-async function installToPath(configPath: string, ide: IdeDefinition) {
+async function installToPath(configPath: string, ide: IdeDefinition, universal = false) {
     try {
-        const result = addToConfig(configPath, ide);
+        const result = addToConfig(configPath, ide, universal);
         const currentVersion = getInstallerVersion();
         console.log(`\n   ✅ ${ide.name}`);
         console.log(`      Config : ${configPath}`);

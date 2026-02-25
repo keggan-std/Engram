@@ -21,8 +21,12 @@ export function getInstallerVersion(): string {
 /**
  * Generate the Engram server entry tailored to a specific IDE's requirements.
  * Includes _engram_version so the installer can detect upgrades and legacy installs.
+ *
+ * @param ide        IDE definition (controls type, cmd wrapper, etc.)
+ * @param universal  When true, adds --mode=universal and --project-root to args.
+ *                   Uses IDE-appropriate workspace variable when available.
  */
-export function makeEngramEntry(ide: IdeDefinition): Record<string, any> {
+export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<string, any> {
     const entry: Record<string, any> = {};
 
     // Some IDEs require explicit "type": "stdio"
@@ -30,17 +34,26 @@ export function makeEngramEntry(ide: IdeDefinition): Record<string, any> {
         entry.type = "stdio";
     }
 
+    // Build args
+    const baseArgs = ["-y", "engram-mcp-server"];
+    if (universal) {
+        baseArgs.push("--mode=universal");
+    }
+
     // Windows cmd /c wrapper for npx (npx is a .cmd on Windows)
     if (ide.requiresCmdWrapper) {
         entry.command = "cmd";
-        entry.args = ["/c", "npx", "-y", "engram-mcp-server"];
+        entry.args = ["/c", "npx", ...baseArgs];
     } else {
         entry.command = "npx";
-        entry.args = ["-y", "engram-mcp-server"];
+        entry.args = [...baseArgs];
     }
 
     // Version stamp — used by the installer to detect upgrades and legacy installs
     entry._engram_version = getInstallerVersion();
+    if (universal) {
+        entry._engram_mode = "universal";
+    }
 
     return entry;
 }
@@ -76,13 +89,13 @@ export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
  *   "upgraded"       — updated from an older tracked version to the current one
  *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era), now stamped
  */
-export function addToConfig(configPath: string, ide: IdeDefinition): InstallResult {
+export function addToConfig(configPath: string, ide: IdeDefinition, universal = false): InstallResult {
     let config: Record<string, any> = readJson(configPath) || {};
     const key = ide.configKey;
 
     if (!config[key]) config[key] = {};
 
-    const newEntry = makeEngramEntry(ide);
+    const newEntry = makeEngramEntry(ide, universal);
     const currentVersion = newEntry._engram_version as string;
 
     if (config[key].engram) {
