@@ -21,7 +21,8 @@
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
 - [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.7.0](#-whats-new-in-v170)
+- [✨ What's New in v1.7.1](#-whats-new-in-v171)
+- [What's New in v1.7.0](#-whats-new-in-v170)
 - [What's New in v1.6.0](#-whats-new-in-v160)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -52,6 +53,45 @@ Every AI coding agent is **stateless by default**. Each new session starts from 
 - **Time, tokens, and patience are wasted on repeated discovery.**
 
 Engram solves this by providing a **persistent brain** using a native SQLite (WAL mode) database. An AI agent should only need to deeply review a file once. When you ask it to change something, it should already know where to go.
+
+---
+
+## ✨ What's New in v1.7.1
+
+**v1.7.1** is a hotfix release addressing 20 bugs found during a systematic functional audit of the v1.7.0 tool surface.
+
+### 🔒 Enum Validation for Change, Task, and Scope Fields
+
+`record_change`, `create_task`, and related actions now enforce enum validation on `change_type`, `impact_scope`, and `priority`. Previously, arbitrary strings were silently accepted, corrupting query results and task filtering.
+
+- `change_type`: `created | modified | deleted | refactored | renamed | moved | config_changed`
+- `impact_scope`: `local | module | cross_module | global`
+- `priority`: `critical | high | medium | low`
+
+### 📡 Directed Broadcasts — `target_agent` Now Works
+
+`engram_memory(action:"broadcast", target_agent:"agent-name")` now correctly stores and filters directed messages. Previously the `target_agent` column was missing from the DB schema and the `agent_sync` query had no filter — all agents received all broadcasts regardless.
+
+### ⏱️ `what_changed { since: "session_start" }` Fixed
+
+The `"session_start"` sentinel value is now resolved to the current session's `started_at` timestamp before the SQL query. Previously it was passed literally, always returning zero results.
+
+### 🔧 Universal Mode Array Coercion Fixed
+
+`set_file_notes` with `dependencies` passed as a JSON string (e.g. `"[\"src/a.ts\"]"`) no longer crashes in Universal Mode. A `parseDepsField()` helper now handles both native arrays and JSON-encoded strings at the repository layer — compensating for the `HandlerCapturer` bypass of Zod preprocessing.
+
+### ✅ API Correctness Fixes (ISS-001 – ISS-015)
+
+- `generate_report` and `get_global_knowledge` return real data
+- `backup` no longer returns ENOENT
+- `get_tasks { status:"all" }` returns all tasks
+- `acknowledge_event { approved:false }` snoozes the event
+- `config { op:"get", key:X }` returns only that key's value
+- `record_milestone` version prefix no longer doubled
+- `dump` no longer creates a spurious change record
+- `NoActiveSessionError` message uses correct v1.7 syntax
+
+> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md)
 
 ---
 
