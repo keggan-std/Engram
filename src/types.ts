@@ -51,6 +51,7 @@ export interface FileNoteRow {
   file_mtime: number | null;      // Unix ms of file at time notes were saved
   content_hash: string | null;    // SHA-256 of file content at note-write time
   git_branch: string | null;      // git branch at note-write time
+  executive_summary: string | null; // 2-3 sentence Tier 1 micro summary
 }
 
 export type FileNoteConfidence = "high" | "medium" | "stale" | "unknown";

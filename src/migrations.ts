@@ -524,6 +524,15 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE file_notes ADD COLUMN content_hash TEXT;`);
     },
   },
+
+  // ─── V14: Tiered Verbosity ───────────────────────────────────────
+  {
+    version: 14,
+    description: "Tiered verbosity — executive_summary column on file_notes for Tier 1 micro-level reads",
+    up: (db) => {
+      db.exec(`ALTER TABLE file_notes ADD COLUMN executive_summary TEXT;`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

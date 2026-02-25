@@ -201,6 +201,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         dependencies: coerceStringArray().optional(),
         dependents: coerceStringArray().optional(),
         notes: z.string().optional(),
+        executive_summary: z.string().optional().describe("2-3 sentence micro summary for fast Tier-1 reads (set_file_notes)."),
         files: z.array(z.any()).optional(),
         task_focus: z.string().optional(),
         // Changes
@@ -338,6 +339,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             file_mtime,
             git_branch,
             content_hash,
+            executive_summary: params.executive_summary as string | null | undefined,
           });
           acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES);
           return success({ message: `File notes saved for ${fp}.`, file_mtime_captured: file_mtime !== null, git_branch_captured: git_branch, content_hash_captured: content_hash !== null });
@@ -352,6 +354,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             ...f,
             file_mtime: getFileMtime(normalizePath(String(f["file_path"] ?? "")), projectRoot),
             content_hash: getFileHash(normalizePath(String(f["file_path"] ?? "")), projectRoot),
+            executive_summary: f["executive_summary"] as string | null | undefined,
             git_branch,
           }));
           const count = repos.fileNotes.upsertBatch(

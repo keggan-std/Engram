@@ -698,7 +698,7 @@ Actions:
         // start params
         agent_name: z.string().optional().describe("Your agent identifier. For: start."),
         resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
-        verbosity: z.enum(["full", "summary", "minimal"]).optional().describe("Response detail level. For: start. nano=counts only, summary=default, full=everything."),
+        verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. nano=counts+rules only (~10 tokens), minimal=counts+agent_rules, summary=default, full=everything."),
         focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
         // end params
         summary: z.string().optional().describe("Session accomplishments summary. Required for: end."),
@@ -725,8 +725,7 @@ Actions:
         case "start": {
           const agent_name = params.agent_name ?? "unknown";
           const verbosity = params.verbosity ?? "summary";
-          const focus = params.focus;
-          const resume_task = params.resume_task;
+          const focus = params.focus;          const resume_task = params.resume_task;
           const timestamp = now();
 
           // Check for already-open session and close it
@@ -812,6 +811,19 @@ Actions:
             tool_catalog: buildToolCatalog(),
             triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
           };
+
+          if (verbosity === "nano") {
+            return success({
+              session_id: sessionId,
+              verbosity: "nano",
+              counts: { changes: recordedChanges.length, decisions: activeDecisions.length, conventions: activeConventions.length, tasks: openTasks.length, files: repos.fileNotes.countAll() },
+              agent_rules: AGENT_RULES,
+              tool_catalog: buildToolCatalog(),
+              triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
+              update_available: updateNotification ?? undefined,
+              message: `Session #${sessionId} started (nano). Use engram_memory — see tool_catalog.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}`,
+            });
+          }
 
           if (verbosity === "minimal") {
             return success({ ...baseResponse, verbosity: "minimal", counts: { changes: recordedChanges.length, decisions: activeDecisions.length, conventions: activeConventions.length, tasks: openTasks.length, files: repos.fileNotes.countAll() }, message: `Session #${sessionId} started. Use engram_memory for all ops — see tool_catalog.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}` });
