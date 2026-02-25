@@ -542,6 +542,15 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE agents ADD COLUMN specializations TEXT;`);
     },
   },
+
+  // ─── V16: Targeted Broadcasts ────────────────────────────────────
+  {
+    version: 16,
+    description: "Targeted broadcasts — target_agent TEXT on broadcasts for directed delivery",
+    up: (db) => {
+      db.exec(`ALTER TABLE broadcasts ADD COLUMN target_agent TEXT;`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

@@ -291,6 +291,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         current_task_id: z.number().int().optional(),
         from_agent: z.string().optional(),
         message: z.string().optional(),
+        target_agent: z.string().optional(),
         expires_in_minutes: z.number().int().optional(),
         timeout_minutes: z.number().int().optional(),
         specializations: z.array(z.string()).optional(),
@@ -1041,7 +1042,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           } catch { /* best effort */ }
           let broadcasts: unknown[] = [];
           try {
-            const all = db.prepare(`SELECT * FROM broadcasts WHERE (expires_at IS NULL OR expires_at > ?) AND NOT EXISTS (SELECT 1 FROM json_each(read_by) WHERE value = ?) ORDER BY created_at DESC LIMIT 10`).all(nowMs, params.agent_id) as Array<{ id: number }>;
+            const all = db.prepare(`SELECT * FROM broadcasts WHERE (expires_at IS NULL OR expires_at > ?) AND NOT EXISTS (SELECT 1 FROM json_each(read_by) WHERE value = ?) AND (target_agent IS NULL OR target_agent = ?) ORDER BY created_at DESC LIMIT 10`).all(nowMs, params.agent_id, params.agent_id) as Array<{ id: number }>;
             broadcasts = all;
             for (const b of all) {
               const row = db.prepare("SELECT read_by FROM broadcasts WHERE id = ?").get(b.id) as { read_by: string };
@@ -1085,9 +1086,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.from_agent || !params.message) return error("from_agent and message required for broadcast.");
           const nowMs = Date.now();
           const expiresAt = nowMs + (params.expires_in_minutes ?? 60) * 60_000;
+          const targetAgent = params.target_agent ?? null;
           try {
-            const result = db.prepare("INSERT INTO broadcasts (from_agent, message, created_at, expires_at, read_by) VALUES (?, ?, ?, ?, '[]')").run(params.from_agent, params.message, nowMs, expiresAt);
-            return success({ broadcast_id: Number(result.lastInsertRowid), message: `Broadcast #${result.lastInsertRowid} sent.`, expires_at: new Date(expiresAt).toISOString() });
+            const result = db.prepare("INSERT INTO broadcasts (from_agent, message, created_at, expires_at, read_by, target_agent) VALUES (?, ?, ?, ?, '[]', ?)").run(params.from_agent, params.message, nowMs, expiresAt, targetAgent);
+            return success({ broadcast_id: Number(result.lastInsertRowid), message: `Broadcast #${result.lastInsertRowid} sent.`, expires_at: new Date(expiresAt).toISOString(), ...(targetAgent ? { target_agent: targetAgent } : {}) });
           } catch { return error("Broadcast table not initialised. Ensure migrations have run."); }
         }
 

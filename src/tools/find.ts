@@ -55,7 +55,7 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   agent_sync:           { desc: "Register agent heartbeat and specializations.", params: "{ agent_id: string, specializations?: string[], agent_name?: string, status?: string, current_task_id?: number }" },
   get_agents:           { desc: "List all registered agents.", params: "{}" },
   route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
-  broadcast:            { desc: "Send a message to all or specific agents.", params: "{ from_agent: string, message: string, target_agents? }" },
+  broadcast:            { desc: "Send a message to all agents, or to a specific agent only.", params: "{ from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }" },
 };
 
 export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
