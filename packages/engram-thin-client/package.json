@@ -1,0 +1,42 @@
+{
+    "name": "engram-thin-client",
+    "version": "1.6.0",
+    "description": "Thin client proxy for Engram MCP Server — enables Anthropic defer_loading for any agent using the Anthropic API directly.",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "bin": {
+        "engram-thin-client": "dist/index.js"
+    },
+    "files": [
+        "dist/"
+    ],
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js"
+    },
+    "keywords": [
+        "engram",
+        "mcp",
+        "memory",
+        "ai",
+        "agent",
+        "thin-client",
+        "defer_loading"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/keggan-std/Engram"
+    },
+    "license": "MIT",
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.54.0",
+        "@modelcontextprotocol/sdk": "^1.10.1"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.3"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
