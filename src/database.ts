@@ -28,6 +28,52 @@ let _dbPath: string = "";
 
 // ─── Initialization ──────────────────────────────────────────────────
 
+/**
+ * Open the SQLite database, auto-recovering from WAL/SHM corruption.
+ * If the WAL or SHM files cause SQLITE_CORRUPT, they are removed and the
+ * main DB is reopened (which is almost always intact in WAL mode).
+ * If the main DB itself is corrupt, it is renamed to a timestamped .corrupt
+ * file and a fresh database is created.
+ */
+function openDatabaseWithRecovery(dbPath: string): DatabaseType {
+  // First attempt
+  try {
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL"); // quick smoke-test
+    db.pragma("journal_mode = DELETE"); // reset so caller sets it properly
+    return db;
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+  }
+
+  // Try removing WAL/SHM — the main file is usually fine in WAL mode
+  const walPath = dbPath + "-wal";
+  const shmPath = dbPath + "-shm";
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  for (const p of [walPath, shmPath]) {
+    if (fs.existsSync(p)) {
+      try { fs.renameSync(p, p + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
+    }
+  }
+
+  try {
+    const db = new Database(dbPath);
+    db.pragma("journal_mode = WAL");
+    db.pragma("journal_mode = DELETE");
+    console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
+    return db;
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+  }
+
+  // Main DB is also corrupt — rename it and start fresh
+  try { fs.renameSync(dbPath, dbPath + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
+  console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
+  return new Database(dbPath);
+}
+
 export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   _projectRoot = projectRoot;
   const dbDir = path.join(projectRoot, DB_DIR_NAME);
@@ -35,7 +81,7 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   ensureGitignore(projectRoot);
 
   _dbPath = path.join(dbDir, DB_FILE_NAME);
-  _db = new Database(_dbPath);
+  _db = openDatabaseWithRecovery(_dbPath);
 
   // Performance pragmas
   _db.pragma("journal_mode = WAL");

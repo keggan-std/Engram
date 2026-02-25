@@ -303,6 +303,8 @@ Returns:
         handoff_pending?: { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null };
         suggested_focus?: string;
         update_available?: typeof updateNotification;
+        agent_rules?: unknown;
+        tool_catalog?: unknown;
       } = {
         session_id: sessionId,
         previous_session: lastSession

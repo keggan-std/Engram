@@ -143,7 +143,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             const wouldRemove = Math.max(0, totalSessions - keepSessions);
             return success({ dry_run: true, total_sessions: totalSessions, would_remove: wouldRemove, message: `Dry run. ${wouldRemove} session(s) would be removed. Set dry_run: false to execute.` });
           }
-          const result = await services.compaction.compact(keepSessions, maxAgeDays);
+          const result = await services.compaction.manualCompact(keepSessions, maxAgeDays);
           return success(result as Record<string, unknown>);
         }
 
@@ -229,7 +229,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         // ─── SCAN PROJECT ────────────────────────────────────────────────
         case "scan_project": {
           const snapshot = services.scan.getOrRefresh(projectRoot, params.force_refresh ?? false, params.max_depth ?? 5);
-          return success(snapshot as Record<string, unknown>);
+          return success(snapshot as unknown as Record<string, unknown>);
         }
 
         default:
