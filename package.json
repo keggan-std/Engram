@@ -1,60 +1,60 @@
 {
-    "name": "engram-mcp-server",
-    "version": "1.7.0",
-    "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
-    "type": "module",
-    "main": "dist/index.js",
-    "bin": {
-        "engram": "dist/index.js",
-        "engram-mcp-server": "dist/index.js"
-    },
-    "files": [
-        "dist/",
-        "scripts/"
-    ],
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/keggan-std/Engram"
-    },
-    "releaseNotes": "# v1.7.0 — Token Efficiency & Intelligence Overhaul\n\nSix improvement tracks, zero breaking changes.\n\n**P1.1** — Fixed MCP validation crash: `z.array(z.unknown())` replaced with typed schemas on `files`/`changes`/`decisions` inputs. Fixes silent failures on VS Code Copilot and Cursor.\n\n**P1.3** — Default search limit 20→8 (`DEFAULT_SEARCH_LIMIT`). Override with explicit `limit` param.\n\n**P1.4** — Convention capping by verbosity: nano=0, minimal=5, summary=10, full=all. Sorted enforced-first.\n\n**P2** — Tiered tool catalog: Tier 0 (~80t names only) / Tier 1 (~400t with descriptions) / Tier 2 (~1,200t full params). Per-agent delivery tracking — new agents get Tier 2 once, then step down.\n\n**P3** — `agent_role:\"sub\"` + `task_id` on `start` returns task-scoped context (~300-500 tokens) instead of full session boilerplate.\n\n**P4** — `--mode=universal` / `ENGRAM_MODE=universal`: expose a single `engram` tool (~80t schema) with BM25 fuzzy routing and `discover` action, built into the main server.\n\n**P5** — Deleted 660-line dead `registerSessionTools()`. `sessions.ts`: 904→316 lines.\n\n**P6** — Lint: backtick-token extraction, whole-word regex matching, expanded STOP_WORDS. `set_file_notes` nudges for `executive_summary`. AR-06 updated.",
-    "scripts": {
-        "build": "tsc",
-        "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
-        "test": "vitest run",
-        "test:watch": "vitest",
-        "start": "node dist/index.js",
-        "dev": "tsc --watch",
-        "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
-        "install-hooks": "node dist/scripts/install-hooks.js",
-        "install-mcp": "node scripts/install-mcp.js",
-        "install-mcp:list": "node scripts/install-mcp.js --list",
-        "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
-    },
-    "keywords": [
-        "mcp",
-        "model-context-protocol",
-        "ai-memory",
-        "coding-agent",
-        "persistent-memory",
-        "session-continuity"
-    ],
-    "author": "",
-    "license": "MIT",
-    "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.12.0",
-        "better-sqlite3": "^12.6.2",
-        "zod": "^3.24.0"
-    },
-    "devDependencies": {
-        "@types/better-sqlite3": "^7.6.13",
-        "@types/node": "^22.10.0",
-        "typescript": "^5.7.0",
-        "vitest": "^4.0.18"
-    },
-    "overrides": {
-        "prebuild-install": "7.1.3"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    }
+  "name": "engram-mcp-server",
+  "version": "1.7.0",
+  "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "engram": "dist/index.js",
+    "engram-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "scripts/"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/keggan-std/Engram.git"
+  },
+  "releaseNotes": "# v1.7.0 — Token Efficiency & Intelligence Overhaul\n\n**Released:** v1.7.0\n\n## Overview\n\nv1.7.0 is a focused precision release with **six improvement tracks**, all targeting token efficiency, MCP compatibility, and agent intelligence — with zero breaking changes to the existing 4-dispatcher API surface.\n\n| Track | Improvement                                         | Token Impact                                             |\n| ----- | --------------------------------------------------- | -------------------------------------------------------- |\n| P1.1  | Fixed MCP validation crash (`z.array(z.unknown())`) | Unblocks Copilot/Cursor clients                          |\n| P1.3  | Default search limit 20 → 8                         | ~60% fewer search tokens                                 |\n| P1.4  | Convention capping by verbosity                     | Up to 100% fewer convention tokens in nano/minimal modes |\n| P2    | Tiered tool catalog (Tier 0/1/2)                    | ~93% catalog reduction after first session               |\n| P3    | Sub-agent mode (`agent_role:\"sub\"`)                 | ~80% smaller session start (~300-500t vs ~2,000t)        |\n| P4    | Universal mode (`--mode=universal`)                 | Single 80-token tool schema for constrained clients      |\n| P5    | Deleted 660 lines of dead legacy code               | Smaller footprint, cleaner codebase                      |\n| P6    | Smarter lint, exec_summary hints, AR-06 update      | Better conventions signal-to-noise                       |\n\n---\n\n## What's New\n\n### 🔧 P1.1 — MCP Validation Crash Fix (Critical)\n\n`z.array(z.unknown())` generates a JSON Schema without an `items` property. Some MCP clients (VS Code Copilot, Cursor) validate tool input schemas strictly and reject calls with malformed array schemas, producing a silent crash.\n\n**Fix:** All three affected input arrays in `engram_memory` (`files`, `changes`, `decisions`) now use fully typed Zod schemas with `.passthrough()` — generating valid `{type: \"array\", items: {...}}` JSON Schema output.\n\n### ⚡ P1.3 — Default Search Limit: 20 → 8\n\nIntroduced `DEFAULT_SEARCH_LIMIT = 8` in `constants.ts`. All `engram_memory(action:\"search\")` calls now default to returning 8 results instead of 20. Agents rarely need more than 8 hits for a lookup. Still overridable via explicit `limit` param (up to `MAX_SEARCH_RESULTS = 50`).\n\n### 📋 P1.4 — Convention Capping by Verbosity\n\nActive conventions are now sorted (enforced-first, then most-recent-first) and capped before delivery:\n\n| Verbosity | Convention cap |\n| --------- | -------------- |\n| `nano`    | 0              |\n| `minimal` | 5              |\n| `summary` | 10             |\n| `full`    | all            |\n\n`total_conventions` count and a hint are always returned so agents know when the cap is active.\n\n### 🗂️ P2 — Tiered Tool Catalog\n\n`buildToolCatalog(tier: 0|1|2)` replaces the previous flat catalog:\n\n- **Tier 0** — Action names only, list format (~80 tokens)\n- **Tier 1** — Names + one-line descriptions (~400 tokens)\n- **Tier 2** — Full parameter documentation (~1,200 tokens)\n\n`selectCatalogTier(agent_name, verbosity)` tracks delivery history per agent. New agents get Tier 2 once, then drop to Tier 1, then Tier 0 on repeat calls. Agents can always request a higher tier via `engram_find(action:\"catalog\")`.\n\n### 🤖 P3 — Sub-Agent Session Mode\n\nNew `agent_role:\"sub\"` + `task_id` parameters on `engram_session(action:\"start\")`. When set, returns a focused context slice instead of the full session boilerplate:\n\n- The specified task's full details\n- Files declared in `begin_work` for that task\n- Recent decisions matching task tags\n- Conventions (capped at 5)\n\nResults in ~300-500 token session starts vs ~2,000+ for full context. Ideal for sub-agents spawned to handle a specific task within a larger orchestrated workflow.\n\n### 🌐 P4 — Universal Mode (`--mode=universal`)\n\nNew server-level opt-in mode that exposes a **single `engram` tool** (~80 token schema) instead of the standard 4-dispatcher surface:\n\n```bash\n# CLI activation\nnpx engram-mcp-server --mode=universal --project-root /your/project\n\n# Environment variable activation\nENGRAM_MODE=universal npx engram-mcp-server --project-root /your/project\n```\n\n**Architecture (`src/modes/universal.ts`):**\n\n- `HandlerCapturer` — duck-typed SDK server stub captures handler callbacks from all 4 dispatcher registrations without creating actual MCP tools. Zero subprocess overhead.\n- `fuzzyResolveAction()` — BM25-style substring scoring routes unknown action names to the best match (threshold 0.5), with ranked alternatives in `suggestions[]`.\n- `universalizeResponse()` — rewrites all `engram_memory(action:\"X\")` refs in response text to `engram({action:\"X\"})` for consistency.\n- `discover` action — filtered catalog search within the single tool.\n\nStandard 4-dispatcher behaviour is completely unchanged when the flag is absent.\n\n### 🗑️ P5 — Dead Code Removal (660 Lines)\n\n`registerSessionTools()` — a 660-line legacy function that registered the old v1.5 individual tools (`engram_start_session`, `engram_end_session`, `engram_record_change`, etc.) — was deleted. It was exported but had zero call-sites in `index.ts` since the v1.6 dispatcher migration. Confirmed dead via full codebase grep.\n\n`sessions.ts` shrinks from **904 → 316 lines**.\n\n### 🔍 P6 — Intelligence Improvements\n\n**P6.3 — `executive_summary` nudge:** When `set_file_notes` is called without providing `executive_summary`, the success response now includes a `hint` field explaining the value of writing one. AR-06 in the live agent rules also updated to make the requirement explicit.\n\n**P6.4 — Smarter convention linting:** `engram_find(action:\"lint\")` now:\n\n- Extracts backtick-quoted identifiers as high-priority match tokens (exact symbol matching)\n- Uses whole-word regex instead of substring includes (no more false positives on shared stems)\n- Expanded STOP_WORDS list for cleaner scoring\n\n---",
+  "scripts": {
+    "build": "tsc",
+    "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
+    "install-hooks": "node dist/scripts/install-hooks.js",
+    "install-mcp": "node scripts/install-mcp.js",
+    "install-mcp:list": "node scripts/install-mcp.js --list",
+    "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-memory",
+    "coding-agent",
+    "persistent-memory",
+    "session-continuity"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "better-sqlite3": "^12.6.2",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "prebuild-install": "7.1.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
