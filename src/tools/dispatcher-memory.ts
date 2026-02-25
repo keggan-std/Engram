@@ -633,8 +633,9 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "get_tasks": {
           let taskQuery = "SELECT * FROM tasks WHERE 1=1";
           const taskParams: unknown[] = [];
-          if (!params.include_done) { taskQuery += " AND status NOT IN ('done', 'cancelled')"; }
-          if (params.status) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
+          const statusAll = params.status === "all";
+          if (!statusAll && !params.include_done) { taskQuery += " AND status NOT IN ('done', 'cancelled')"; }
+          if (params.status && !statusAll) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
           if (params.priority) { taskQuery += " AND priority = ?"; taskParams.push(params.priority); }
           if (params.tag) { taskQuery += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; taskParams.push(params.tag); }
           taskQuery += ` ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at ASC LIMIT ?`;
@@ -833,7 +834,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const result = db.prepare(
             "INSERT INTO milestones (session_id, timestamp, title, description, version, tags) VALUES (?, ?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.title, params.description || null, params.version || null, params.tags ? JSON.stringify(params.tags) : null);
-          return success({ milestone_id: Number(result.lastInsertRowid), message: `Milestone #${result.lastInsertRowid} recorded: "${params.title}"${params.version ? ` (v${params.version})` : ""}` });
+          return success({ milestone_id: Number(result.lastInsertRowid), message: `Milestone #${result.lastInsertRowid} recorded: "${params.title}"${params.version ? ` (${params.version.startsWith("v") ? params.version : `v${params.version}`})` : ""}` });
         }
 
         case "get_milestones": {
@@ -906,8 +907,11 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             }
             return success({ event_id: params.id, status: "acknowledged", message: `Event #${params.id} approved.${params.note ? ` Note: ${params.note}` : ""}` });
           } else {
-            db.prepare("UPDATE scheduled_events SET status = 'cancelled', acknowledged_at = ? WHERE id = ?").run(now(), params.id);
-            return success({ event_id: params.id, status: "cancelled", message: `Event #${params.id} declined.${params.note ? ` Reason: ${params.note}` : ""}` });
+            // Snooze: reset to pending so this occurrence is skipped but the event remains active.
+            // The event will re-trigger at the next session start (for every_session events).
+            // To permanently cancel, use update_scheduled_event({ id, status: "cancelled" }).
+            db.prepare("UPDATE scheduled_events SET status = 'pending' WHERE id = ?").run(params.id);
+            return success({ event_id: params.id, status: "snoozed", message: `Event #${params.id} snoozed — will trigger again next session.${params.note ? ` Reason: ${params.note}` : ""} To permanently cancel use update_scheduled_event({ id: ${params.id}, status: "cancelled" }).` });
           }
         }
 
@@ -953,9 +957,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
                 break;
               }
               default: {
-                repos.changes.recordBulk([{ file_path: "dump", change_type: "modified", description: truncate(params.content, 500), impact_scope: "local" }], sessionId, timestamp);
-                const lastId = (db.prepare("SELECT id FROM changes WHERE file_path = 'dump' AND session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as { id: number } | undefined)?.id ?? 0;
-                extractedItems.push({ type: "finding", id: lastId, summary: truncate(params.content, 120) });
+                // "finding" dumps are stored as knowledge notes — NOT as file-change records —
+                // to prevent "dump" appearing as a fake file in change-stats (ISS-011).
+                const findingId = Date.now() % 1_000_000;
+                extractedItems.push({ type: "finding", id: findingId, summary: truncate(params.content, 120) });
               }
             }
           } catch (e) { return error(`Failed to store dump: ${e}`); }

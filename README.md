@@ -852,11 +852,12 @@ engram_session({
     action: "start",
     agent_name: "sub-agent-auth",
     agent_role: "sub",
-    task_id: 42,  // The task ID assigned by the orchestrator
+    task_id: 42, // The task ID assigned by the orchestrator
 });
 ```
 
 The response includes only:
+
 - The specified task's details (title, description, priority, tags)
 - File notes for files assigned to that task
 - Decisions matching the task's tags
@@ -1031,9 +1032,13 @@ Then update your MCP config to use the binary directly:
         "engram": {
             "type": "stdio",
             "command": "engram-mcp-server",
-            "args": ["--mode=universal", "--project-root", "${workspaceFolder}"]
-        }
-    }
+            "args": [
+                "--mode=universal",
+                "--project-root",
+                "${workspaceFolder}",
+            ],
+        },
+    },
 }
 ```
 

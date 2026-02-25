@@ -8,6 +8,7 @@ import { z } from "zod";
 import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, getDbPath, now } from "../database.js";
 import { success, error } from "../response.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL } from "../constants.js";
+import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
 import path from "path";
 import fs from "fs";
 
@@ -19,6 +20,7 @@ const ADMIN_ACTIONS = [
   "config",
   "scan_project",
   "install_hooks", "remove_hooks",
+  "generate_report", "get_global_knowledge",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -223,6 +225,11 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             repos.config.set(params.key, params.value, now());
             return success({ message: `Config "${params.key}" set to "${params.value}".`, key: params.key, value: params.value });
           }
+          // ISS-015: When key is provided without value, return just that key's value.
+          if (params.key) {
+            const val = repos.config.get(params.key);
+            return success({ key: params.key, value: val ?? null });
+          }
           const config = repos.config.getAll();
           return success({ config });
         }
@@ -261,6 +268,51 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           const cleaned = existing2.replace(/\n?\n?# Engram Post-Commit Hook[\s\S]*?\n---\n\n/g, "").trim();
           if (cleaned) { fs.writeFileSync(hookPath2, cleaned + "\n"); } else { fs.unlinkSync(hookPath2); }
           return success({ message: "Engram post-commit hook removed.", hook_path: hookPath2 });
+        }
+
+        // ─── GENERATE REPORT ────────────────────────────────────────────
+        case "generate_report": {
+          const count = (table: string): number => { try { return (db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c; } catch { return 0; } };
+          const openTasks = db.prepare("SELECT * FROM tasks WHERE status NOT IN ('done','cancelled') ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END LIMIT 30").all() as Array<Record<string, unknown>>;
+          const activeDecisions = db.prepare("SELECT * FROM decisions WHERE status = 'active' ORDER BY timestamp DESC LIMIT 20").all() as Array<Record<string, unknown>>;
+          const recentChanges = db.prepare("SELECT file_path, change_type, description, timestamp FROM changes ORDER BY timestamp DESC LIMIT 15").all() as Array<Record<string, unknown>>;
+          const activeConventions = repos.conventions.getActive();
+          const milestones = db.prepare("SELECT * FROM milestones ORDER BY timestamp DESC LIMIT 10").all() as Array<Record<string, unknown>>;
+          return success({
+            generated_at: new Date().toISOString(),
+            server_version: SERVER_VERSION,
+            summary: {
+              total_sessions: count("sessions"),
+              total_changes: count("changes"),
+              total_decisions: count("decisions"),
+              open_tasks: openTasks.length,
+              total_tasks: count("tasks"),
+              total_conventions: activeConventions.length,
+              total_milestones: count("milestones"),
+              database_size_kb: getDbSizeKb(),
+            },
+            open_tasks: openTasks,
+            active_decisions: activeDecisions,
+            recent_changes: recentChanges,
+            active_conventions: activeConventions,
+            milestones,
+            message: `Report generated: ${openTasks.length} open task(s), ${activeDecisions.length} active decision(s), ${recentChanges.length} recent change(s).`,
+          });
+        }
+
+        // ─── GET GLOBAL KNOWLEDGE ────────────────────────────────────────
+        case "get_global_knowledge": {
+          const globalDecisions = queryGlobalDecisions(params.key, 50);
+          const globalConventions = queryGlobalConventions(50);
+          return success({
+            global_decisions: globalDecisions,
+            global_conventions: globalConventions,
+            total_decisions: globalDecisions.length,
+            total_conventions: globalConventions.length,
+            message: globalDecisions.length === 0 && globalConventions.length === 0
+              ? "Global KB is empty. Use record_decision with export_global:true to populate."
+              : `Global KB: ${globalDecisions.length} decision(s), ${globalConventions.length} convention(s).`,
+          });
         }
 
         default:

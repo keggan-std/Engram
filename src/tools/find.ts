@@ -49,13 +49,13 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   acknowledge_event:    { desc: "Approve or cancel a triggered event.", params: "{ id: number, approved: boolean, note? }" },
   check_events:         { desc: "Check for triggered events mid-session.", params: "{}" },
   // Coordination
-  dump:                 { desc: "Smart dump: auto-classifies free-text into memory categories.", params: "{ description: string, hint?: string }" },
+  dump:                 { desc: "Smart dump: auto-classifies free-text into memory categories.", params: "{ content: string, hint?: string }" },
   claim_task:           { desc: "Atomically claim a task for exclusive work.", params: "{ task_id: number, agent_id?: string }" },
   release_task:         { desc: "Release a claimed task.", params: "{ task_id: number, agent_id?: string }" },
   agent_sync:           { desc: "Register agent heartbeat and specializations.", params: "{ agent_id: string, specializations?: string[], agent_name?: string, status?: string, current_task_id?: number }" },
   get_agents:           { desc: "List all registered agents.", params: "{}" },
   route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
-  broadcast:            { desc: "Send a message to all or specific agents.", params: "{ message: string, target_agents? }" },
+  broadcast:            { desc: "Send a message to all or specific agents.", params: "{ from_agent: string, message: string, target_agents? }" },
 };
 
 export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
@@ -83,10 +83,12 @@ function searchCatalog(query: string): Array<{ tool: string; action: string; des
   const results: Array<{ tool: string; action: string; desc: string; params: string; score: number }> = [];
 
   function scoreEntry(action: string, entry: { desc: string; params: string }): number {
-    const text = `${action} ${entry.desc} ${entry.params}`.toLowerCase();
+    // Split action name on underscores so "record" matches "record_change", etc.
+    const expandedAction = action.replace(/_/g, " ");
     let score = 0;
     for (const w of words) {
       if (action.includes(w)) score += 3;
+      else if (expandedAction.includes(w)) score += 2;  // "record" in "record change"
       if (entry.desc.toLowerCase().includes(w)) score += 2;
       if (entry.params.toLowerCase().includes(w)) score += 1;
     }
@@ -116,11 +118,11 @@ export function registerFindTool(server: McpServer): void {
       description: `Search the Engram tool catalog or lint content against active conventions.
 
 Actions:
-  - search (default): Find matching engram_memory / engram_admin operations by keyword.
+  - search (or discover): Find matching engram_memory / engram_admin operations by keyword.
   - lint: Check a snippet of code or text against all active conventions. Returns matched violations.`,
       inputSchema: {
         query: z.string().optional().describe("Keyword query for search action."),
-        action: z.enum(["search", "lint"]).optional().default("search").describe("'search' = catalog lookup (default). 'lint' = check content against conventions."),
+        action: z.enum(["search", "discover", "lint"]).optional().default("search").describe("'search'/'discover' = catalog lookup (default). 'lint' = check content against conventions."),
         content: z.string().optional().describe("Code/text content to lint. For: lint."),
         file_path: z.string().optional().describe("Optional file path for context. For: lint."),
       },
