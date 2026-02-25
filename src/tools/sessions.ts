@@ -797,6 +797,7 @@ Actions:
           // Build response
           const abandoned = abandonedWork.length > 0 ? abandonedWork.map(w => ({ id: w.id, agent_id: w.agent_id, description: w.description, files: JSON.parse(w.files), started_ago_minutes: Math.round((Date.now() - w.started_at) / 60_000) })) : undefined;
           const handoff = handoffPending ? { id: handoffPending.id, from_agent: handoffPending.from_agent, reason: handoffPending.reason, next_agent_instructions: handoffPending.next_agent_instructions, git_branch: handoffPending.git_branch } : undefined;
+          const rulesResult = services.agentRules.getRules();
           const baseResponse = {
             session_id: sessionId,
             previous_session: lastSession ? { id: lastSession.id, summary: lastSession.summary, ended_at: lastSession.ended_at, agent: lastSession.agent_name } : null,
@@ -807,7 +808,8 @@ Actions:
             abandoned_work: abandoned,
             handoff_pending: handoff,
             update_available: updateNotification ?? undefined,
-            agent_rules: AGENT_RULES,
+            agent_rules: rulesResult.rules,
+            agent_rules_source: rulesResult.source,
             tool_catalog: buildToolCatalog(),
             triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
           };
@@ -817,7 +819,8 @@ Actions:
               session_id: sessionId,
               verbosity: "nano",
               counts: { changes: recordedChanges.length, decisions: activeDecisions.length, conventions: activeConventions.length, tasks: openTasks.length, files: repos.fileNotes.countAll() },
-              agent_rules: AGENT_RULES,
+              agent_rules: rulesResult.rules,
+              agent_rules_source: rulesResult.source,
               tool_catalog: buildToolCatalog(),
               triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
               update_available: updateNotification ?? undefined,

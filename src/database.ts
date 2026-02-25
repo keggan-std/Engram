@@ -9,7 +9,7 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
-import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService } from "./services/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService } from "./services/index.js";
 import { SERVER_VERSION } from "./constants.js";
 
 export interface Services {
@@ -18,6 +18,7 @@ export interface Services {
   git: GitService;
   events: EventTriggerService;
   update: UpdateService;
+  agentRules: AgentRulesService;
 }
 
 let _db: DatabaseType | null = null;
@@ -103,6 +104,7 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
     git: new GitService(projectRoot),
     events: new EventTriggerService(_repos),
     update: new UpdateService(_repos, SERVER_VERSION),
+    agentRules: new AgentRulesService(projectRoot),
   };
 
   return _db;
