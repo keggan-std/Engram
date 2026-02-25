@@ -475,7 +475,16 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             params.status as Parameters<typeof repos.decisions.updateStatus>[1]
           );
           if (changes === 0) return error(`Decision #${params.id} not found.`);
-          return success({ message: `Decision #${params.id} status updated to "${params.status}".` });
+          // Cascade warning: if deprecating/superseding, check dependents
+          let cascadeWarning: Array<{ id: number; decision: string }> | undefined;
+          if (params.status === "deprecated" || params.status === "superseded") {
+            const dependents = repos.decisions.getDependents(params.id).map(d => ({ id: d.id, decision: d.decision }));
+            if (dependents.length > 0) cascadeWarning = dependents;
+          }
+          return success({
+            message: `Decision #${params.id} status updated to "${params.status}".${cascadeWarning ? ` ⚠️ ${cascadeWarning.length} dependent decision(s) may be affected.` : ""}`,
+            cascade_warning: cascadeWarning,
+          });
         }
 
         // ── CONVENTIONS ───────────────────────────────────────────────────────
