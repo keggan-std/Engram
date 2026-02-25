@@ -104,12 +104,31 @@ export function registerUniversalMode(server: McpServer): void {
       description: `Persistent memory for AI agents. Pass any action + relevant params. Examples: engram({action:"start", agent_name:"claude", verbosity:"summary"}) — engram({action:"record_change", changes:[{...}]}) — engram({action:"search", query:"auth"}).`,
       inputSchema: z.object({
         action: z.string().describe("Operation name. Examples: start, end, record_change, get_file_notes, set_file_notes, search, record_decision, create_task, backup. Use action:'discover' + query to look up any action."),
-        query: z.string().optional().describe("For action:'discover' — search the action catalog."),
+        query: z.string().optional().describe("For action:'discover' and 'search'. Also accepted as summary for action:'end'."),
+        params: z.record(z.unknown()).optional().describe(
+          "Additional parameters for the action. " +
+          "Example: engram({action:'set_file_notes', params:{file_path:'src/index.ts', purpose:'Entry point', executive_summary:'...'}}) — " +
+          "engram({action:'create_task', params:{title:'Review repos layer', priority:'high'}}) — " +
+          "engram({action:'record_change', params:{changes:[{file_path:'src/x.ts', change_type:'modified', description:'...', impact_scope:'local'}]}}) — " +
+          "engram({action:'record_decision', params:{decision:'Use X pattern', rationale:'Because Y', tags:['architecture']}}) — " +
+          "engram({action:'end', params:{summary:'What was done this session'}}). " +
+          "Use action:'discover' + query to find params for any action."
+        ),
       }).passthrough(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (rawParams: Record<string, unknown>) => {
-      const { action, ...rest } = rawParams;
+      const { action, query, params: explicitParams, ...inlineRest } = rawParams as Record<string, unknown> & { action?: unknown; query?: string; params?: Record<string, unknown> };
+      // Merge priority: explicit params object > inline extra fields > query (forwarded as-is)
+      const rest: Record<string, unknown> = {
+        ...(explicitParams ?? {}),
+        ...inlineRest,
+        ...(query !== undefined ? { query } : {}),
+      };
+      // For action:"end" — allow query to serve as summary fallback
+      if (String(action ?? "") === "end" && !rest.summary && query) {
+        rest.summary = query;
+      }
       const actionStr = String(action ?? "");
 
       // ── discover action: BM25 catalog search ───────────────────────────
@@ -137,12 +156,25 @@ export function registerUniversalMode(server: McpServer): void {
             }) }],
           };
         }
-        const q = query.toLowerCase();
-        const matches = allActions.filter(a =>
-          a.call.toLowerCase().includes(q) ||
-          (a.desc ?? "").toLowerCase().includes(q) ||
-          (a.params ?? "").toLowerCase().includes(q)
-        ).slice(0, 8);
+        // Word-by-word BM25-style scoring — each query word scored independently
+        // so "record change" matches "record_change" and related entries.
+        const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+        const scored = allActions.map(a => {
+          const callLower = a.call.toLowerCase();
+          const descLower = (a.desc ?? "").toLowerCase();
+          const paramsLower = (a.params ?? "").toLowerCase();
+          // Expand underscores for word matching ("record_change" → "record change")
+          const callExpanded = callLower.replace(/_/g, " ");
+          let score = 0;
+          for (const w of words) {
+            if (callLower.includes(w)) score += 3;
+            else if (callExpanded.includes(w)) score += 2;
+            if (descLower.includes(w)) score += 2;
+            if (paramsLower.includes(w)) score += 1;
+          }
+          return { ...a, score };
+        });
+        const matches = scored.filter(a => a.score > 0).sort((a, b) => b.score - a.score).slice(0, 8);
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ query, matches, message: `Found ${matches.length} actions matching "${query}".` }) }],
         };

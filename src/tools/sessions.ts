@@ -255,7 +255,11 @@ Actions:
         }
 
         case "end": {
-          if (!params.summary) return error("summary required for end action");
+          // Accept summary from params.summary OR params.query (universal mode fallback: engram({action:"end", query:"..."})).
+          const endSummary = params.summary ?? (params as Record<string, unknown>).query as string | undefined;
+          if (!endSummary) return error("summary required for end action. Pass summary:'...' or, in universal mode, query:'...'.");
+          // Reassign for the rest of the handler
+          (params as Record<string, unknown>).summary = endSummary;
           const sessionId = getCurrentSessionId();
           if (!sessionId) return error("No active session. Start one first with engram_session(action:'start').");
           const timestamp = now();
@@ -274,7 +278,7 @@ Actions:
           const decisionCount = repos.sessions.countBySession(sessionId, "decisions");
           const tasksDone = repos.tasks.countDoneInSession(sessionId);
           logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} (dispatcher)`);
-          repos.sessions.close(sessionId, timestamp, params.summary, params.tags);
+          repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
 
           return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone }, ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
         }

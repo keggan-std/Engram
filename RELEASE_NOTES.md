@@ -1,3 +1,62 @@
+# v1.7.1 — Hotfix: Enum Validation, Targeted Broadcasts & API Correctness
+
+**Released:** v1.7.1
+
+## Overview
+
+v1.7.1 is a hotfix release addressing **20 bugs** discovered during a systematic functional audit of the v1.7.0 tool surface. No new features — only correctness and reliability fixes. Zero breaking changes.
+
+| ID       | Area                 | Fix                                                              | Commit    |
+| -------- | -------------------- | ---------------------------------------------------------------- | --------- |
+| ISS-001–015 | API correctness   | Various: report, backup, tasks, events, session error messages   | `8dd7bce` |
+| ISS-007  | Universal Mode       | `discover` action used full-string includes instead of BM25       | `061b790` |
+| ISS-016  | `what_changed`       | `"session_start"` used as literal SQL string (always 0 results)  | `061b790` |
+| ISS-017  | `create_task`        | `priority` accepted any string — no enum validation              | `c89edb1` |
+| ISS-018  | `broadcast`          | `target_agent` column missing; all agents received all broadcasts | `b0efaf2` |
+| ISS-019  | `record_change`      | `change_type` + `impact_scope` accepted any string               | `c89edb1` |
+| ISS-020  | Universal Mode       | `set_file_notes` crashed when `dependencies` was a JSON string   | `13af958` |
+
+---
+
+## What's Fixed
+
+### 🔒 Enum Validation — `change_type`, `impact_scope`, `priority`
+
+`record_change`, `create_task`, and related actions now reject invalid values with a clear Zod validation error.
+
+**Valid values:**
+- `change_type`: `created | modified | deleted | refactored | renamed | moved | config_changed`
+- `impact_scope`: `local | module | cross_module | global`  
+- `priority`: `critical | high | medium | low`
+
+### 📡 Directed Broadcasts — `target_agent` Column + Query Filter
+
+The `broadcasts` table now has a `target_agent TEXT` column (migration v16). The `broadcast` INSERT stores it; the `agent_sync` SELECT filters `WHERE target_agent IS NULL OR target_agent = ?`. Directed messages are now correctly scoped to their intended recipient.
+
+### ⏱️ `what_changed { since: "session_start" }`
+
+The `"session_start"` sentinel is now resolved to the session's `started_at` ISO timestamp before the SQL query executes.
+
+### 🧩 Universal Mode — Array Coercion Bypass Fixed
+
+`HandlerCapturer` (the duck-typed SDK stub used in Universal Mode) bypasses Zod `.transform()` preprocessing. `set_file_notes` with `dependencies` passed as a JSON string now works correctly — a `parseDepsField()` helper in `file-notes.repo.ts` handles both `string[]` and raw JSON string inputs.
+
+### ✅ API Correctness (ISS-001 – ISS-015)
+
+- `generate_report` returns a full project knowledge summary
+- `get_global_knowledge` returns correct data shape
+- `backup` no longer throws `ENOENT`
+- `get_tasks { status: "all" }` returns all tasks regardless of status
+- `acknowledge_event { approved: false }` snoozes the event (was a no-op)
+- `config { op: "get", key: X }` returns only that key's value (was all config)
+- `record_milestone` version prefix no longer doubled (`v1.7.1` not `vv1.7.1`)
+- `dump` no longer creates a spurious `file_path: "dump"` change record
+- `NoActiveSessionError` message uses the correct v1.7 syntax
+- `checkpoint { progress: string }` accepts plain strings in `progress`
+- `update_task { id: N }` uses `id` (not `task_id`)
+
+---
+
 # v1.7.0 — Token Efficiency & Intelligence Overhaul
 
 **Released:** v1.7.0

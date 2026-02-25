@@ -15,8 +15,8 @@ export class FileNotesRepo {
         sessionId: number | null,
         data: {
             purpose?: string | null;
-            dependencies?: string[] | null;
-            dependents?: string[] | null;
+            dependencies?: string[] | string | null;
+            dependents?: string[] | string | null;
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;
@@ -27,8 +27,18 @@ export class FileNotesRepo {
         }
     ): void {
         const normalizedPath = normalizePath(filePath);
-        const deps = data.dependencies ? JSON.stringify(data.dependencies.map(d => normalizePath(d))) : null;
-        const depnts = data.dependents ? JSON.stringify(data.dependents.map(d => normalizePath(d))) : null;
+        // Defensively parse dependencies/dependents — may be a raw JSON string when called
+        // from Universal Mode (HandlerCapturer bypasses Zod coerceStringArray preprocessing).
+        const parseDepsField = (v: unknown): string[] | null => {
+            if (!v) return null;
+            if (Array.isArray(v)) return v as string[];
+            if (typeof v === "string") { try { return JSON.parse(v); } catch { return null; } }
+            return null;
+        };
+        const depsArr = parseDepsField(data.dependencies);
+        const depntsArr = parseDepsField(data.dependents);
+        const deps = depsArr ? JSON.stringify(depsArr.map((d: string) => normalizePath(d))) : null;
+        const depnts = depntsArr ? JSON.stringify(depntsArr.map((d: string) => normalizePath(d))) : null;
         const mtime = data.file_mtime ?? null;
         const branch = data.git_branch ?? null;
         const hash = data.content_hash ?? null;
@@ -66,8 +76,8 @@ export class FileNotesRepo {
         entries: Array<{
             file_path: string;
             purpose?: string | null;
-            dependencies?: string[] | null;
-            dependents?: string[] | null;
+            dependencies?: string[] | string | null;
+            dependents?: string[] | string | null;
             layer?: string | null;
             complexity?: string | null;
             notes?: string | null;

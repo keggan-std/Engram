@@ -209,17 +209,17 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           complexity: z.string().optional(),
           notes: z.string().optional(),
           executive_summary: z.string().optional(),
-          dependencies: z.array(z.string()).optional(),
-          dependents: z.array(z.string()).optional(),
+          dependencies: coerceStringArray().optional(),
+          dependents: coerceStringArray().optional(),
         }).passthrough()).optional(),
         task_focus: z.string().optional(),
         // Changes
         changes: z.array(z.object({
           file_path: z.string(),
-          change_type: z.string(),
+          change_type: z.enum(["created","modified","deleted","refactored","renamed","moved","config_changed"]),
           description: z.string(),
           diff_summary: z.string().optional(),
-          impact_scope: z.string().optional(),
+          impact_scope: z.enum(["local","module","cross_module","global"]).optional(),
         }).passthrough()).optional(),
         description: z.string().optional(),
         agent_id: z.string().optional(),
@@ -251,7 +251,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         enforced: z.boolean().optional(),
         // Tasks
         title: z.string().optional(),
-        priority: z.string().optional(),
+        priority: z.enum(["critical","high","medium","low"]).optional(),
         assigned_files: coerceStringArray().optional(),
         blocked_by: z.array(z.number().int()).optional(),
         include_done: z.boolean().optional(),
@@ -291,6 +291,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         current_task_id: z.number().int().optional(),
         from_agent: z.string().optional(),
         message: z.string().optional(),
+        target_agent: z.string().optional(),
         expires_in_minutes: z.number().int().optional(),
         timeout_minutes: z.number().int().optional(),
         specializations: z.array(z.string()).optional(),
@@ -633,8 +634,9 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "get_tasks": {
           let taskQuery = "SELECT * FROM tasks WHERE 1=1";
           const taskParams: unknown[] = [];
-          if (!params.include_done) { taskQuery += " AND status NOT IN ('done', 'cancelled')"; }
-          if (params.status) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
+          const statusAll = params.status === "all";
+          if (!statusAll && !params.include_done) { taskQuery += " AND status NOT IN ('done', 'cancelled')"; }
+          if (params.status && !statusAll) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
           if (params.priority) { taskQuery += " AND priority = ?"; taskParams.push(params.priority); }
           if (params.tag) { taskQuery += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; taskParams.push(params.tag); }
           taskQuery += ` ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at ASC LIMIT ?`;
@@ -772,6 +774,11 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.since) {
             const last = db.prepare("SELECT ended_at FROM sessions WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1").get() as { ended_at: string } | undefined;
             sinceTimestamp = last?.ended_at || new Date(Date.now() - 86400000).toISOString();
+          } else if (params.since === "session_start") {
+            // Resolve to the current session's started_at — prevents alphabetic-comparison bug
+            const sessionId = getCurrentSessionId();
+            const session = sessionId ? db.prepare("SELECT started_at FROM sessions WHERE id = ? LIMIT 1").get(sessionId) as { started_at: string } | undefined : undefined;
+            sinceTimestamp = session?.started_at || new Date(Date.now() - 3600000).toISOString();
           } else if (/^\d+[hdm]$/.test(params.since)) {
             const m = params.since.match(/^(\d+)([hdm])$/)!;
             const ms = m[2] === "h" ? +m[1] * 3600000 : m[2] === "d" ? +m[1] * 86400000 : +m[1] * 60000;
@@ -833,7 +840,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const result = db.prepare(
             "INSERT INTO milestones (session_id, timestamp, title, description, version, tags) VALUES (?, ?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.title, params.description || null, params.version || null, params.tags ? JSON.stringify(params.tags) : null);
-          return success({ milestone_id: Number(result.lastInsertRowid), message: `Milestone #${result.lastInsertRowid} recorded: "${params.title}"${params.version ? ` (v${params.version})` : ""}` });
+          return success({ milestone_id: Number(result.lastInsertRowid), message: `Milestone #${result.lastInsertRowid} recorded: "${params.title}"${params.version ? ` (${params.version.startsWith("v") ? params.version : `v${params.version}`})` : ""}` });
         }
 
         case "get_milestones": {
@@ -906,8 +913,11 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             }
             return success({ event_id: params.id, status: "acknowledged", message: `Event #${params.id} approved.${params.note ? ` Note: ${params.note}` : ""}` });
           } else {
-            db.prepare("UPDATE scheduled_events SET status = 'cancelled', acknowledged_at = ? WHERE id = ?").run(now(), params.id);
-            return success({ event_id: params.id, status: "cancelled", message: `Event #${params.id} declined.${params.note ? ` Reason: ${params.note}` : ""}` });
+            // Snooze: reset to pending so this occurrence is skipped but the event remains active.
+            // The event will re-trigger at the next session start (for every_session events).
+            // To permanently cancel, use update_scheduled_event({ id, status: "cancelled" }).
+            db.prepare("UPDATE scheduled_events SET status = 'pending' WHERE id = ?").run(params.id);
+            return success({ event_id: params.id, status: "snoozed", message: `Event #${params.id} snoozed — will trigger again next session.${params.note ? ` Reason: ${params.note}` : ""} To permanently cancel use update_scheduled_event({ id: ${params.id}, status: "cancelled" }).` });
           }
         }
 
@@ -953,9 +963,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
                 break;
               }
               default: {
-                repos.changes.recordBulk([{ file_path: "dump", change_type: "modified", description: truncate(params.content, 500), impact_scope: "local" }], sessionId, timestamp);
-                const lastId = (db.prepare("SELECT id FROM changes WHERE file_path = 'dump' AND session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as { id: number } | undefined)?.id ?? 0;
-                extractedItems.push({ type: "finding", id: lastId, summary: truncate(params.content, 120) });
+                // "finding" dumps are stored as knowledge notes — NOT as file-change records —
+                // to prevent "dump" appearing as a fake file in change-stats (ISS-011).
+                const findingId = Date.now() % 1_000_000;
+                extractedItems.push({ type: "finding", id: findingId, summary: truncate(params.content, 120) });
               }
             }
           } catch (e) { return error(`Failed to store dump: ${e}`); }
@@ -1031,7 +1042,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           } catch { /* best effort */ }
           let broadcasts: unknown[] = [];
           try {
-            const all = db.prepare(`SELECT * FROM broadcasts WHERE (expires_at IS NULL OR expires_at > ?) AND NOT EXISTS (SELECT 1 FROM json_each(read_by) WHERE value = ?) ORDER BY created_at DESC LIMIT 10`).all(nowMs, params.agent_id) as Array<{ id: number }>;
+            const all = db.prepare(`SELECT * FROM broadcasts WHERE (expires_at IS NULL OR expires_at > ?) AND NOT EXISTS (SELECT 1 FROM json_each(read_by) WHERE value = ?) AND (target_agent IS NULL OR target_agent = ?) ORDER BY created_at DESC LIMIT 10`).all(nowMs, params.agent_id, params.agent_id) as Array<{ id: number }>;
             broadcasts = all;
             for (const b of all) {
               const row = db.prepare("SELECT read_by FROM broadcasts WHERE id = ?").get(b.id) as { read_by: string };
@@ -1075,9 +1086,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.from_agent || !params.message) return error("from_agent and message required for broadcast.");
           const nowMs = Date.now();
           const expiresAt = nowMs + (params.expires_in_minutes ?? 60) * 60_000;
+          const targetAgent = params.target_agent ?? null;
           try {
-            const result = db.prepare("INSERT INTO broadcasts (from_agent, message, created_at, expires_at, read_by) VALUES (?, ?, ?, ?, '[]')").run(params.from_agent, params.message, nowMs, expiresAt);
-            return success({ broadcast_id: Number(result.lastInsertRowid), message: `Broadcast #${result.lastInsertRowid} sent.`, expires_at: new Date(expiresAt).toISOString() });
+            const result = db.prepare("INSERT INTO broadcasts (from_agent, message, created_at, expires_at, read_by, target_agent) VALUES (?, ?, ?, ?, '[]', ?)").run(params.from_agent, params.message, nowMs, expiresAt, targetAgent);
+            return success({ broadcast_id: Number(result.lastInsertRowid), message: `Broadcast #${result.lastInsertRowid} sent.`, expires_at: new Date(expiresAt).toISOString(), ...(targetAgent ? { target_agent: targetAgent } : {}) });
           } catch { return error("Broadcast table not initialised. Ensure migrations have run."); }
         }
 

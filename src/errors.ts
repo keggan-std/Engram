@@ -63,7 +63,7 @@ export class SafetyCheckError extends EngramError {
  */
 export class NoActiveSessionError extends EngramError {
     constructor() {
-        super("No active session. Start one with engram_start_session first.", "NO_SESSION");
+        super('No active session. Call engram_session({ action: "start" }) first.', "NO_SESSION");
         this.name = "NoActiveSessionError";
     }
 }

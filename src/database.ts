@@ -154,8 +154,13 @@ export function backupDatabase(destPath?: string): string {
   const destDir = path.dirname(destPath);
   fs.mkdirSync(destDir, { recursive: true });
 
-  // Use SQLite backup API
-  db.backup(destPath);
+  // Flush WAL to the main DB file so the copy is consistent (ISS-005 fix).
+  // better-sqlite3's db.backup() is async in v9+ and statSync immediately after
+  // it would throw ENOENT before the file is written. Using WAL checkpoint +
+  // synchronous file copy guarantees the backup file is fully written before
+  // we return the path to callers.
+  try { db.pragma("wal_checkpoint(FULL)"); } catch { /* WAL may not be in use */ }
+  fs.copyFileSync(getDbPath(), destPath);
 
   return destPath;
 }
