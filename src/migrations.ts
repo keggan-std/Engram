@@ -515,6 +515,15 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V13: Staleness-Enhanced ───────────────────────────────────────
+  {
+    version: 13,
+    description: "Staleness-enhanced — content_hash SHA-256 on file_notes for hash-based confidence scoring",
+    up: (db) => {
+      db.exec(`ALTER TABLE file_notes ADD COLUMN content_hash TEXT;`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

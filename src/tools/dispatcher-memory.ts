@@ -9,7 +9,7 @@ import {
   now, getCurrentSessionId, getRepos, getProjectRoot, getDb
 } from "../database.js";
 import {
-  normalizePath, coerceStringArray, ftsEscape, getFileMtime, gitCommand, truncate,
+  normalizePath, coerceStringArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
   safeJsonParse, detectLayer, isGitRepo, getGitLogSince, getGitFilesChanged, minutesSince,
 } from "../utils.js";
 import { success, error } from "../response.js";
@@ -63,7 +63,16 @@ function withStaleness(note: FileNoteRow, projectRoot: string): FileNoteWithStal
   const currentMtime = getFileMtime(note.file_path, projectRoot);
   if (currentMtime == null) return { ...note, confidence: "unknown", stale: false };
   const driftMs = currentMtime - note.file_mtime;
-  if (driftMs <= 0) return { ...note, confidence: "high", stale: false };
+  if (driftMs <= 0) {
+    // mtime matches — verify hash if available
+    if (note.content_hash) {
+      const currentHash = getFileHash(note.file_path, projectRoot);
+      if (currentHash && currentHash !== note.content_hash) {
+        return { ...note, confidence: "stale", stale: true, staleness_hours: 0 };
+      }
+    }
+    return { ...note, confidence: "high", stale: false };
+  }
   const driftHours = driftMs / 3_600_000;
   const confidence: FileNoteConfidence = driftHours > FILE_MTIME_STALE_HOURS ? "stale" : "medium";
   return { ...note, confidence, stale: true, staleness_hours: Math.round(driftHours) };
@@ -317,6 +326,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const fp = normalizePath(params.file_path);
           purgeExpiredLocks();
           const file_mtime = getFileMtime(fp, projectRoot);
+          const content_hash = getFileHash(fp, projectRoot);
           const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
           repos.fileNotes.upsert(fp, timestamp, sessionId, {
             purpose: params.purpose,
@@ -327,9 +337,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             notes: params.notes,
             file_mtime,
             git_branch,
+            content_hash,
           });
           acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES);
-          return success({ message: `File notes saved for ${fp}.`, file_mtime_captured: file_mtime !== null, git_branch_captured: git_branch });
+          return success({ message: `File notes saved for ${fp}.`, file_mtime_captured: file_mtime !== null, git_branch_captured: git_branch, content_hash_captured: content_hash !== null });
         }
 
         case "set_file_notes_batch": {
@@ -340,6 +351,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => ({
             ...f,
             file_mtime: getFileMtime(normalizePath(String(f["file_path"] ?? "")), projectRoot),
+            content_hash: getFileHash(normalizePath(String(f["file_path"] ?? "")), projectRoot),
             git_branch,
           }));
           const count = repos.fileNotes.upsertBatch(
