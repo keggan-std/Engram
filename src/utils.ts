@@ -5,14 +5,17 @@
 import { execSync } from "child_process";
 import { createHash } from "crypto";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { z } from "zod";
 import {
+  BLOCKED_PATH_PATTERNS,
   EXCLUDED_DIRS,
   LAYER_PATTERNS,
   MAX_FILE_TREE_DEPTH,
   MAX_FILE_TREE_ENTRIES,
-  PROJECT_MARKERS,
+  SOFT_PROJECT_MARKERS,
+  STRONG_PROJECT_MARKERS,
 } from "./constants.js";
 import type { ArchLayer } from "./types.js";
 
@@ -57,27 +60,169 @@ export function normalizePath(filePath: string, projectRoot?: string): string {
   return p;
 }
 
+// ============================================================================
+// FLAW-1 FIX: Smart project root detection
+//
+// Priority chain (first hit wins):
+//   0. --project-root=<path>  CLI arg  (highest — explicit IDE config)
+//   1. ENGRAM_PROJECT_ROOT env var
+//   2. PROJECT_ROOT env var
+//   3. git rev-parse --show-toplevel  (authoritative for git repos)
+//   4. Walk up — STRONG markers only (.git, .engram)  — never ambiguous
+//   5. Walk up — SOFT markers (package.json etc) skipping BLOCKED paths
+//   6. ~/.engram/global/  fallback  (never crashes; logged as warning)
+//
+// Additional enhancements requested:
+//   • --project-root flag: IDEs and users can bake the workspace path into
+//     the MCP spawn command so detection is never needed.
+//   • git command detection: `git rev-parse --show-toplevel` is the most
+//     reliable way to find the real project root — it follows git worktrees
+//     and submodules correctly.
+//   • Logged resolution: the resolved path + method are always logged so
+//     users can validate what Engram chose.
+// ============================================================================
+
+/** Returns the normalised path with OS separators replaced by forward slashes. */
+function normStr(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 /**
- * Auto-detect the project root by walking up from cwd looking for marker files.
+ * Check whether a directory path matches any known non-project blocked pattern.
+ * Used to reject IDE install dirs, npm globals, and OS system dirs.
+ */
+function isBlockedPath(dirPath: string): boolean {
+  const n = normStr(dirPath);
+  return BLOCKED_PATH_PATTERNS.some(re => re.test(n));
+}
+
+/**
+ * Try `git rev-parse --show-toplevel` from startDir.
+ * Returns the git root if found, null otherwise.
+ * This is the most authoritative detection method — it follows worktrees,
+ * submodules, and nested git repos correctly.
+ */
+function detectGitRoot(startDir: string): string | null {
+  try {
+    const result = execSync("git rev-parse --show-toplevel", {
+      cwd: startDir,
+      encoding: "utf-8",
+      timeout: 3000,
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+    return result || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Auto-detect the project root using a 6-tier priority chain.
+ *
+ * @param startDir  Starting directory for filesystem walk (default: cwd)
+ * @returns         Absolute path to the detected or fallback project root
  */
 export function findProjectRoot(startDir?: string): string {
-  // 1. Explicit env var
-  if (process.env.ENGRAM_PROJECT_ROOT) return process.env.ENGRAM_PROJECT_ROOT;
-  if (process.env.PROJECT_ROOT) return process.env.PROJECT_ROOT;
+  const cwd = startDir || process.cwd();
 
-  // 2. Walk up directory tree
-  let dir = startDir || process.cwd();
+  // ── Tier 0: --project-root=<path> CLI arg ────────────────────────────────
+  // Highest priority: explicit instruction from IDE config or user.
+  for (const arg of process.argv) {
+    if (arg.startsWith("--project-root=")) {
+      const val = arg.slice("--project-root=".length).trim();
+      if (val) {
+        const resolved = path.resolve(val);
+        console.error(`[Engram] [INFO] Project root ← --project-root arg: ${resolved}`);
+        return resolved;
+      }
+    }
+    // Also handle separate --project-root <path> style
+    if (arg === "--project-root") {
+      const idx = process.argv.indexOf(arg);
+      const next = process.argv[idx + 1];
+      if (next && !next.startsWith("-")) {
+        const resolved = path.resolve(next);
+        console.error(`[Engram] [INFO] Project root ← --project-root arg: ${resolved}`);
+        return resolved;
+      }
+    }
+  }
+
+  // ── Tier 1+2: Explicit env vars ────────────────────────────────────────────
+  if (process.env.ENGRAM_PROJECT_ROOT) {
+    const resolved = path.resolve(process.env.ENGRAM_PROJECT_ROOT);
+    console.error(`[Engram] [INFO] Project root ← ENGRAM_PROJECT_ROOT: ${resolved}`);
+    return resolved;
+  }
+  if (process.env.PROJECT_ROOT) {
+    const resolved = path.resolve(process.env.PROJECT_ROOT);
+    console.error(`[Engram] [INFO] Project root ← PROJECT_ROOT env: ${resolved}`);
+    return resolved;
+  }
+
+  // ── Tier 3: git rev-parse --show-toplevel ───────────────────────────────
+  // Most reliable: git knows the real project boundary, including worktrees.
+  // Blocked paths are checked so we don't accept a git repo that is the IDE
+  // install dir itself (unlikely but possible with developer setups).
+  const gitRoot = detectGitRoot(cwd);
+  if (gitRoot && !isBlockedPath(gitRoot)) {
+    console.error(`[Engram] [INFO] Project root ← git: ${gitRoot}`);
+    return gitRoot;
+  }
+
+  // ── Tier 4: Walk up — STRONG markers only (.git, .engram) ────────────
+  // .git and .engram are never present in IDE install dirs; always safe.
+  let dir = cwd;
   while (dir !== path.dirname(dir)) {
-    for (const marker of PROJECT_MARKERS) {
+    for (const marker of STRONG_PROJECT_MARKERS) {
       if (fs.existsSync(path.join(dir, marker))) {
-        return dir;
+        if (!isBlockedPath(dir)) {
+          console.error(`[Engram] [INFO] Project root ← strong marker (${marker}): ${dir}`);
+          return dir;
+        }
       }
     }
     dir = path.dirname(dir);
   }
 
-  // 3. Fallback to cwd
-  return process.cwd();
+  // ── Tier 5: Walk up — SOFT markers, skip blocked paths ────────────────
+  // package.json etc. are checked, but only for dirs that don't look like
+  // IDE install dirs, npm globals, or OS system directories.
+  // Also reject dirs whose package.json has name === "engram-mcp-server"
+  // (running from our own source tree).
+  dir = cwd;
+  while (dir !== path.dirname(dir)) {
+    if (!isBlockedPath(dir)) {
+      for (const marker of SOFT_PROJECT_MARKERS) {
+        if (fs.existsSync(path.join(dir, marker))) {
+          // Extra guard: our own package — skip it
+          if (marker === "package.json") {
+            try {
+              const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8"));
+              if (pkg?.name === "engram-mcp-server") {
+                dir = path.dirname(dir);
+                continue;
+              }
+            } catch { /* malformed package.json — skip */ }
+          }
+          console.error(`[Engram] [INFO] Project root ← soft marker (${marker}): ${dir}`);
+          return dir;
+        }
+      }
+    }
+    dir = path.dirname(dir);
+  }
+
+  // ── Tier 6: Global home fallback ────────────────────────────────────
+  // Nothing found — use a safe per-user global dir rather than cwd.
+  // This guarantees the server is always usable even from unknown environments.
+  const globalFallback = path.join(os.homedir(), ".engram", "global");
+  try { fs.mkdirSync(globalFallback, { recursive: true }); } catch { /* best-effort */ }
+  console.error(
+    `[Engram] [WARN] No project root found — using global memory at ${globalFallback}.\n` +
+    `         Set ENGRAM_PROJECT_ROOT or pass --project-root=<path> to override.`
+  );
+  return globalFallback;
 }
 
 /**

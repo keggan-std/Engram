@@ -1,6 +1,6 @@
 {
     "name": "engram-mcp-server",
-    "version": "1.7.2",
+    "version": "1.7.3",
     "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
     "type": "module",
     "main": "dist/index.js",
@@ -9,8 +9,7 @@
         "engram-mcp-server": "dist/index.js"
     },
     "files": [
-        "dist/",
-        "scripts/"
+        "dist/"
     ],
     "repository": {
         "type": "git",

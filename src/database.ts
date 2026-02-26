@@ -31,24 +31,36 @@ let _dbPath: string = "";
 
 /**
  * Open the SQLite database, auto-recovering from WAL/SHM corruption.
- * If the WAL or SHM files cause SQLITE_CORRUPT, they are removed and the
- * main DB is reopened (which is almost always intact in WAL mode).
- * If the main DB itself is corrupt, it is renamed to a timestamped .corrupt
- * file and a fresh database is created.
+ *
+ * FLAW-2 FIX: busy_timeout is set immediately after open — BEFORE any other
+ * pragma — so concurrent access from multiple IDE windows waits up to 5 s
+ * instead of crashing with SQLITE_BUSY.
+ *
+ * FLAW-3 FIX: SQLITE_BUSY is no longer swallowed by the corruption-recovery
+ * path. A busy DB is not corrupt; the two conditions must not be conflated.
+ *
+ * If WAL/SHM files cause SQLITE_CORRUPT they are removed and the main DB is
+ * reopened (almost always intact in WAL mode). If the main DB itself is
+ * corrupt it is renamed to a timestamped .corrupt file and a fresh database
+ * is created.
  */
 function openDatabaseWithRecovery(dbPath: string): DatabaseType {
-  // First attempt
+  const CORRUPTION_CODES = new Set(["SQLITE_CORRUPT", "SQLITE_NOTADB"]);
+
+  // ── First attempt ──────────────────────────────────────────────────
   try {
     const db = new Database(dbPath);
-    db.pragma("journal_mode = WAL"); // quick smoke-test
+    db.pragma("busy_timeout = 5000");  // FLAW-2: set BEFORE any other pragma
+    db.pragma("journal_mode = WAL");   // smoke-test (waits up to 5 s if busy)
     db.pragma("journal_mode = DELETE"); // reset so caller sets it properly
     return db;
   } catch (err: unknown) {
-    const code = (err as { code?: string }).code;
-    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+    const code = (err as { code?: string }).code ?? "";
+    // FLAW-3: never enter corruption recovery for a locked-but-healthy DB
+    if (!CORRUPTION_CODES.has(code)) throw err;
   }
 
-  // Try removing WAL/SHM — the main file is usually fine in WAL mode
+  // ── Try removing WAL/SHM ── main file is usually fine in WAL mode ──
   const walPath = dbPath + "-wal";
   const shmPath = dbPath + "-shm";
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -60,22 +72,28 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
 
   try {
     const db = new Database(dbPath);
+    db.pragma("busy_timeout = 5000");  // FLAW-2: set here too
     db.pragma("journal_mode = WAL");
     db.pragma("journal_mode = DELETE");
     console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
     return db;
   } catch (err: unknown) {
-    const code = (err as { code?: string }).code;
-    if (code !== "SQLITE_CORRUPT" && code !== "SQLITE_NOTADB") throw err;
+    const code = (err as { code?: string }).code ?? "";
+    if (!CORRUPTION_CODES.has(code)) throw err;
   }
 
-  // Main DB is also corrupt — rename it and start fresh
+  // ── Main DB is also corrupt — rename and start fresh ───────────────
   try { fs.renameSync(dbPath, dbPath + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
   console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
-  return new Database(dbPath);
+  const freshDb = new Database(dbPath);
+  freshDb.pragma("busy_timeout = 5000");  // FLAW-2: set on fresh DB too
+  return freshDb;
 }
 
-export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
+// FLAW-5 FIX: initDatabase is synchronous (better-sqlite3 is sync throughout).
+// The misleading async/Promise wrapper is removed — callers no longer need
+// to remember to await a function that never actually awaits anything.
+export function initDatabase(projectRoot: string): DatabaseType {
   _projectRoot = projectRoot;
   const dbDir = path.join(projectRoot, DB_DIR_NAME);
   fs.mkdirSync(dbDir, { recursive: true });
@@ -84,12 +102,12 @@ export async function initDatabase(projectRoot: string): Promise<DatabaseType> {
   _dbPath = path.join(dbDir, DB_FILE_NAME);
   _db = openDatabaseWithRecovery(_dbPath);
 
-  // Performance pragmas
+  // Performance pragmas (busy_timeout already set inside openDatabaseWithRecovery)
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
   _db.pragma("synchronous = NORMAL");
   _db.pragma("cache_size = -8000"); // 8MB cache
-  _db.pragma("busy_timeout = 5000");
+  _db.pragma("busy_timeout = 5000"); // re-affirm after WAL mode switch
 
   // Run versioned migrations
   runMigrations(_db);
@@ -167,7 +185,24 @@ export function backupDatabase(destPath?: string): string {
 
 // ─── Gitignore ───────────────────────────────────────────────────────
 
+// FLAW-6 / FLAW-13 FIX: Write a self-contained .engram/.gitignore ("*") that
+// protects the DB regardless of whether a root .gitignore exists or is writable.
+// Also append to root .gitignore when present, as a belt-and-suspenders measure.
 function ensureGitignore(projectRoot: string): void {
+  // 1. Self-contained: .engram/.gitignore with wildcard — always works
+  try {
+    const dbDir = path.join(projectRoot, DB_DIR_NAME);
+    const innerIgnore = path.join(dbDir, ".gitignore");
+    if (!fs.existsSync(innerIgnore)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+      fs.writeFileSync(innerIgnore,
+        "# Engram AI agent memory — do not commit\n*\n!.gitignore\n",
+        "utf-8"
+      );
+    }
+  } catch { /* best-effort */ }
+
+  // 2. Belt-and-suspenders: append to root .gitignore if it exists
   const gitignorePath = path.join(projectRoot, ".gitignore");
   try {
     if (fs.existsSync(gitignorePath)) {

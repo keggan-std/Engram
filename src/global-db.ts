@@ -26,6 +26,9 @@ export function getGlobalDb(): InstanceType<typeof Database> | null {
             fs.mkdirSync(GLOBAL_DB_DIR, { recursive: true });
         }
         const db = new Database(GLOBAL_DB_PATH);
+        // FLAW-7 FIX: set busy_timeout before any other pragma so concurrent
+        // multi-agent access waits instead of crashing with SQLITE_BUSY.
+        db.pragma("busy_timeout = 5000");
         db.pragma("journal_mode = WAL");
         db.pragma("foreign_keys = ON");
         initGlobalSchema(db);

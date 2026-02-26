@@ -7,7 +7,7 @@ import path from "path";
 import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
-import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion } from "./config-writer.js";
+import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError } from "./config-writer.js";
 import { detectCurrentIde, detectInstalledIdes } from "./ide-detector.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -110,8 +110,14 @@ Examples:
                 const foundPath = ide.scopes.global.find(p => fs.existsSync(p));
                 if (foundPath) {
                     detected = true;
-                    const config = readJson(foundPath);
-                    if (config?.[ide.configKey]?.engram) installed = true;
+                    try {
+                        const config = readJson(foundPath);
+                        if (config?.[ide.configKey]?.engram) installed = true;
+                    } catch (e) {
+                        if (e instanceof ConfigParseError) {
+                            console.warn(`  ⚠️  ${foundPath} — invalid JSON (run 'engram install' to repair)`);
+                        }
+                    }
                 } else if (ide.scopes.global.find(p => fs.existsSync(path.dirname(p)))) {
                     detected = true;
                 }
@@ -185,8 +191,19 @@ Examples:
                 console.log(`  ${id.padEnd(14)} (not detected)`);
                 continue;
             }
-            const config = readJson(foundPath);
-            const entry = config?.[ide.configKey]?.engram;
+            let entry: any = null;
+            try {
+                const config = readJson(foundPath);
+                entry = config?.[ide.configKey]?.engram ?? null;
+            } catch (e) {
+                if (e instanceof ConfigParseError) {
+                    console.log(`  ${id.padEnd(14)} ${foundPath}`);
+                    console.log(`  ${"  ".repeat(7)} ⚠️  Invalid JSON in config — run 'engram install' to repair`);
+                    console.log();
+                    continue;
+                }
+                throw e;
+            }
             if (!entry) {
                 console.log(`  ${id.padEnd(14)} ${foundPath}`);
                 console.log(`  ${"".padEnd(14)} Not installed`);
