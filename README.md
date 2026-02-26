@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🧠 Engram
+<img src="assets/logo.png" alt="Engram logo" width="320" />
+
+# Engram
 
 > **Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and multi-agent coordination across sessions.**
 
@@ -20,16 +22,15 @@
 
 - [Overview](#overview)
 - [Why Engram?](#why-engram)
-- [Installation (Auto & Manual)](#installation)
-- [✨ What's New in v1.7.2](#-whats-new-in-v172)
-- [What's New in v1.7.0](#-whats-new-in-v170)
-- [What's New in v1.6.0](#-whats-new-in-v160)
+- [How Engram Works?](#how-engram-works)
+- [Installation](#installation)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
 - [Using with AI Agents](#using-with-ai-agents)
 - [Multi-Agent Workflows](#multi-agent-workflows)
 - [Contributing](#contributing)
+- [Security](#security)
 - [License](#license)
 
 ---
@@ -56,184 +57,65 @@ Engram solves this by providing a **persistent brain** using a native SQLite (WA
 
 ---
 
-## ✨ What's New in v1.7.2
+## How Engram Works?
 
-**v1.7.2** is a hotfix release addressing 20 bugs found during a systematic functional audit of the v1.7.0 tool surface.
+Engram runs as a local MCP server alongside your AI tool. It maintains a **project-local SQLite database** at `.engram/memory.db` — one per project, created automatically on first use. No cloud, no API keys, no data leaving your machine.
 
-### 🔒 Enum Validation for Change, Task, and Scope Fields
+### The Session Lifecycle
 
-`record_change`, `create_task`, and related actions now enforce enum validation on `change_type`, `impact_scope`, and `priority`. Previously, arbitrary strings were silently accepted, corrupting query results and task filtering.
-
-- `change_type`: `created | modified | deleted | refactored | renamed | moved | config_changed`
-- `impact_scope`: `local | module | cross_module | global`
-- `priority`: `critical | high | medium | low`
-
-### 📡 Directed Broadcasts — `target_agent` Now Works
-
-`engram_memory(action:"broadcast", target_agent:"agent-name")` now correctly stores and filters directed messages. Previously the `target_agent` column was missing from the DB schema and the `agent_sync` query had no filter — all agents received all broadcasts regardless.
-
-### ⏱️ `what_changed { since: "session_start" }` Fixed
-
-The `"session_start"` sentinel value is now resolved to the current session's `started_at` timestamp before the SQL query. Previously it was passed literally, always returning zero results.
-
-### 🔧 Universal Mode Array Coercion Fixed
-
-`set_file_notes` with `dependencies` passed as a JSON string (e.g. `"[\"src/a.ts\"]"`) no longer crashes in Universal Mode. A `parseDepsField()` helper now handles both native arrays and JSON-encoded strings at the repository layer — compensating for the `HandlerCapturer` bypass of Zod preprocessing.
-
-### ✅ API Correctness Fixes (ISS-001 – ISS-015)
-
-- `generate_report` and `get_global_knowledge` return real data
-- `backup` no longer returns ENOENT
-- `get_tasks { status:"all" }` returns all tasks
-- `acknowledge_event { approved:false }` snoozes the event
-- `config { op:"get", key:X }` returns only that key's value
-- `record_milestone` version prefix no longer doubled
-- `dump` no longer creates a spurious change record
-- `NoActiveSessionError` message uses correct v1.7 syntax
-
-> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md)
-
----
-
-## What's New in v1.7.0
-
-<details>
-<summary><strong>✨ What's New in v1.7.0</strong></summary>
-
-**v1.7.0** is a precision token-efficiency release — six improvement tracks with zero breaking changes to the 4-dispatcher API surface.
-
-### 🔧 MCP Validation Crash Fix (Critical)
-
-`z.array(z.unknown())` produced invalid JSON Schema (missing `items`) on `files`, `changes`, and `decisions` input arrays — causing silent validation crashes on VS Code Copilot and Cursor. **Fixed** with fully typed Zod schemas in all three affected inputs.
-
-### ⚡ Default Search Limit: 20 → 8
-
-`engram_memory(action:"search")` now defaults to 8 results (`DEFAULT_SEARCH_LIMIT`). Typical lookups rarely need more. Still overridable via explicit `limit` param (up to 50).
-
-### 📋 Convention Capping by Verbosity
-
-Active conventions are sorted (enforced-first) and capped per verbosity: `nano`=0, `minimal`=5, `summary`=10, `full`=all. Total count + hint always returned.
-
-### 🗂️ Tiered Tool Catalog (P2)
-
-`buildToolCatalog(tier)` delivers the right detail level per agent:
-
-- **Tier 2** (new agents) — full params ~1,200 tokens, once
-- **Tier 1** (returning agents) — names + descriptions ~400 tokens
-- **Tier 0** (familiar agents) — names only ~80 tokens
-
-Delivery history tracked per `agent_name`. Recoverable anytime via `engram_find(action:"catalog")`.
-
-### 🤖 Sub-Agent Session Mode (P3)
-
-`engram_session(action:"start", agent_role:"sub", task_id:"T-42")` returns a focused context slice (~300-500 tokens) scoped to that task — instead of the full session boilerplate. Ideal for sub-agents spawned within an orchestrated multi-agent workflow.
-
-### 🌐 Built-In Universal Mode (P4)
-
-A single `engram` tool with an ~80 token schema — now available **inside the main server** without a separate proxy package:
-
-```bash
-# CLI flag
-npx -y engram-mcp-server --mode=universal --project-root /your/project
-
-# Environment variable
-ENGRAM_MODE=universal npx -y engram-mcp-server --project-root /your/project
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          AGENT SESSION LIFECYCLE                          │
+├──────────────┬──────────────────────────────────────────────────────────┤
+│   Session    │  engram_session(action:"start")                           │
+│    Start     │  ← previous summary, open tasks, decisions, file notes,  │
+│              │     conventions, triggered events — all ranked by focus   │
+├──────────────┼──────────────────────────────────────────────────────────┤
+│  Active Work │  get_file_notes  → skip re-reading if notes are fresh     │
+│              │  record_change   → every file edit captured with context  │
+│              │  record_decision → why you built it, persisted forever    │
+│              │  add_convention  → project standards stored once, used ∞  │
+│              │  create_task     → work items survive session boundaries  │
+├──────────────┼──────────────────────────────────────────────────────────┤
+│   Context    │  check_events fires at 50% / 70% / 85% fill              │
+│   Pressure   │  → checkpoint to offload working memory mid-session       │
+│              │  → or end early and resume cleanly in the next session    │
+├──────────────┼──────────────────────────────────────────────────────────┤
+│   Session    │  engram_session(action:"end", summary:"...")              │
+│     End      │  → summary stored, open tasks preserved, memory locked   │
+│              │  → next session — same agent or different — starts fresh  │
+└──────────────┴──────────────────────────────────────────────────────────┘
 ```
 
-BM25 routing and fuzzy action resolution built-in. Use when you want minimal token overhead without running a separate proxy.
+### What the Agent Receives at Start
 
-### 🗑️ 660 Lines of Dead Code Removed (P5)
+When an agent calls `engram_session(action:"start", focus:"topic")`, the response includes:
 
-`sessions.ts` shrank from 904 → 316 lines. The deleted `registerSessionTools()` registered old v1.5 individual tools that were never called post-v1.6 migration.
+| Field                      | What it contains                                                          |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `previous_session.summary` | What was done last session — files, functions, blockers                   |
+| `active_decisions`         | Binding architectural decisions. Follow them or supersede with rationale. |
+| `active_conventions`       | Project standards (naming, patterns, style) — enforced every session      |
+| `open_tasks`               | Pending work items with priority and blocking chains                      |
+| `abandoned_work`           | Work declared via `begin_work` that was never closed — resume or discard  |
+| `handoff_pending`          | Structured handoff from the previous agent — instructions, branch, tasks  |
+| `triggered_events`         | Scheduled reminders or deferred tasks now due                             |
+| `agent_rules`              | Live-loaded behavioral rules from the README (7-day cache)                |
+| `tool_catalog`             | Available actions, scoped to the agent's familiarity tier                 |
 
-### 🔍 Smarter Convention Linting (P6)
+All context is **FTS5-ranked** around the `focus` topic — the most relevant memory surfaces first. The `suggested_focus` field auto-derives the topic for the next session when none is provided.
 
-`engram_find(action:"lint")` now extracts backtick-quoted identifiers for high-priority matching, uses whole-word regex (no false positives on shared stems), and has an expanded STOP_WORDS list. AR-06 agent rule updated to require `executive_summary` on `set_file_notes`.
+### Token Efficiency by Mode
 
-> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md)
+| Mode                          | Schema tokens | Works with         |
+| ----------------------------- | ------------- | ------------------ |
+| Standard 4-dispatcher         | ~1,600        | All MCP agents     |
+| `--mode=universal` (built-in) | ~80           | All MCP agents     |
+| `engram-thin-client`          | ~0 (deferred) | Anthropic API only |
 
-</details>
+### Storage
 
----
-
-## What's New in v1.6.0
-
-<details>
-<summary><strong>✨ What's New in v1.6.0</strong></summary>
-
-**v1.6.0** is the largest Engram release to date — fourteen feature tracks covering a complete lean-surface rearchitecture, deeper memory intelligence, smarter multi-agent coordination, and a new thin-client proxy.
-
-### ⚡ Lean 4-Tool Dispatcher Surface — ~95% Fewer Schema Tokens
-
-The MCP surface collapsed from 50+ individual tools to **4 dispatcher tools**: `engram_session`, `engram_memory`, `engram_admin`, `engram_find`. Every previous operation is still available — routed via `action` parameter. Token overhead drops from ~32,500 to ~1,600 per API call. Every AI agent benefits automatically with no configuration change.
-
-### 📸 Checkpoints — Offload Working Memory Mid-Session
-
-`engram_memory(action:"checkpoint")` saves current understanding, progress, and relevant files to a persistent `checkpoints` table. `get_checkpoint` restores it. Use when approaching context limits without ending the session.
-
-### 🔬 Hash-Based Staleness Detection
-
-File notes now store a **SHA-256 content hash** alongside `file_mtime`. When mtime matches but the hash differs, confidence is downgraded to `stale` — catching silent edits from formatters, git merges, and auto-saves that preserve timestamps.
-
-### 📊 Tiered Verbosity — `nano` Mode
-
-Four verbosity levels: `full`, `summary`, `minimal`, and the new **`nano`** — returns only session ID, counts, agent rules, and tool catalog. Under 100 tokens total. For ultra-lean session starts in constrained contexts.
-
-### 🗂️ Executive Summary on File Notes
-
-File notes now support an `executive_summary` field — a 2-3 sentence micro summary for Tier-1 reads. Agents can write it once; future sessions get instant context without opening the file.
-
-### 🛡️ Agent Rules — Live-Loaded from GitHub
-
-`start_session` now returns `agent_rules` fetched dynamically from the Engram README (7-day local cache at `.engram/agent_rules_cache.json`). Rules update automatically when the README changes — no agent reinstall required.
-
-### 🔍 Convention Linting in `engram_find`
-
-`engram_find(action:"lint", content:"...")` checks any code snippet against all active conventions and returns a `violations[]` array — useful before committing or during code review.
-
-### 🔧 Git Hook Install/Remove via `engram_admin`
-
-`engram_admin(action:"install_hooks")` and `remove_hooks` write/remove the Engram post-commit hook directly from within the MCP tool — no CLI needed.
-
-### 🌐 Multi-Agent Specialization Routing
-
-`engram_memory(action:"agent_sync", specializations:["typescript","database"])` stores agent skill tags. `claim_task` returns an advisory `match_score` comparing agent specializations vs task tags. New `route_task` action finds the best-matched agent for any task.
-
-### 🔒 Agent Safety — File Locking & Pending Work
-
-`engram_memory(action:"lock_file")` / `unlock_file` prevent concurrent write conflicts. `engram_memory(action:"begin_work")` / `end_work` declare intent before touching files. Abandoned work surfaces in `start_session` as `abandoned_work`.
-
-### 🌡️ Context Pressure Detection
-
-`check_events` fires `context_pressure` at 50%/70%/85% so agents know when to wrap up before hitting the context wall.
-
-### 🤝 Session Handoffs
-
-`engram_session(action:"handoff")` packages open tasks, last file touched, git branch, and instructions for the next agent. Auto-surfaced in `start_session` as `handoff_pending`.
-
-### 🎬 Session Replay & Diagnostics
-
-Every MCP tool call is logged to `tool_call_log`. Session Replay reconstructs the complete chronological timeline of any session.
-
-### 📦 `engram-thin-client` Package
-
-New `packages/engram-thin-client/` proxy enables Anthropic's `defer_loading` beta — tools are defined with `defer_loading: true` so **zero** schema tokens are consumed upfront. Claude discovers tools on demand via BM25 search. For agents using the Anthropic API directly.
-
-### 📦 `engram-universal-client` Package
-
-New `packages/engram-universal-thin-client/` proxy exposes Engram as a **single MCP tool** with an ~80-token schema — works with **every** MCP-compatible agent (Cursor, VS Code Copilot, Windsurf, Gemini CLI, GPT-based IDEs, Claude). BM25 routing maps free-text or near-miss action strings to the correct dispatcher. No Anthropic API required.
-
-| Approach                        | Schema tokens/call | Works universally            |
-| ------------------------------- | ------------------ | ---------------------------- |
-| v1.5 (50+ tools)                | ~32,500            | ✅                           |
-| v1.6 dispatcher (4 tools)       | ~1,600             | ✅                           |
-| `engram-thin-client`            | ~0 (deferred)      | ⚠️ Anthropic only            |
-| `engram-universal-client` proxy | ~80                | ✅ All agents                |
-| **v1.7 `--mode=universal`**     | **~80**            | ✅ **All agents (built-in)** |
-
-> Full changelog: [RELEASE_NOTES.md](RELEASE_NOTES.md) · Previous release: **v1.5.0** — Multi-Agent Coordination, Trustworthy Context & Knowledge Intelligence.
-
-</details>
+All data lives in a local SQLite WAL database. There is no telemetry, no external sync, and no authentication surface. The database is a plain file — portable via `backup`, exportable to JSON, restorable on any machine.
 
 ---
 
@@ -538,22 +420,93 @@ In your IDE, open the AI chat and ask the agent to call `engram_session(action:"
 
 ## Features
 
-- 🧠 **Session Continuity:** Each session automatically receives the previous session's summary, changes, decisions, and full project context. Use the `focus` parameter to FTS5-rank all context around the topic you're about to work on. `suggested_focus` is returned automatically when no focus is provided.
-- 🔐 **Trustworthy Context:** File notes track `file_mtime` and `git_branch` at write time. Returns `confidence` (`high`, `medium`, `stale`, `unknown`) and a `branch_warning` when the current branch differs from when notes were stored.
-- 🔒 **Agent Safety:** `engram_memory(action:"lock_file")` / `unlock_file` prevent concurrent write conflicts. `begin_work` / `end_work` declare intent before touching files. Abandoned work from prior sessions surfaces in `start_session`.
-- 🤖 **Multi-Agent Coordination:** Multiple agents collaborate simultaneously. Atomic task claiming prevents duplicates. `route_task` finds the best-matched agent. `agent_sync` tracks who is alive and their specializations.
-- 🤝 **Session Handoffs:** `engram_session(action:"handoff")` packages context (tasks, files, git branch, instructions) for graceful agent-to-agent transfers. `acknowledge_handoff` clears the pending handoff.
-- 🌡️ **Context Pressure Detection:** `engram_memory(action:"check_events")` fires at 50%/70%/85% context fill — giving agents advance warning before hitting the context wall.
-- ⏰ **Scheduled Events:** Postpone tasks or set reminders. Triggers include `next_session`, `datetime`, or `task_complete`.
-- 📝 **Change Tracking:** Records every file modification with context. Combines agent-recorded changes with `git` history. Git hook integration (`--install-hooks`) auto-records commits.
-- 🏗️ **Architectural Decision Records:** Logs design decisions with rationale, affected files, and tags forever. `depends_on` field models prerequisite decision chains. FTS5 deduplication warns on similar existing decisions.
-- 📁 **File Intelligence:** Stores per-file notes (purpose, deps, layer, complexity) with branch-aware staleness detection preventing endless re-reads.
-- 📐 **Convention Tracking:** Records and enforces project conventions (naming, testing, styling).
-- ✅ **Task Management:** Work items persist across sessions with priority, status, and multi-agent claiming. End-session warns on unclosed claimed tasks.
-- 🔍 **Precise Full-Text Search (FTS5):** High-performance ranked search across all memory, with `context_chars` enrichment and per-result `confidence` levels for file note results.
-- 🎬 **Session Replay:** Reconstructs the complete tool-call + change + decision timeline for any session via the `tool_call_log` table.
-- 💾 **Backup & Restore:** `engram_admin(action:"backup")` creates timestamped SQLite copies to any path (like Dropbox/OneDrive) for cross-machine portability.
-- 📊 **Reports, Stats & Commit Suggestions:** Generate Markdown project reports, per-agent activity metrics, and conventional commit messages from session data.
+Engram gives an AI coding agent **persistent memory** — the ability to pick up exactly where it left off, across sessions, IDEs, and teams. Here is what that means in practice.
+
+---
+
+### 🧠 Sessions That Actually Continue
+
+An AI agent without Engram starts cold every session — re-reads files, rediscovers architecture, re-learns conventions. That warm-up wastes tokens and your patience, every single time.
+
+With Engram, `engram_session(action:"start")` delivers the full context in one call: the previous session's summary, open tasks, architectural decisions, project conventions, and a `suggested_focus` auto-derived from recent activity. The agent arrives already knowing your codebase.
+
+> The agent that worked on your project yesterday is effectively present today.
+
+---
+
+### 🏗️ Decisions That Outlive Sessions
+
+Every architectural choice gets stored with rationale, affected files, tags, and dependency chains. It lives in Engram indefinitely — not in a chat history that scrolls away.
+
+Six months later, a new agent asks why something works a certain way. Engram answers precisely, with the original reasoning intact. `depends_on` chains warn when changing one decision risks cascading to others. Decisions are superseded, never deleted — the full evolution of your architecture is always recoverable.
+
+---
+
+### 📁 Smart File Notes With Staleness Detection
+
+The agent learns a file once — its purpose, layer, complexity, and dependencies — writes a 2-3 sentence `executive_summary`, and never reads it from scratch again. Future sessions query the note for instant context with zero file reads.
+
+Notes use **SHA-256 content hashing** to catch silent edits from formatters and auto-saves that preserve `mtime`. A `branch_warning` fires when the current branch diverges from when the note was written, preventing cross-branch confusion.
+
+---
+
+### ✅ Tasks That Survive Everything
+
+Work items persist across sessions, restarts, agent switches, and context resets — with priority, tags, and blocking chains. `claim_task` is **atomic**: two parallel agents can never start the same work. `begin_work` declarations surface as `abandoned_work` in the next session — nothing falls through the cracks.
+
+---
+
+### 🤖 Parallel Agents Without Conflicts
+
+Run multiple AI agents on the same codebase simultaneously. Engram provides the coordination layer so they never step on each other.
+
+| Mechanism                         | What it prevents                         |
+| --------------------------------- | ---------------------------------------- |
+| `lock_file` / `unlock_file`       | Two agents editing the same file at once |
+| `claim_task` (atomic)             | Duplicate work from parallel agents      |
+| `broadcast` / `agent_sync`        | Missed messages between agents           |
+| `route_task`                      | Work going to the wrong specialization   |
+| `handoff` / `acknowledge_handoff` | Context loss when switching agents       |
+
+---
+
+### 🌡️ Always Land Cleanly — Context Wall Warnings
+
+AI agents hit their context limit and abruptly stop, mid-task and mid-thought. Engram fires `context_pressure` events at **50%, 70%, and 85%** fill — giving the agent time to `checkpoint` its progress and wrap up gracefully before the wall hits. The next session resumes exactly where it left off.
+
+---
+
+### 📐 Convention Enforcement That Sticks
+
+Project conventions — naming rules, testing standards, logging patterns, response shapes — are stored once and returned at every session start. `engram_find(action:"lint")` actively checks any code against them. Conventions do not get forgotten when a session ends or a new agent joins.
+
+---
+
+### 📝 Unified Change History — Agent and Human
+
+Every file change is recorded with `change_type`, `description`, `impact_scope`, and optional diff. Git hook integration captures commits from both agents and humans into one timeline. `what_changed` returns a full diff report from any point in time or since session start.
+
+---
+
+### ⚡ Minimal API Footprint — 4 Tools or 1
+
+All capabilities route through **4 dispatcher tools** via an `action` parameter. Add `--mode=universal` to collapse to a single `engram` tool at ~80 schema tokens — a 99% reduction from the original 50-tool surface. BM25 fuzzy routing handles typos and near-miss action names automatically.
+
+| Mode                  | Schema tokens | Compatibility      |
+| --------------------- | ------------- | ------------------ |
+| Standard 4-dispatcher | ~1,600        | All MCP agents     |
+| `--mode=universal`    | ~80           | All MCP agents     |
+| `engram-thin-client`  | ~0 deferred   | Anthropic API only |
+
+---
+
+### 💾 Your Data, Your Machine
+
+No cloud. No telemetry. No authentication surface. Memory lives in a local SQLite WAL file at `.engram/memory.db`. `backup` creates a portable copy to any path. `export` serializes everything to JSON. You own it entirely.
+
+---
+
+> For the full version history and per-release breakdown, see [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ---
 
@@ -1112,13 +1065,23 @@ The global database at `~/.engram/memory.db` can be reset the same way if needed
 
 ## Contributing
 
-We welcome contributions!
+Contributions are welcome — bug reports, feature proposals, documentation improvements, and code. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide, including:
 
-1. Fork the repo and create your branch (`git checkout -b feature/amazing-idea`).
-2. Install dependencies: `npm install`.
-3. Build the project: `npm run build`.
-4. Run tests: `npm test` (Uses Vitest).
-5. Commit your changes and open a Pull Request.
+- Development environment setup
+- Branch naming and commit message conventions
+- Testing requirements before submitting a PR
+- How to propose new features or architectural changes
+- Code review process and expectations
+
+For questions and discussion, open a [GitHub Issue](https://github.com/keggan-std/Engram/issues).
+
+---
+
+## Security
+
+For responsible disclosure of security vulnerabilities, please read [SECURITY.md](SECURITY.md). **Do not open a public GitHub issue for security vulnerabilities.**
+
+The short version: Engram has no network-facing server, no authentication surface, and no telemetry. All data stays on your machine in a local SQLite file. The primary attack surface is the local filesystem and the `npx` execution model.
 
 ---
 
@@ -1126,9 +1089,11 @@ We welcome contributions!
 
 This project is licensed under the [MIT License](LICENSE).
 
+Copyright &copy; 2026 Keggan Student, Tanzania.
+
 ---
 
 <div align="center">
   <em>Because your AI agent shouldn't have amnesia.</em><br/>
-  <strong>Copyright &copy; 2026 Keggan Student - Tanzania</strong>
+  <strong>Copyright &copy; 2026 Keggan Student — Tanzania</strong>
 </div>
