@@ -35,6 +35,15 @@ export interface IdeDefinition {
     requiresType: boolean;
     /** Whether Windows requires cmd /c wrapper for npx */
     requiresCmdWrapper: boolean;
+    /**
+     * FLAW-4 FIX: IDE-native variable for the current workspace/project root.
+     * When set, the installer injects `--project-root=<var>` into the MCP args
+     * so the server receives the actual workspace path at spawn time, bypassing
+     * all heuristic detection.
+     *
+     * Examples: "${workspaceFolder}" (VS Code/Cursor), "${SolutionDir}" (VS)
+     */
+    workspaceVar?: string;
     scopes: {
         global?: string[];
         localDirs?: string[];
@@ -47,20 +56,16 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
     // ─── VS Code forks ──────────────────────────────────────────────
     vscode: {
         name: "VS Code (Copilot)",
-        // Confirmed: VS Code uses "servers" key, not "mcpServers".
-        // Source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers
         configKey: "servers",
         requiresType: true,
         requiresCmdWrapper: false,
+        // FLAW-4 FIX: VS Code expands ${workspaceFolder} at spawn time — ensures
+        // the server always receives the correct project root without heuristics.
+        workspaceVar: "${workspaceFolder}",
         scopes: {
-            // Global user config.  APPDATA now resolves correctly on all OSes:
-            //   Windows : %APPDATA%\Code\User\mcp.json
-            //   macOS   : ~/Library/Application Support/Code/User/mcp.json
-            //   Linux   : ~/.config/Code/User/mcp.json
             global: [
                 path.join(APPDATA, "Code", "User", "mcp.json"),
             ],
-            // Workspace-level: .vscode/mcp.json in project root.
             localDirs: [".vscode"],
         },
     },
@@ -69,14 +74,12 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
+        // FLAW-4 FIX: Cursor also expands ${workspaceFolder}
+        workspaceVar: "${workspaceFolder}",
         scopes: {
-            // Confirmed: ~/.cursor/mcp.json is the cross-platform global path.
-            // Source: https://cursor.com/docs/context/mcp
-            // The old APPDATA/Cursor/mcp.json fallback was wrong on every OS.
             global: [
                 path.join(HOME, ".cursor", "mcp.json"),
             ],
-            // Project-level: .cursor/mcp.json in project root.
             localDirs: [".cursor"],
         },
     },
@@ -142,19 +145,13 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
     // ─── Microsoft ──────────────────────────────────────────────────
     visualstudio: {
         name: "Visual Studio 2022/2026",
-        // FIXED: Visual Studio uses "servers" key, not "mcpServers".
-        // Source: https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
-        // Every official example uses { "servers": { ... } }.
         configKey: "servers",
         requiresType: false,
         requiresCmdWrapper: false,
+        // FLAW-4 FIX: Visual Studio expands ${SolutionDir} at spawn time
+        workspaceVar: "${SolutionDir}",
         scopes: {
-            // Global: %USERPROFILE%\.mcp.json  (confirmed in MS docs)
             global: [path.join(HOME, ".mcp.json")],
-            // Local options (VS checks in order):
-            //   <SOLUTIONDIR>\.mcp.json   ← primary (source-controlled)
-            //   <SOLUTIONDIR>\.vs\mcp.json ← VS-specific (user-local)
-            // localDirs[0] drives the interactive menu; "" → .mcp.json in cwd.
             localDirs: ["", ".vs"],
         },
     },

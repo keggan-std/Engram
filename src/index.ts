@@ -120,7 +120,7 @@ async function main(): Promise<void> {
     args.includes("--install-hooks") ||
     args.includes("--remove-hooks")
   ) {
-    runInstaller(args);
+    await runInstaller(args);  // FLAW-12 FIX: runInstaller is async; was missing await
     return;
   }
 
@@ -134,7 +134,8 @@ async function main(): Promise<void> {
   const projectRoot = findProjectRoot();
   log.info(`Project root: ${projectRoot}`);
 
-  // Initialize database
+  // Initialize database (synchronous — better-sqlite3 is sync throughout)
+  // FLAW-5 FIX: initDatabase is no longer async; no await needed
   initDatabase(projectRoot);
   log.info(`Database initialized at ${projectRoot}/.engram/memory.db`);
 

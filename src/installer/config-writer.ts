@@ -7,12 +7,23 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { IdeDefinition } from "./ide-configs.js";
 
-/** Read the installed package version (used to stamp _engram_version in IDE configs). */
+/**
+ * FLAW-15 FIX: Read version from package.json relative to the dist output,
+ * but fall back to the SERVER_VERSION constant as the single source of truth.
+ * This is resilient to build output structure changes.
+ */
 export function getInstallerVersion(): string {
     try {
         const __dirname = path.dirname(fileURLToPath(import.meta.url));
-        const pkgPath = path.resolve(__dirname, "../../package.json");
-        return JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version as string;
+        // Try dist/installer/ → ../../package.json (standard build layout)
+        for (const rel of ["../../package.json", "../../../package.json", "../../../../package.json"]) {
+            const pkgPath = path.resolve(__dirname, rel);
+            if (fs.existsSync(pkgPath)) {
+                const ver = JSON.parse(fs.readFileSync(pkgPath, "utf-8")).version as string | undefined;
+                if (ver) return ver;
+            }
+        }
+        return "unknown";
     } catch {
         return "unknown";
     }
@@ -22,9 +33,13 @@ export function getInstallerVersion(): string {
  * Generate the Engram server entry tailored to a specific IDE's requirements.
  * Includes _engram_version so the installer can detect upgrades and legacy installs.
  *
- * @param ide        IDE definition (controls type, cmd wrapper, etc.)
- * @param universal  When true, adds --mode=universal and --project-root to args.
- *                   Uses IDE-appropriate workspace variable when available.
+ * FLAW-4 FIX: When the IDE definition has a workspaceVar, it is injected as
+ * `--project-root=<var>`. At runtime the IDE expands the variable to the actual
+ * workspace path before spawning the server, so findProjectRoot() receives the
+ * correct root with no heuristics needed.
+ *
+ * @param ide        IDE definition (controls type, cmd wrapper, workspaceVar, etc.)
+ * @param universal  When true, adds --mode=universal to args.
  */
 export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<string, any> {
     const entry: Record<string, any> = {};
@@ -38,6 +53,12 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<s
     const baseArgs = ["-y", "engram-mcp-server"];
     if (universal) {
         baseArgs.push("--mode=universal");
+    }
+    // FLAW-4 FIX: inject workspace root variable when the IDE supports it.
+    // The IDE expands this variable at spawn time (e.g. ${workspaceFolder} →
+    // /path/to/project) so the server always receives the correct project path.
+    if (ide.workspaceVar) {
+        baseArgs.push(`--project-root=${ide.workspaceVar}`);
     }
 
     // Windows cmd /c wrapper for npx (npx is a .cmd on Windows)
@@ -59,13 +80,29 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<s
 }
 
 /**
- * Read and parse a JSON config file. Returns null if file doesn't exist or is invalid.
+ * Read and parse a JSON config file.
+ * FLAW-8 FIX: distinguish between "file not found" and "file has invalid JSON".
+ * Returns:
+ *   null    — file does not exist (safe to create fresh)
+ *   object  — parsed successfully
+ * Throws ParseError (with .isParseError = true) when the file exists but
+ *   contains invalid JSON — callers should warn and bail rather than
+ *   silently overwriting the user's config.
  */
+export class ConfigParseError extends Error {
+    constructor(public readonly filePath: string, public readonly cause: unknown) {
+        super(`Failed to parse JSON config at ${filePath}: ${cause}`);
+        this.name = "ConfigParseError";
+    }
+}
+
 export function readJson(filePath: string): Record<string, any> | null {
+    if (!fs.existsSync(filePath)) return null; // file not found — safe to create
     try {
         return JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    } catch {
-        return null;
+    } catch (e) {
+        // File exists but is invalid JSON — signal this distinctly
+        throw new ConfigParseError(filePath, e);
     }
 }
 
@@ -81,18 +118,35 @@ export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
 
 /**
  * Add or update the Engram entry in a config file.
- * Uses the IDE's configKey ("mcpServers" or "servers") to write the correct JSON structure.
+ * FLAW-8 FIX: if the config file exists but has invalid JSON, back it up
+ * before overwriting so the user doesn't lose their other tool configs.
  *
  * Returns:
- *   "added"          — fresh install, no prior entry
- *   "exists"         — already installed at the same version, no changes made
- *   "upgraded"       — updated from an older tracked version to the current one
- *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era), now stamped
+ *   "added"           — fresh install, no prior entry
+ *   "exists"          — already installed at the same version, no changes made
+ *   "upgraded"        — updated from an older tracked version to the current one
+ *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era)
  */
 export function addToConfig(configPath: string, ide: IdeDefinition, universal = false): InstallResult {
-    let config: Record<string, any> = readJson(configPath) || {};
-    const key = ide.configKey;
+    let config: Record<string, any>;
+    try {
+        config = readJson(configPath) ?? {};
+    } catch (e) {
+        if (e instanceof ConfigParseError) {
+            // Backup the broken file then start fresh
+            const ts = new Date().toISOString().replace(/[:.]/g, "-");
+            const bakPath = configPath + `.invalid.${ts}.bak`;
+            try { fs.copyFileSync(configPath, bakPath); } catch { /* best-effort */ }
+            console.warn(`[Engram] Config at ${configPath} contains invalid JSON.`);
+            console.warn(`         Backed up to: ${bakPath}`);
+            console.warn(`         Writing a fresh config with only the Engram entry.`);
+            config = {};
+        } else {
+            throw e;
+        }
+    }
 
+    const key = ide.configKey;
     if (!config[key]) config[key] = {};
 
     const newEntry = makeEngramEntry(ide, universal);

@@ -61,8 +61,23 @@ export const EXCLUDED_DIRS = new Set([
 ]);
 
 // Project root markers — used to auto-detect project boundaries
-export const PROJECT_MARKERS = [
+// FLAW-1 FIX: two tiers prevent IDE install dirs from being picked up.
+
+/**
+ * STRONG markers: unambiguous project boundaries. Found → return immediately.
+ * These never appear in IDE install directories or npm global dirs.
+ */
+export const STRONG_PROJECT_MARKERS = [
   ".git",
+  ".engram",   // already-initialised Engram project
+] as const;
+
+/**
+ * SOFT markers: typically present in real projects but also in Electron/Node
+ * app install dirs. Only used after strong markers are exhausted, AND only if
+ * the candidate path passes the BLOCKED_PATH_PATTERNS check.
+ */
+export const SOFT_PROJECT_MARKERS = [
   "package.json",
   "build.gradle",
   "build.gradle.kts",
@@ -80,6 +95,41 @@ export const PROJECT_MARKERS = [
   "pubspec.yaml",
   "Gemfile",
   "composer.json",
+];
+
+/**
+ * Legacy combined list kept for any external callers.
+ * Prefer STRONG_PROJECT_MARKERS + SOFT_PROJECT_MARKERS directly.
+ */
+export const PROJECT_MARKERS = [
+  ...STRONG_PROJECT_MARKERS,
+  ...SOFT_PROJECT_MARKERS,
+];
+
+/**
+ * Path-segment patterns that indicate an IDE install, npm global, or OS system
+ * directory. A soft-marker candidate whose normalised path matches any of these
+ * is rejected so we don't mistake an IDE's own install dir for a project root.
+ */
+export const BLOCKED_PATH_PATTERNS: RegExp[] = [
+  // Windows IDE install / npm global locations
+  /[/\\]AppData[/\\]Local[/\\]Programs[/\\]/i,
+  /[/\\]AppData[/\\]Roaming[/\\]npm[/\\]/i,
+  /[/\\]AppData[/\\]Local[/\\]npm[/\\]/i,
+  // Windows system dirs
+  /^[A-Za-z]:[/\\]Program Files( \(x86\))?[/\\]/i,
+  /^[A-Za-z]:[/\\]Windows[/\\]/i,
+  // macOS application bundles and Homebrew
+  /\/Applications\/.+\.app\//,
+  /\/usr\/local\/(bin|lib|Cellar)\//,
+  /\/opt\/(homebrew|local)\//,
+  // Linux system dirs
+  /^\/usr\/(bin|lib|share|local)\//,
+  /^\/opt\//,
+  // npm / node global installs (all OSes)
+  /[/\\]node_modules[/\\]engram-mcp-server[/\\]/i,
+  /[/\\]lib[/\\]node_modules[/\\]/i,
+  /[/\\]node_modules\.bin[/\\]/i,
 ];
 
 // Update check

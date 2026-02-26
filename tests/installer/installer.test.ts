@@ -26,7 +26,8 @@ describe("makeEngramEntry", () => {
     it("should generate basic entry for mcpServers IDEs (Cursor, Windsurf)", () => {
         const entry = makeEngramEntry(IDE_CONFIGS.cursor);
         expect(entry.command).toBe("npx");
-        expect(entry.args).toEqual(["-y", "engram-mcp-server"]);
+        // Cursor has workspaceVar="${workspaceFolder}", so --project-root is injected
+        expect(entry.args).toEqual(["-y", "engram-mcp-server", "--project-root=${workspaceFolder}"]);
         expect(entry.type).toBeUndefined();
     });
 
