@@ -631,32 +631,20 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 
 <!-- ENGRAM_INSTRUCTIONS_START -->
 
-## Engram — Persistent Memory MCP (v1.7)
+## Engram — Session Rules
 
-Engram is a persistent memory MCP server. It gives AI agents session continuity, change tracking, decision logging, and multi-agent coordination across sessions — all via a SQLite database. The API surface is **4 dispatcher tools** (or **1 tool** in universal mode) — each routed via an `action` parameter. Schema tokens: ~1,600 per call in standard mode, ~80 in universal mode.
+**4 dispatcher tools:** `engram_session` · `engram_memory` · `engram_admin` · `engram_find`  
+Unknown action? → `engram_find({ query: "what I want to do" })`  
+Universal mode? All actions route through a single `engram` tool — call `engram({ action: "start" })` etc.
 
 Follow these rules **every session, every project**.
 
----
-
-### Dispatcher Tools
-
-| Tool             | Responsibility                                    |
-| ---------------- | ------------------------------------------------- |
-| `engram_session` | Session lifecycle (start, end, handoffs, history) |
-| `engram_memory`  | All memory operations (34+ actions)               |
-| `engram_admin`   | Maintenance, git hooks, backup, config, stats     |
-| `engram_find`    | Tool catalog search + convention linting          |
-
-> If running in **universal mode** (`--mode=universal`), all actions route through a single `engram` tool instead. Call `engram({ action: "start" })` etc.
-
-> Use `engram_find({ query: "what I want to do" })` whenever you don't know the exact `action` name.
+> ⚠️ **MANDATORY: Call this at the start of EVERY new chat — no exceptions.**  
+> Without it, the agent is stateless. All prior context (decisions, file notes, tasks, conventions) will be invisible.
 
 ---
 
-### 1. Session Start — Always First
-
-**Before reading any file or taking any action**, call `engram_session(action:"start")`.
+### Session Start — ALWAYS FIRST, BEFORE any action
 
 ```js
 engram_session({
@@ -667,208 +655,81 @@ engram_session({
 });
 ```
 
-- **Verbosity** — Use `"summary"` by default. Use `"minimal"` for count-only context. Use `"nano"` (under 100 tokens) only when context is critically constrained. **Never** use `"full"`.
-- **`focus`** — When you know what you're about to work on, pass it. Context is FTS5-ranked around that topic.
-- **`tool_catalog`** — Returned at session start. Use it to know available actions — do not call a separate tool for this.
-
-Act on everything returned:
-
-| Field                      | What to do                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `previous_session.summary` | Read immediately. Do not re-explore what is already known.                                                               |
-| `active_decisions`         | Binding. Follow them. Supersede via `engram_memory(action:"record_decision", supersedes:<id>)` only if they must change. |
-| `active_conventions`       | Enforce in every file touched this session.                                                                              |
-| `open_tasks`               | Pending work. Ask the user which to focus on if unclear.                                                                 |
-| `abandoned_work`           | Work left open by a previous unexpected session end. Resume or close it.                                                 |
-| `handoff_pending`          | Structured handoff from previous agent. Read instructions, then call `engram_session(action:"acknowledge_handoff")`.     |
-| `suggested_focus`          | Auto-derived topic hint. Pass as `focus` on the next `start` call.                                                       |
-| `triggered_events`         | Scheduled reminders or deferred work now due. Act on them.                                                               |
-| `agent_rules`              | Live-loaded rules from the Engram README. Treat as binding session instructions.                                         |
-| `update_available`         | Inform the user: _"Engram v{version} is available — update, skip, or postpone?"_                                         |
-
-**If `update_available` is set**, respond to the user's choice:
-
-- **Update** → `npx -y engram-mcp-server install`
-- **Skip this version** → `engram_admin({ action: "config", op: "set", key: "auto_update_skip_version", value: "{version}" })`
-- **Postpone 7 days** → `engram_admin({ action: "config", op: "set", key: "auto_update_remind_after", value: "7d" })`
-- **Disable checks** → `engram_admin({ action: "config", op: "set", key: "auto_update_check", value: "false" })`
+- **Every new chat. Every time. No skipping.** Even for "quick" questions — context is loaded in <1 second.
+- Use `verbosity: "summary"` always. Never `"full"`.
+- Act on everything returned: `previous_session`, `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `abandoned_work`, `agent_rules` (binding), `triggered_events`.
+- If `update_available`: ask user → update (`npx -y engram-mcp-server install`), skip, postpone 7d, or disable.
 
 ---
 
-### 2. Before Opening Any File
-
-Always check Engram before opening a file:
+### Before Opening a File
 
 ```js
-engram_memory({ action: "get_file_notes", file_path: "path/to/file.ts" });
+engram_memory({ action: "get_file_notes", file_path: "..." });
 ```
 
-| `confidence` result | Action                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| `"high"`            | Use stored notes. Only open if you need to edit.                                    |
-| `"medium"`          | Notes exist but file may have minor changes. Open only if precision matters.        |
-| `"stale"`           | File has changed since notes were stored (hash mismatch). Re-read and update notes. |
-| No notes            | Read the file, then immediately call `set_file_notes`.                              |
-
-After reading a file for the first time, store notes immediately:
-
-```js
-engram_memory({ action: "set_file_notes", file_path, purpose, dependencies, dependents, layer, complexity, notes, executive_summary })
-// Batch multiple files:
-engram_memory({ action: "set_file_notes_batch", files: [...] })
-```
+- `high` → use notes, skip opening. `medium` → open only if precision matters. `stale` / no notes → read file, then immediately call `set_file_notes` with `executive_summary`.
 
 ---
 
-### 3. Before Making Design or Architecture Decisions
-
-Search for existing decisions before proposing anything:
+### Before Design/Architecture Decisions
 
 ```js
-engram_memory({
-    action: "search",
-    query: "relevant keywords",
-    scope: "decisions",
-});
-// or:
-engram_memory({ action: "get_decisions" });
+engram_memory({ action: "search", query: "...", scope: "decisions" });
+// or: engram_memory({ action: "get_decisions" })
 ```
 
-- **Decision exists** → Follow it.
-- **Needs to change** → Explain why, then: `engram_memory({ action: "record_decision", supersedes: <id>, decision, rationale })`
-- **No decision** → Make the call and record it immediately:
-
-```js
-engram_memory({
-    action: "record_decision",
-    decision,
-    rationale,
-    affected_files,
-    tags,
-});
-```
+Follow existing decisions. To change one, call `record_decision` with `supersedes: <id>`. Always record new decisions with `rationale`.
 
 ---
 
-### 4. When Modifying Files
-
-After every meaningful change, record it — batch where possible:
+### After Editing Files
 
 ```js
 engram_memory({
     action: "record_change",
-    changes: [
-        {
-            file_path,
-            change_type, // created | modified | refactored | deleted | renamed | moved | config_changed
-            description, // What changed AND why — not just the action
-            impact_scope, // local | module | cross_module | global
-        },
-    ],
+    changes: [{ file_path, change_type, description, impact_scope }],
 });
 ```
 
+`change_type`: created | modified | refactored | deleted | renamed | moved | config_changed  
+`impact_scope`: local | module | cross_module | global. Batch all changes in one call.
+
 ---
 
-### 5. When You Don't Know Something
-
-Search Engram before asking the user — they may have already explained it to a previous session:
+### Mid-Session (context pressure)
 
 ```js
-engram_memory({ action: "search", query: "keywords", context_chars: 200 }); // general search
-engram_admin({ action: "scan_project" }); // project structure
-engram_memory({ action: "get_decisions" }); // architecture questions
-engram_memory({ action: "get_conventions" }); // style / pattern questions
-engram_memory({ action: "get_file_notes", file_path: "..." }); // what is known about a file
-engram_find({ query: "what I want to do" }); // discover the right action
+engram_memory({ action: "checkpoint", current_understanding: "...", progress: "...", relevant_files: [...] })
+engram_memory({ action: "check_events" }) // fires at 50/70/85% context fill
 ```
 
 ---
 
-### 6. Mid-Session — Approaching Context Limits
+### Session End — ALWAYS LAST
 
-Before hitting the context wall, save a checkpoint:
-
-```js
-engram_memory({ action: "checkpoint", current_understanding: "...", progress_percentage: 70, key_findings: [...], next_steps: [...], file_paths: [...] })
-// Restore later:
-engram_memory({ action: "get_checkpoint" })
-```
-
-Check for context pressure events proactively:
-
-```js
-engram_memory({ action: "check_events" }); // fires at 50% / 70% / 85% context fill
-```
+1. Record any unrecorded changes.
+2. Mark done tasks: `engram_memory({ action: "update_task", id: <n>, status: "done" })`
+3. Create tasks for incomplete work.
+4. Record new conventions.
+5. `engram_session({ action: "end", summary: "files/functions touched, pending work, blockers" })`
 
 ---
 
-### 7. Session End — Always Last
+### Sub-Agent Sessions (v1.7+)
 
-Before ending any session:
-
-1. Record all file changes not yet recorded.
-2. Mark completed tasks: `engram_memory({ action: "update_task", task_id, status: "done" })`
-3. Create tasks for anything incomplete: `engram_memory({ action: "create_task", title, description, priority })`
-4. Record any new conventions: `engram_memory({ action: "add_convention", convention, rationale })`
-5. Call end with a precise summary:
-
-```js
-engram_session({
-    action: "end",
-    summary:
-        "Exact files/functions touched, what is pending, any blockers, new patterns discovered",
-});
-```
-
----
-
-### 8. Sub-Agent Sessions (v1.7+)
-
-When your orchestrator spawns a sub-agent to handle a specific task, use `agent_role: "sub"` to get a lightweight, task-scoped context (~300–500 tokens) instead of the full session boilerplate:
+Use `agent_role: "sub"` for lightweight task-scoped context (~300–500 tokens):
 
 ```js
 engram_session({
     action: "start",
     agent_name: "sub-agent-auth",
     agent_role: "sub",
-    task_id: 42, // The task ID assigned by the orchestrator
+    task_id: 42,
 });
 ```
 
-The response includes only:
-
-- The specified task's details (title, description, priority, tags)
-- File notes for files assigned to that task
-- Decisions matching the task's tags
-- Up to 5 relevant conventions
-
-Sub-agents should still call `engram_session(action:"end")` when done and `engram_memory(action:"record_change")` for any edits made.
-
-> **Note:** Sub-agent mode is auto-activated when `agent_role: "sub"` is passed. No separate configuration needed.
-
----
-
-### Quick Reference
-
-| Situation                       | Call                                                        | Notes                                   |
-| ------------------------------- | ----------------------------------------------------------- | --------------------------------------- |
-| **Start every session**         | `engram_session(action:"start")`                            | verbosity:"summary", add focus if known |
-| Discover an action name         | `engram_find({ query:"..." })`                              | Returns action name + param schema      |
-| Before opening any file         | `engram_memory(action:"get_file_notes")`                    |                                         |
-| After first reading a file      | `engram_memory(action:"set_file_notes")`                    | Include `executive_summary`             |
-| Before a design choice          | `engram_memory(action:"search")` / `action:"get_decisions"` |                                         |
-| Record a new decision           | `engram_memory(action:"record_decision")`                   | Always include `rationale`              |
-| After editing files             | `engram_memory(action:"record_change")`                     | Batch multiple changes in one call      |
-| Save mid-session progress       | `engram_memory(action:"checkpoint")`                        | Use near context limits                 |
-| Check context pressure          | `engram_memory(action:"check_events")`                      | Fires at 50% / 70% / 85%                |
-| Create task for incomplete work | `engram_memory(action:"create_task")`                       |                                         |
-| Mark task done                  | `engram_memory(action:"update_task", status:"done")`        |                                         |
-| Record a convention             | `engram_memory(action:"add_convention")`                    |                                         |
-| Schedule deferred work          | `engram_memory(action:"schedule_event")`                    |                                         |
-| Lint code against conventions   | `engram_find(action:"lint", content:"...")`                 | Returns `violations[]`                  |
-| Backup the database             | `engram_admin(action:"backup")`                             |                                         |
-| **End every session**           | `engram_session(action:"end")`                              | Be specific: files, functions, blockers |
+Returns only: the assigned task, its file notes, matching decisions, and up to 5 relevant conventions. Sub-agents still call `record_change` and `session end` as normal.
 
 <!-- ENGRAM_INSTRUCTIONS_END -->
 
