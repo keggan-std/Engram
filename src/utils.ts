@@ -49,8 +49,22 @@ export function coerceStringArray() {
 export function normalizePath(filePath: string, projectRoot?: string): string {
   let p = filePath.replace(/\\/g, "/");
 
-  if (projectRoot && path.isAbsolute(p)) {
-    p = path.relative(projectRoot, p).replace(/\\/g, "/");
+  if (projectRoot) {
+    const root = projectRoot.replace(/\\/g, "/").replace(/\/$/, "");
+    // path.isAbsolute only recognises Unix-style "/" roots on Linux/macOS.
+    // Also detect Windows drive-letter paths (e.g. "C:/...") so the function
+    // works correctly when a Windows path is stored/tested on a non-Windows host.
+    const isAbs = path.isAbsolute(filePath) || /^[A-Za-z]:[\\/]/.test(filePath);
+    if (isAbs) {
+      if (p.startsWith(root + "/")) {
+        p = p.slice(root.length + 1);
+      } else if (p === root) {
+        p = "";
+      } else {
+        // Different root — fall back to OS path.relative (same-platform only)
+        p = path.relative(projectRoot, filePath).replace(/\\/g, "/");
+      }
+    }
   }
 
   p = p.replace(/^\.\//, "");
