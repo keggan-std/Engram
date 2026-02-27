@@ -274,12 +274,30 @@ You can also configure via the Cline extension panel → **MCP Servers** → **E
 
 ---
 
+## Universal Mode (Optional)
+
+By default Engram registers 4 tools (`engram_session`, `engram_memory`, `engram_admin`, `engram_find`). If your agent host limits the number of tools you can register, enable **universal mode** to expose a single `engram` tool instead:
+
+Add `--mode=universal` to the `args` array in your config:
+```json
+"args": ["-y", "engram-mcp-server", "--mode=universal"]
+```
+
+Or set the environment variable:
+```json
+"env": { "ENGRAM_MODE": "universal" }
+```
+
+All actions work identically — `engram({ action: "start" })`, `engram({ action: "record_change", ... })`, etc.
+
+---
+
 ## Verifying the Installation
 
 After installing, ask your AI agent:
 
 ```
-Call engram_start_session and tell me if Engram is connected.
+Call engram_session with action "start", agent_name "test", verbosity "summary" and tell me what it returns.
 ```
 
 If Engram is running correctly, the agent will respond with your session context (or a fresh start message on first use).

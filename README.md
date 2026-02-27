@@ -27,10 +27,11 @@
 - [Features](#features)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
-- [Using with AI Agents](#using-with-ai-agents)
+- [AI Agent Instructions](#ai-agent-instructions)
 - [Multi-Agent Workflows](#multi-agent-workflows)
 - [Contributing](#contributing)
 - [Security](#security)
+- [Author](#author)
 - [License](#license)
 
 ---
@@ -627,111 +628,54 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 
 ---
 
-## Using with AI Agents
+## AI Agent Instructions
 
-> **Copy-paste ready.** Copy everything between the `<!-- ENGRAM_INSTRUCTIONS_START -->` and `<!-- ENGRAM_INSTRUCTIONS_END -->` markers below directly into your agent's instruction file — `CLAUDE.md`, `.github/copilot-instructions.md`, Cursor Rules, or equivalent. No reformatting needed. Works as-is.
+> **Important:** AI agents have a strong tendency to skip Engram tool calls — particularly `engram_session(action:"start")` at the beginning of a chat and `engram_memory(action:"get_file_notes")` before opening files — and proceed directly to reading and reviewing. This defeats the purpose of the memory system entirely. **For any session that involves file exploration or codebase work, explicitly instruct the agent in your prompt to use Engram before acting.** A simple addition like *"Before doing anything, start an Engram session. Before opening any file, check its Engram notes first."* is sufficient to enforce compliance.
+
+> **Copy-paste ready.** The block below can be dropped directly into `CLAUDE.md`, `.github/copilot-instructions.md`, Cursor Rules, or any equivalent agent instruction file — no reformatting needed.
 
 <!-- ENGRAM_INSTRUCTIONS_START -->
 
-## Engram — Session Rules
-
-**4 dispatcher tools:** `engram_session` · `engram_memory` · `engram_admin` · `engram_find`  
-Unknown action? → `engram_find({ query: "what I want to do" })`  
-Universal mode? All actions route through a single `engram` tool — call `engram({ action: "start" })` etc.
-
-Follow these rules **every session, every project**.
-
-> ⚠️ **MANDATORY: Call this at the start of EVERY new chat — no exceptions.**  
-> Without it, the agent is stateless. All prior context (decisions, file notes, tasks, conventions) will be invisible.
-
----
-
-### Session Start — ALWAYS FIRST, BEFORE any action
-
+### Session Start — ALWAYS FIRST
 ```js
-engram_session({
-    action: "start",
-    agent_name: "claude",
-    verbosity: "summary",
-    focus: "topic if known",
-});
+engram_session({ action: "start", agent_name: "claude", verbosity: "summary", focus: "topic if known" })
 ```
+Act on everything returned: `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `agent_rules`, `triggered_events`.  
+Unknown action? → `engram_find({ query: "what I want to do" })`
 
-- **Every new chat. Every time. No skipping.** Even for "quick" questions — context is loaded in <1 second.
-- Use `verbosity: "summary"` always. Never `"full"`.
-- Act on everything returned: `previous_session`, `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `abandoned_work`, `agent_rules` (binding), `triggered_events`.
-- If `update_available`: ask user → update (`npx -y engram-mcp-server install`), skip, postpone 7d, or disable.
-
----
-
-### Before Opening a File
-
+### Before Opening Any File
 ```js
-engram_memory({ action: "get_file_notes", file_path: "..." });
+engram_memory({ action: "get_file_notes", file_path: "..." })
 ```
+`high` confidence → use notes, skip opening. `stale`/absent → read file, then immediately call `set_file_notes` with `executive_summary`.
 
-- `high` → use notes, skip opening. `medium` → open only if precision matters. `stale` / no notes → read file, then immediately call `set_file_notes` with `executive_summary`.
-
----
-
-### Before Design/Architecture Decisions
-
+### Before Architecture/Design Decisions
 ```js
-engram_memory({ action: "search", query: "...", scope: "decisions" });
-// or: engram_memory({ action: "get_decisions" })
+engram_memory({ action: "search", query: "...", scope: "decisions" })
 ```
+Follow existing decisions. Supersede with `record_decision({ ..., supersedes: <id> })`. Always include `rationale`.
 
-Follow existing decisions. To change one, call `record_decision` with `supersedes: <id>`. Always record new decisions with `rationale`.
-
----
-
-### After Editing Files
-
+### After Every File Edit
 ```js
-engram_memory({
-    action: "record_change",
-    changes: [{ file_path, change_type, description, impact_scope }],
-});
+engram_memory({ action: "record_change", changes: [{ file_path, change_type, description, impact_scope }] })
 ```
+`change_type`: `created|modified|refactored|deleted|renamed|moved|config_changed`  
+`impact_scope`: `local|module|cross_module|global` — batch all edits in one call.
 
-`change_type`: created | modified | refactored | deleted | renamed | moved | config_changed  
-`impact_scope`: local | module | cross_module | global. Batch all changes in one call.
-
----
-
-### Mid-Session (context pressure)
-
-```js
-engram_memory({ action: "checkpoint", current_understanding: "...", progress: "...", relevant_files: [...] })
-engram_memory({ action: "check_events" }) // fires at 50/70/85% context fill
-```
-
----
+### Documentation Rule
+Multi-step plans, analyses, proposals → write to `docs/<name>.md`. Chat gets summary only.
 
 ### Session End — ALWAYS LAST
-
-1. Record any unrecorded changes.
-2. Mark done tasks: `engram_memory({ action: "update_task", id: <n>, status: "done" })`
-3. Create tasks for incomplete work.
-4. Record new conventions.
-5. `engram_session({ action: "end", summary: "files/functions touched, pending work, blockers" })`
-
----
+1. Record unrecorded changes
+2. Mark done tasks: `engram_memory({ action: "update_task", id: N, status: "done" })`
+3. Create tasks for incomplete work
+4. `engram_session({ action: "end", summary: "files touched, pending work, blockers" })`
 
 ### Sub-Agent Sessions (v1.7+)
-
-Use `agent_role: "sub"` for lightweight task-scoped context (~300–500 tokens):
-
 ```js
-engram_session({
-    action: "start",
-    agent_name: "sub-agent-auth",
-    agent_role: "sub",
-    task_id: 42,
-});
+engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42 })
 ```
-
-Returns only: the assigned task, its file notes, matching decisions, and up to 5 relevant conventions. Sub-agents still call `record_change` and `session end` as normal.
+Returns only the assigned task, its file notes, matching decisions, and up to 5 conventions (~300–500 tokens). Sub-agents still call `record_change` and `session end` as normal.
 
 <!-- ENGRAM_INSTRUCTIONS_END -->
 
@@ -948,15 +892,21 @@ The short version: Engram has no network-facing server, no authentication surfac
 
 ---
 
+## Author
+
+Built by **Renald Shao** (aka **Keggan Student**) — [GitHub](https://github.com/keggan-std) · [Behance](https://www.behance.net/renaldshao)
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
 
-Copyright &copy; 2026 Keggan Student, Tanzania.
+Copyright &copy; 2026 Renald Shao (aka Keggan Student), Tanzania.
 
 ---
 
 <div align="center">
   <em>Because your AI agent shouldn't have amnesia.</em><br/>
-  <strong>Copyright &copy; 2026 Keggan Student — Tanzania</strong>
+  <strong>Copyright &copy; 2026 Renald Shao (aka Keggan Student) — Tanzania</strong>
 </div>
