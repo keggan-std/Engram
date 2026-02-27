@@ -18,6 +18,10 @@
 
 ---
 
+> ⭐ **If Engram saves you tokens and context, give it a star — it helps other developers find it.**
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -55,6 +59,17 @@ Every AI coding agent is **stateless by default**. Each new session starts from 
 - **Time, tokens, and patience are wasted on repeated discovery.**
 
 Engram solves this by providing a **persistent brain** using a native SQLite (WAL mode) database. An AI agent should only need to deeply review a file once. When you ask it to change something, it should already know where to go.
+
+### How Engram Compares
+
+| Tool | Approach | Local / No cloud | MCP native | Multi-agent | Works today |
+|------|----------|:---:|:---:|:---:|:---:|
+| **Engram** | Structured SQLite memory | ✅ | ✅ | ✅ | ✅ |
+| mem0 | Cloud vector DB | ❌ | ⚠️ wrapper | ⚠️ | ✅ |
+| MemGPT / Letta | In-context manipulation | ✅ | ❌ | ❌ | ✅ |
+| Plain `CLAUDE.md` | Static text file | ✅ | ✅ | ❌ | ✅ |
+
+Engram is the only solution that is **local-first, MCP-native, multi-agent-ready, and structured** (queryable, rankable, exportable) — not just a text file appended to every prompt.
 
 ---
 
