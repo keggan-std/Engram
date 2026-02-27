@@ -39,7 +39,7 @@
 
 **Engram** is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI coding agents persistent memory across sessions. Instead of re-reading files, re-discovering architecture, and re-learning conventions every time a session starts, the agent calls `engram_session(action:"start")` and instantly receives everything it needs.
 
-It operates seamlessly as a background brain for popular AI tools like **Claude Code**, **Claude Desktop**, **Cursor**, **Windsurf**, **Cline**, **Trae IDE**, and **GitHub Copilot** (VS Code & Visual Studio).
+It operates seamlessly as a background brain for popular AI tools like **Claude Code**, **Claude Desktop**, **Cursor**, **Windsurf**, **Cline**, **Trae IDE**, **Antigravity IDE**, and **GitHub Copilot** (VS Code & Visual Studio).
 
 ---
 
@@ -176,6 +176,8 @@ If `npx -y engram-mcp-server --install` fails on Windows, install globally first
 npm install -g engram-mcp-server
 engram install --ide <your-ide>
 ```
+
+Available `--ide` values: `claudecode`, `claudedesktop`, `vscode`, `cursor`, `windsurf`, `antigravity`, `visualstudio`, `cline`, `trae`, `jetbrains`
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
