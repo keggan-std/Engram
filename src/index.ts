@@ -188,7 +188,10 @@ async function main(): Promise<void> {
   // Mark this instance as stopped in the registry so other instances
   // don't see a dead PID with "active" status.
   const shutdownHandler = (): void => {
-    try { getServices().registry.shutdown(); } catch { /* best-effort */ }
+    try {
+      getServices().crossInstance.closeAll();
+      getServices().registry.shutdown();
+    } catch { /* best-effort */ }
   };
   process.on("SIGINT", () => { shutdownHandler(); process.exit(0); });
   process.on("SIGTERM", () => { shutdownHandler(); process.exit(0); });

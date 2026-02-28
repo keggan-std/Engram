@@ -9,7 +9,7 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
-import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService } from "./services/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService, CrossInstanceService } from "./services/index.js";
 import { SERVER_VERSION, CFG_INSTANCE_ID, CFG_INSTANCE_LABEL, CFG_INSTANCE_CREATED_AT, CFG_MACHINE_ID, CFG_SHARING_MODE, CFG_SHARING_TYPES, DEFAULT_SHARING_MODE, DEFAULT_SHARING_TYPES } from "./constants.js";
 import { getMachineId, generateInstanceLabel } from "./utils.js";
 import { randomUUID } from "crypto";
@@ -22,6 +22,7 @@ export interface Services {
   update: UpdateService;
   agentRules: AgentRulesService;
   registry: InstanceRegistryService;
+  crossInstance: CrossInstanceService;
 }
 
 let _db: DatabaseType | null = null;
@@ -119,6 +120,7 @@ export function initDatabase(projectRoot: string): DatabaseType {
   _repos = createRepositories(_db);
 
   // Initialize services
+  const registryService = new InstanceRegistryService(_repos.config, projectRoot, _db);
   _services = {
     compaction: new CompactionService(_db, _repos),
     scan: new ProjectScanService(_repos),
@@ -126,7 +128,8 @@ export function initDatabase(projectRoot: string): DatabaseType {
     events: new EventTriggerService(_repos),
     update: new UpdateService(_repos, SERVER_VERSION),
     agentRules: new AgentRulesService(projectRoot),
-    registry: new InstanceRegistryService(_repos.config, projectRoot, _db),
+    registry: registryService,
+    crossInstance: new CrossInstanceService(registryService),
   };
 
   // ─── Instance Identity ─────────────────────────────────────────────
