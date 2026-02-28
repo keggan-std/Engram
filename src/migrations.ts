@@ -551,6 +551,33 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE broadcasts ADD COLUMN target_agent TEXT;`);
     },
   },
+
+  // ─── V17: Instance Identity & Cross-Instance Infrastructure ─────
+  {
+    version: 17,
+    description: "Instance identity + cross-instance sharing infrastructure — config keys populated by initDatabase()",
+    up: (db) => {
+      // Create shared_access_log table for tracking cross-instance access requests
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sensitive_access_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          requester_instance_id TEXT NOT NULL,
+          requester_label TEXT,
+          target_type TEXT NOT NULL,
+          target_ids TEXT NOT NULL,
+          reason TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          requested_at TEXT NOT NULL,
+          resolved_at TEXT,
+          resolved_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sar_status ON sensitive_access_requests(status);
+        CREATE INDEX IF NOT EXISTS idx_sar_requester ON sensitive_access_requests(requester_instance_id);
+      `);
+      // Identity values (instance_id, machine_id, etc.) are written by
+      // initDatabase() after this migration runs — no SQL needed here.
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

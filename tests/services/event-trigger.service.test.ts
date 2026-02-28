@@ -18,7 +18,7 @@ let repos: Repositories;
 let service: EventTriggerService;
 
 beforeEach(() => {
-    db = createTestDb();
+    ({ db } = createTestDb());
     repos = createRepositories(db);
     service = new EventTriggerService(repos);
 });

@@ -10,7 +10,9 @@ import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService } from "./services/index.js";
-import { SERVER_VERSION } from "./constants.js";
+import { SERVER_VERSION, CFG_INSTANCE_ID, CFG_INSTANCE_LABEL, CFG_INSTANCE_CREATED_AT, CFG_MACHINE_ID, CFG_SHARING_MODE, CFG_SHARING_TYPES, DEFAULT_SHARING_MODE, DEFAULT_SHARING_TYPES } from "./constants.js";
+import { getMachineId, generateInstanceLabel } from "./utils.js";
+import { randomUUID } from "crypto";
 
 export interface Services {
   compaction: CompactionService;
@@ -124,6 +126,20 @@ export function initDatabase(projectRoot: string): DatabaseType {
     update: new UpdateService(_repos, SERVER_VERSION),
     agentRules: new AgentRulesService(projectRoot),
   };
+
+  // ─── Instance Identity ─────────────────────────────────────────────
+  // Generate stable identity on first run after v17 migration.
+  // These values live in the config table and never change once set.
+  const existingId = _repos.config.get(CFG_INSTANCE_ID);
+  if (!existingId) {
+    const ts = now();
+    _repos.config.set(CFG_INSTANCE_ID, randomUUID(), ts);
+    _repos.config.set(CFG_INSTANCE_LABEL, generateInstanceLabel(projectRoot), ts);
+    _repos.config.set(CFG_INSTANCE_CREATED_AT, ts, ts);
+    _repos.config.set(CFG_MACHINE_ID, getMachineId(), ts);
+    _repos.config.set(CFG_SHARING_MODE, DEFAULT_SHARING_MODE, ts);
+    _repos.config.set(CFG_SHARING_TYPES, JSON.stringify(DEFAULT_SHARING_TYPES), ts);
+  }
 
   return _db;
 }

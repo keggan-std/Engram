@@ -312,3 +312,62 @@ export interface BackupInfo {
   created_at: string;
   database_version: number;
 }
+
+// ─── Cross-Instance Types ───────────────────────────────────────────────────
+
+export type SharingMode = "none" | "read" | "full";
+
+export interface InstanceStats {
+  sessions: number;
+  decisions: number;
+  file_notes: number;
+  tasks: number;
+  conventions: number;
+  changes: number;
+  db_size_kb: number;
+}
+
+export interface InstanceEntry {
+  instance_id: string;
+  label: string;
+  project_root: string;
+  db_path: string;
+  schema_version: number;
+  server_version: string;
+  sharing_mode: SharingMode;
+  sharing_types: string[];
+  stats: InstanceStats;
+  last_heartbeat: string;
+  status: "active" | "stale" | "stopped";
+  pid: number | null;
+  machine_id: string;
+}
+
+export interface InstanceRegistry {
+  schema_version: number;
+  machine_id: string;
+  last_updated: string;
+  instances: Record<string, InstanceEntry>;
+}
+
+export interface SensitiveAccessRequest {
+  id: number;
+  requester_instance_id: string;
+  requester_label: string | null;
+  target_type: string;
+  target_ids: string;     // JSON array of IDs
+  reason: string | null;
+  status: "pending" | "approved" | "denied";
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+}
+
+export interface CrossInstanceSearchResult {
+  source_instance_id: string;
+  source_label: string;
+  source_project: string;
+  type: string;
+  results: Record<string, unknown>[];
+  total: number;
+}

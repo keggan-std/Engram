@@ -16,8 +16,9 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 15; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
+export const DB_VERSION = 17; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
                               // V12 checkpoints, V13 content_hash, V14 executive_summary, V15 agent specializations
+                              // V16 targeted broadcasts, V17 instance identity
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
@@ -146,6 +147,26 @@ export const CFG_AUTO_UPDATE_CHANGELOG = "auto_update_changelog";
 export const CFG_AUTO_UPDATE_SKIP_VERSION = "auto_update_skip_version";
 export const CFG_AUTO_UPDATE_REMIND_AFTER = "auto_update_remind_after";
 export const CFG_AUTO_UPDATE_NOTIFY_LEVEL = "auto_update_notify_level"; // "major" | "minor" | "patch"
+
+// Config keys — instance identity & cross-instance
+export const CFG_INSTANCE_ID = "instance_id";
+export const CFG_INSTANCE_LABEL = "instance_label";
+export const CFG_INSTANCE_CREATED_AT = "instance_created_at";
+export const CFG_MACHINE_ID = "machine_id";
+export const CFG_SHARING_MODE = "sharing_mode";       // "none" | "read" | "full"
+export const CFG_SHARING_TYPES = "sharing_types";     // JSON array of table names
+export const CFG_SENSITIVE_KEYS = "sensitive_keys";   // JSON array of decision/convention IDs marked sensitive
+
+// Instance registry
+export const INSTANCE_REGISTRY_DIR = ".engram";
+export const INSTANCE_REGISTRY_FILE = "instances.json";
+export const HEARTBEAT_INTERVAL_MS = 60_000;           // 60 seconds
+export const STALE_THRESHOLD_MS = 5 * 60_000;          // 5 minutes
+export const PRUNE_THRESHOLD_MS = 7 * 24 * 60 * 60_000; // 7 days
+
+// Sharing defaults
+export const DEFAULT_SHARING_MODE = "none";
+export const DEFAULT_SHARING_TYPES = ["decisions", "conventions"];
 
 // Architecture layer detection patterns
 export const LAYER_PATTERNS: Record<string, RegExp[]> = {

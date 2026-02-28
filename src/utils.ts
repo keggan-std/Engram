@@ -463,3 +463,67 @@ export function getFileHash(filePath: string, projectRoot?: string): string | nu
     return null;
   }
 }
+
+// ============================================================================
+// Cross-Instance Identity Utilities
+// ============================================================================
+
+/**
+ * Derive a stable machine ID from OS hardware identifiers.
+ * Falls back to a SHA-256 hash of hostname + username + homedir.
+ *
+ * Priority:
+ *   Windows:  MachineGuid from registry
+ *   macOS:    IOPlatformUUID via ioreg
+ *   Linux:    /etc/machine-id or /var/lib/dbus/machine-id
+ *   Fallback: SHA-256(hostname + username + homedir)
+ */
+export function getMachineId(): string {
+  const platform = os.platform();
+
+  try {
+    if (platform === "win32") {
+      // Windows: read MachineGuid from registry
+      const output = execSync(
+        'reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid',
+        { encoding: "utf-8", timeout: 5000 }
+      ).trim();
+      const match = output.match(/MachineGuid\s+REG_SZ\s+(.+)/);
+      if (match?.[1]) return match[1].trim();
+    } else if (platform === "darwin") {
+      // macOS: IOPlatformUUID
+      const output = execSync(
+        "ioreg -rd1 -c IOPlatformExpertDevice",
+        { encoding: "utf-8", timeout: 5000 }
+      );
+      const match = output.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
+      if (match?.[1]) return match[1];
+    } else {
+      // Linux: /etc/machine-id
+      for (const p of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+        if (fs.existsSync(p)) {
+          const id = fs.readFileSync(p, "utf-8").trim();
+          if (id) return id;
+        }
+      }
+    }
+  } catch {
+    // Fall through to fallback
+  }
+
+  // Fallback: hash of deterministic OS info
+  const raw = `${os.hostname()}:${os.userInfo().username}:${os.homedir()}`;
+  return createHash("sha256").update(raw).digest("hex").slice(0, 32);
+}
+
+/**
+ * Generate a human-readable instance label from the project root path.
+ * Format: "<project_basename>" (e.g., "Engram", "fundi-smart", "MCP-Builder")
+ */
+export function generateInstanceLabel(projectRoot: string): string {
+  const basename = path.basename(projectRoot);
+  // Clean up: replace spaces/special chars, limit length
+  const cleaned = basename.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return cleaned || "unknown-project";
+}
+

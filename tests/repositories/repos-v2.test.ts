@@ -16,7 +16,7 @@ import { SnapshotRepo } from "../../src/repositories/snapshot.repo.js";
 let db: Database.Database;
 
 beforeEach(() => {
-    db = createTestDb();
+    ({ db } = createTestDb());
 });
 
 // ─── ConfigRepo ───────────────────────────────────────────────────────────────

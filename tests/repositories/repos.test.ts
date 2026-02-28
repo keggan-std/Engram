@@ -16,7 +16,7 @@ import { FileNotesRepo } from "../../src/repositories/file-notes.repo.js";
 let db: Database.Database;
 
 beforeEach(() => {
-    db = createTestDb();
+    ({ db } = createTestDb());
 });
 
 // ─── Sessions ────────────────────────────────────────────────────────

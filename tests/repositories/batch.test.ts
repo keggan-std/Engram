@@ -11,7 +11,7 @@ import { DecisionsRepo } from "../../src/repositories/decisions.repo.js";
 let db: Database.Database;
 
 beforeEach(() => {
-    db = createTestDb();
+    ({ db } = createTestDb());
 });
 
 // ─── FileNotesRepo.upsertBatch ──────────────────────────────────────
