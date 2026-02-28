@@ -74,6 +74,14 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   remove_hooks:       { desc: "Remove Engram git hook from .git/hooks/post-commit.", params: "{}" },
   generate_report:    { desc: "Generate a comprehensive project memory report.", params: "{}" },
   get_global_knowledge: { desc: "Retrieve cross-project global KB entries.", params: "{}" },
+  // Cross-instance actions
+  discover_instances: { desc: "List all Engram instances on this machine with status, sharing, and stats.", params: "{ include_stale?: boolean }" },
+  get_instance_info:  { desc: "Get detailed info about this instance (identity, sharing config, stats).", params: "{}" },
+  set_sharing:        { desc: "Configure sharing mode for this instance.", params: "{ mode: 'none'|'read'|'full', types?: string[] }" },
+  query_instance:     { desc: "Query memory from another instance (decisions, conventions, file_notes, tasks, sessions, changes).", params: "{ instance_id: string, type?: string, query?: string, limit?: number, status?: string }" },
+  search_all_instances: { desc: "Search across all sharing instances at once.", params: "{ query: string, scope?: string, limit?: number }" },
+  import_from_instance: { desc: "Import records from another instance (requires full sharing).", params: "{ instance_id: string, type?: string, ids?: number[] }" },
+  set_instance_label: { desc: "Set a human-readable label for this instance.", params: "{ label: string }" },
 };
 
 // ─── BM25-style keyword search over catalog entries ──────────────────────────

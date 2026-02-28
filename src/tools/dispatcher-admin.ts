@@ -12,6 +12,8 @@ import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
 import path from "path";
 import fs from "fs";
 
+import { coerceStringArray } from "../utils.js";
+
 const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
   "export", "import",
@@ -21,6 +23,10 @@ const ADMIN_ACTIONS = [
   "scan_project",
   "install_hooks", "remove_hooks",
   "generate_report", "get_global_knowledge",
+  // Cross-instance actions
+  "discover_instances", "get_instance_info", "set_sharing",
+  "query_instance", "search_all_instances",
+  "import_from_instance", "set_instance_label",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -30,7 +36,7 @@ export function registerAdminDispatcher(server: McpServer): void {
       title: "Admin Operations",
       description: `Engram admin and maintenance operations. Use only when needed.
 
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project.`,
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances.`,
       inputSchema: {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
@@ -45,6 +51,17 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         force_refresh: z.boolean().optional(),
         max_depth: z.number().int().optional(),
         prune_old: z.boolean().optional(),
+        // Cross-instance params
+        instance_id: z.string().optional().describe("Target instance UUID for cross-instance queries."),
+        type: z.string().optional().describe("Memory type to query: decisions, conventions, file_notes, tasks, sessions, changes."),
+        query: z.string().optional().describe("Search query for cross-instance search."),
+        limit: z.number().int().optional().describe("Max results to return."),
+        mode: z.string().optional().describe("Sharing mode: none, read, or full."),
+        types: coerceStringArray().optional().describe("Sharing types array: decisions, conventions, file_notes, tasks, etc."),
+        label: z.string().optional().describe("Human-readable instance label."),
+        include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
+        ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
+        status: z.string().optional().describe("Filter by status."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
@@ -312,6 +329,175 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             message: globalDecisions.length === 0 && globalConventions.length === 0
               ? "Global KB is empty. Use record_decision with export_global:true to populate."
               : `Global KB: ${globalDecisions.length} decision(s), ${globalConventions.length} convention(s).`,
+          });
+        }
+
+        // ─── DISCOVER INSTANCES ──────────────────────────────────────────
+        case "discover_instances": {
+          const instances = services.crossInstance.discoverInstances(params.include_stale ?? true);
+          const selfId = services.registry.getInstanceId();
+          return success({
+            self_instance_id: selfId,
+            instances: instances.map(i => ({
+              instance_id: i.instance_id,
+              label: i.label,
+              project_root: i.project_root,
+              sharing_mode: i.sharing_mode,
+              sharing_types: i.sharing_types,
+              status: i.status,
+              stats: i.stats,
+              last_heartbeat: i.last_heartbeat,
+              is_self: i.instance_id === selfId,
+            })),
+            total: instances.length,
+            message: `Found ${instances.length} Engram instance(s) on this machine.`,
+          });
+        }
+
+        // ─── GET INSTANCE INFO ───────────────────────────────────────────
+        case "get_instance_info": {
+          const self = services.registry.getSelf();
+          return success({
+            ...self,
+            message: `Instance '${self.label}' (${self.instance_id}). Sharing: ${self.sharing_mode}. Types: ${self.sharing_types.join(", ")}.`,
+          });
+        }
+
+        // ─── SET SHARING ─────────────────────────────────────────────────
+        case "set_sharing": {
+          const sharingMode = params.mode as "none" | "read" | "full" | undefined;
+          if (!sharingMode || !["none", "read", "full"].includes(sharingMode)) {
+            return error("mode is required: 'none', 'read', or 'full'.");
+          }
+          const sharingTypes = params.types as string[] | undefined;
+          services.registry.setSharing(sharingMode, sharingTypes);
+          const updated = services.registry.getSelf();
+          return success({
+            sharing_mode: updated.sharing_mode,
+            sharing_types: updated.sharing_types,
+            message: `Sharing updated to '${updated.sharing_mode}'. Types: ${updated.sharing_types.join(", ")}.`,
+          });
+        }
+
+        // ─── QUERY INSTANCE ─────────────────────────────────────────────
+        case "query_instance": {
+          if (!params.instance_id) return error("instance_id is required.");
+          const queryType = params.type ?? "decisions";
+          try {
+            let result: { source: { label: string; instance_id: string; project_root: string }; results: Record<string, unknown>[] };
+            switch (queryType) {
+              case "decisions":
+                result = services.crossInstance.queryDecisions(params.instance_id, { query: params.query, limit: params.limit, status: params.status });
+                break;
+              case "conventions":
+                result = services.crossInstance.queryConventions(params.instance_id, { category: params.query });
+                break;
+              case "file_notes":
+                result = services.crossInstance.queryFileNotes(params.instance_id, { filePath: params.query, limit: params.limit });
+                break;
+              case "tasks":
+                result = services.crossInstance.queryTasks(params.instance_id, { status: params.status, limit: params.limit });
+                break;
+              case "sessions":
+                result = services.crossInstance.querySessions(params.instance_id, { limit: params.limit });
+                break;
+              case "changes":
+                result = services.crossInstance.queryChanges(params.instance_id, { limit: params.limit, filePath: params.query });
+                break;
+              default:
+                return error(`Unknown query type '${queryType}'. Valid: decisions, conventions, file_notes, tasks, sessions, changes.`);
+            }
+            return success({
+              source: { label: result.source.label, instance_id: result.source.instance_id, project: result.source.project_root },
+              type: queryType,
+              results: result.results,
+              count: result.results.length,
+              message: `${result.results.length} ${queryType} from '${result.source.label}'.`,
+            });
+          } catch (e) {
+            return error((e as Error).message);
+          }
+        }
+
+        // ─── SEARCH ALL INSTANCES ────────────────────────────────────────
+        case "search_all_instances": {
+          if (!params.query) return error("query is required for search_all_instances.");
+          const results = services.crossInstance.searchAll(params.query, { scope: params.scope, limit: params.limit });
+          const totalResults = results.reduce((sum, r) => sum + r.total, 0);
+          return success({
+            query: params.query,
+            scope: params.scope ?? "decisions",
+            results: results.map(r => ({
+              source_label: r.source_label,
+              source_project: r.source_project,
+              source_instance_id: r.source_instance_id,
+              count: r.total,
+              items: r.results,
+            })),
+            instances_searched: results.length,
+            total_results: totalResults,
+            message: `Found ${totalResults} result(s) across ${results.length} instance(s) for "${params.query}".`,
+          });
+        }
+
+        // ─── IMPORT FROM INSTANCE ────────────────────────────────────────
+        case "import_from_instance": {
+          if (!params.instance_id) return error("instance_id is required.");
+          const importType = params.type ?? "decisions";
+          try {
+            const { source, records } = services.crossInstance.extractForImport(
+              params.instance_id,
+              importType,
+              params.ids
+            );
+            // The actual import writes happen here; extractForImport only reads
+            let imported = 0;
+            const ts = now();
+            if (importType === "decisions" && records.length > 0) {
+              const stmt = db.prepare(
+                "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status) VALUES (?, ?, ?, ?, ?, ?, ?)"
+              );
+              const insertAll = db.transaction(() => {
+                for (const r of records) {
+                  stmt.run(null, ts, `[imported from ${source.label}] ${r.decision}`, r.rationale ?? null, r.affected_files ?? null, r.tags ?? null, "active");
+                  imported++;
+                }
+              });
+              insertAll();
+            } else if (importType === "conventions" && records.length > 0) {
+              const stmt = db.prepare(
+                "INSERT INTO conventions (session_id, timestamp, category, rule, enforced) VALUES (?, ?, ?, ?, ?)"
+              );
+              const insertAll = db.transaction(() => {
+                for (const r of records) {
+                  stmt.run(null, ts, r.category ?? "imported", `[from ${source.label}] ${r.rule}`, r.enforced ?? 1);
+                  imported++;
+                }
+              });
+              insertAll();
+            } else {
+              return error(`Import of '${importType}' is not yet supported. Supported: decisions, conventions.`);
+            }
+            return success({
+              source_label: source.label,
+              source_instance_id: source.instance_id,
+              type: importType,
+              imported,
+              message: `Imported ${imported} ${importType} from '${source.label}'.`,
+            });
+          } catch (e) {
+            return error((e as Error).message);
+          }
+        }
+
+        // ─── SET INSTANCE LABEL ──────────────────────────────────────────
+        case "set_instance_label": {
+          if (!params.label) return error("label is required.");
+          services.registry.setLabel(params.label);
+          return success({
+            label: params.label,
+            instance_id: services.registry.getInstanceId(),
+            message: `Instance label updated to '${params.label}'.`,
           });
         }
 
