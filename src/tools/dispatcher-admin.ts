@@ -27,6 +27,9 @@ const ADMIN_ACTIONS = [
   "discover_instances", "get_instance_info", "set_sharing",
   "query_instance", "search_all_instances",
   "import_from_instance", "set_instance_label",
+  // Sensitive data actions
+  "mark_sensitive", "unmark_sensitive", "list_sensitive",
+  "request_access", "approve_access", "deny_access", "list_access_requests",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -36,7 +39,7 @@ export function registerAdminDispatcher(server: McpServer): void {
       title: "Admin Operations",
       description: `Engram admin and maintenance operations. Use only when needed.
 
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances.`,
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests.`,
       inputSchema: {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
@@ -62,6 +65,11 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
         ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
         status: z.string().optional().describe("Filter by status."),
+        reason: z.string().optional().describe("Reason for access request."),
+        request_id: z.number().int().optional().describe("Access request ID for approve/deny."),
+        resolved_by: z.string().optional().describe("Who approved/denied (default: human)."),
+        requester_instance_id: z.string().optional().describe("Instance ID of the requester."),
+        requester_label: z.string().optional().describe("Human-readable label of the requester."),
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
@@ -498,6 +506,111 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             label: params.label,
             instance_id: services.registry.getInstanceId(),
             message: `Instance label updated to '${params.label}'.`,
+          });
+        }
+
+        // ─── MARK SENSITIVE ──────────────────────────────────────────────
+        case "mark_sensitive": {
+          if (!params.type) return error("type is required (e.g. decisions, conventions, file_notes).");
+          if (!params.ids || params.ids.length === 0) return error("ids array is required.");
+          const lockResult = services.sensitiveData.lockRecords(params.type, params.ids);
+          return success({
+            type: params.type,
+            ids: params.ids,
+            newly_locked: lockResult.locked,
+            message: `Marked ${lockResult.locked} ${params.type} record(s) as sensitive.`,
+          });
+        }
+
+        // ─── UNMARK SENSITIVE ────────────────────────────────────────────
+        case "unmark_sensitive": {
+          if (!params.type) return error("type is required.");
+          if (!params.ids || params.ids.length === 0) return error("ids array is required.");
+          const unlockResult = services.sensitiveData.unlockRecords(params.type, params.ids);
+          return success({
+            type: params.type,
+            ids: params.ids,
+            unlocked: unlockResult.unlocked,
+            message: `Unmarked ${unlockResult.unlocked} ${params.type} record(s) from sensitive.`,
+          });
+        }
+
+        // ─── LIST SENSITIVE ──────────────────────────────────────────────
+        case "list_sensitive": {
+          const summary = services.sensitiveData.getSummary();
+          const total = summary.reduce((s, e) => s + e.count, 0);
+          return success({
+            locked_items: summary,
+            total_locked: total,
+            message: total > 0 ? `${total} record(s) locked across ${summary.length} type(s).` : "No sensitive records locked.",
+          });
+        }
+
+        // ─── REQUEST ACCESS ──────────────────────────────────────────────
+        case "request_access": {
+          if (!params.requester_instance_id) return error("requester_instance_id is required.");
+          if (!params.type) return error("type is required.");
+          if (!params.ids || params.ids.length === 0) return error("ids array is required.");
+          const request = services.sensitiveData.createAccessRequest(
+            params.requester_instance_id,
+            params.requester_label ?? null,
+            params.type,
+            params.ids,
+            params.reason ?? null,
+          );
+          return success({
+            request_id: request.id,
+            status: request.status,
+            message: `Access request #${request.id} created (pending human approval).`,
+          });
+        }
+
+        // ─── APPROVE ACCESS ──────────────────────────────────────────────
+        case "approve_access": {
+          if (!params.request_id) return error("request_id is required.");
+          const approved = services.sensitiveData.approveRequest(params.request_id, params.resolved_by ?? "human");
+          if (!approved) return error(`Access request #${params.request_id} not found.`);
+          return success({
+            request_id: approved.id,
+            status: approved.status,
+            resolved_at: approved.resolved_at,
+            resolved_by: approved.resolved_by,
+            message: `Access request #${approved.id} approved.`,
+          });
+        }
+
+        // ─── DENY ACCESS ─────────────────────────────────────────────────
+        case "deny_access": {
+          if (!params.request_id) return error("request_id is required.");
+          const denied = services.sensitiveData.denyRequest(params.request_id, params.resolved_by ?? "human");
+          if (!denied) return error(`Access request #${params.request_id} not found.`);
+          return success({
+            request_id: denied.id,
+            status: denied.status,
+            resolved_at: denied.resolved_at,
+            resolved_by: denied.resolved_by,
+            message: `Access request #${denied.id} denied.`,
+          });
+        }
+
+        // ─── LIST ACCESS REQUESTS ────────────────────────────────────────
+        case "list_access_requests": {
+          const statusFilter = params.status as "pending" | "approved" | "denied" | undefined;
+          const requests = services.sensitiveData.listRequests(statusFilter);
+          return success({
+            requests: requests.map(r => ({
+              id: r.id,
+              requester: r.requester_label ?? r.requester_instance_id,
+              type: r.target_type,
+              ids: JSON.parse(r.target_ids),
+              reason: r.reason,
+              status: r.status,
+              requested_at: r.requested_at,
+              resolved_at: r.resolved_at,
+              resolved_by: r.resolved_by,
+            })),
+            count: requests.length,
+            message: `${requests.length} access request(s)${statusFilter ? ` (${statusFilter})` : ''}.`,
           });
         }
 

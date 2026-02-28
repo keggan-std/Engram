@@ -82,6 +82,14 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   search_all_instances: { desc: "Search across all sharing instances at once.", params: "{ query: string, scope?: string, limit?: number }" },
   import_from_instance: { desc: "Import records from another instance (requires full sharing).", params: "{ instance_id: string, type?: string, ids?: number[] }" },
   set_instance_label: { desc: "Set a human-readable label for this instance.", params: "{ label: string }" },
+  // Sensitive data actions
+  mark_sensitive:     { desc: "Lock specific records as sensitive (hidden from cross-instance queries).", params: "{ type: string, ids: number[] }" },
+  unmark_sensitive:   { desc: "Remove sensitivity lock from specific records.", params: "{ type: string, ids: number[] }" },
+  list_sensitive:     { desc: "List all currently locked sensitive records by type.", params: "{}" },
+  request_access:     { desc: "Create a pending access request for sensitive data (requires human approval).", params: "{ requester_instance_id: string, type: string, ids: number[], requester_label?: string, reason?: string }" },
+  approve_access:     { desc: "Approve a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
+  deny_access:        { desc: "Deny a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
+  list_access_requests: { desc: "List access requests, optionally filtered by status.", params: "{ status?: 'pending'|'approved'|'denied' }" },
 };
 
 // ─── BM25-style keyword search over catalog entries ──────────────────────────
