@@ -9,3 +9,4 @@ export { EventTriggerService } from "./event-trigger.service.js";
 export { UpdateService } from "./update.service.js";
 export type { UpdateNotification } from "./update.service.js";
 export { AgentRulesService } from "./agent-rules.service.js";
+export { InstanceRegistryService } from "./instance-registry.service.js";

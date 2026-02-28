@@ -9,7 +9,7 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
-import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService } from "./services/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService } from "./services/index.js";
 import { SERVER_VERSION, CFG_INSTANCE_ID, CFG_INSTANCE_LABEL, CFG_INSTANCE_CREATED_AT, CFG_MACHINE_ID, CFG_SHARING_MODE, CFG_SHARING_TYPES, DEFAULT_SHARING_MODE, DEFAULT_SHARING_TYPES } from "./constants.js";
 import { getMachineId, generateInstanceLabel } from "./utils.js";
 import { randomUUID } from "crypto";
@@ -21,6 +21,7 @@ export interface Services {
   events: EventTriggerService;
   update: UpdateService;
   agentRules: AgentRulesService;
+  registry: InstanceRegistryService;
 }
 
 let _db: DatabaseType | null = null;
@@ -125,6 +126,7 @@ export function initDatabase(projectRoot: string): DatabaseType {
     events: new EventTriggerService(_repos),
     update: new UpdateService(_repos, SERVER_VERSION),
     agentRules: new AgentRulesService(projectRoot),
+    registry: new InstanceRegistryService(_repos.config, projectRoot, _db),
   };
 
   // ─── Instance Identity ─────────────────────────────────────────────
@@ -140,6 +142,12 @@ export function initDatabase(projectRoot: string): DatabaseType {
     _repos.config.set(CFG_SHARING_MODE, DEFAULT_SHARING_MODE, ts);
     _repos.config.set(CFG_SHARING_TYPES, JSON.stringify(DEFAULT_SHARING_TYPES), ts);
   }
+
+  // ─── Instance Registry ─────────────────────────────────────────────
+  // Register in ~/.engram/instances.json and start periodic heartbeat.
+  // The heartbeat timer is unref'd so it won't prevent Node from exiting.
+  _services.registry.register();
+  _services.registry.startHeartbeat();
 
   return _db;
 }

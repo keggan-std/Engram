@@ -16,7 +16,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SERVER_NAME, SERVER_VERSION } from "./constants.js";
-import { initDatabase, getProjectRoot } from "./database.js";
+import { initDatabase, getProjectRoot, getServices } from "./database.js";
 import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer/index.js";
@@ -181,9 +181,18 @@ async function main(): Promise<void> {
   // Fire-and-forget — never blocks startup or any tool call.
   // Results are stored in the config repo and surfaced on the next engram_start_session.
   try {
-    const { getServices } = await import("./database.js");
     getServices().update.scheduleCheck();
   } catch { /* update check is best-effort */ }
+
+  // ─── Graceful shutdown ─────────────────────────────────────────────
+  // Mark this instance as stopped in the registry so other instances
+  // don't see a dead PID with "active" status.
+  const shutdownHandler = (): void => {
+    try { getServices().registry.shutdown(); } catch { /* best-effort */ }
+  };
+  process.on("SIGINT", () => { shutdownHandler(); process.exit(0); });
+  process.on("SIGTERM", () => { shutdownHandler(); process.exit(0); });
+  process.on("beforeExit", shutdownHandler);
 }
 
 // ─── Run ──────────────────────────────────────────────────────────────
