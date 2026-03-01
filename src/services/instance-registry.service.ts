@@ -75,6 +75,7 @@ export class InstanceRegistryService {
     private config: ConfigRepo,
     private projectRoot: string,
     private db: DatabaseType,
+    private dbFileName: string = DB_FILE_NAME,
   ) {}
 
   // ─── Core Identity ─────────────────────────────────────────────────
@@ -142,7 +143,7 @@ export class InstanceRegistryService {
 
     let dbSizeKb = 0;
     try {
-      const dbPath = path.join(this.projectRoot, DB_DIR_NAME, DB_FILE_NAME);
+      const dbPath = path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName);
       const stat = fs.statSync(dbPath);
       dbSizeKb = Math.round(stat.size / 1024);
     } catch { /* file may not exist during tests */ }
@@ -174,7 +175,7 @@ export class InstanceRegistryService {
       instance_id: this.getInstanceId(),
       label: this.config.get(CFG_INSTANCE_LABEL) ?? "unknown",
       project_root: this.projectRoot,
-      db_path: path.join(this.projectRoot, DB_DIR_NAME, DB_FILE_NAME),
+      db_path: path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName),
       schema_version: DB_VERSION,
       server_version: SERVER_VERSION,
       sharing_mode: (this.config.get(CFG_SHARING_MODE) ?? DEFAULT_SHARING_MODE) as SharingMode,

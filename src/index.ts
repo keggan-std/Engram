@@ -134,10 +134,16 @@ async function main(): Promise<void> {
   const projectRoot = findProjectRoot();
   log.info(`Project root: ${projectRoot}`);
 
+  // --ide=<key>: global-only IDEs inject this so they open a per-IDE DB shard
+  // (memory-{key}.db) instead of competing on the shared memory.db write lock.
+  const ideArg = args.find(a => a.startsWith("--ide="));
+  const ideKey = ideArg ? ideArg.slice("--ide=".length).trim() : undefined;
+
   // Initialize database (synchronous — better-sqlite3 is sync throughout)
   // FLAW-5 FIX: initDatabase is no longer async; no await needed
-  initDatabase(projectRoot);
-  log.info(`Database initialized at ${projectRoot}/.engram/memory.db`);
+  initDatabase(projectRoot, ideKey);
+  const dbLabel = ideKey ? `memory-${ideKey}.db` : "memory.db";
+  log.info(`Database initialized at ${projectRoot}/.engram/${dbLabel}`);
 
   // Create MCP server
   const server = new McpServer({
