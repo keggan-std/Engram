@@ -521,7 +521,10 @@ export function getMachineId(): string {
  * Format: "<project_basename>" (e.g., "Engram", "fundi-smart", "MCP-Builder")
  */
 export function generateInstanceLabel(projectRoot: string): string {
-  const basename = path.basename(projectRoot);
+  // Normalize backslashes → forward slashes so path.basename works correctly
+  // on both Windows hosts and Linux CI runners regardless of input format.
+  const normalized = projectRoot.replace(/\\/g, "/");
+  const basename = path.basename(normalized);
   // Clean up: replace spaces/special chars, limit length
   const cleaned = basename.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   return cleaned || "unknown-project";
