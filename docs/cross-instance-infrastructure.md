@@ -1,13 +1,624 @@
-# Engram Cross-Instance Infrastructure — Design & Implementation Plan
+# Engram Cross-Instance Infrastructure
 
-> **Author:** Claude (session #33)  
-> **Date:** February 28, 2026  
-> **Status:** Proposed  
-> **Prerequisite for:** Dashboard (Phase 1), Cloud Sync, Memory Sharing
+# Engram Cross-Instance Infrastructure
+
+> **Status:** Implemented (main, v1.7.3+)  
+> **Implemented:** March 1, 2026 (sessions #33–#36)  
+> **Migration:** v17  
+> **Test coverage:** 77 new tests across 4 test files
 
 ---
 
-## 1. The Problem — Today's Landscape
+## Overview
+
+When you use Engram across multiple projects and IDEs, each project gets its own isolated `.engram/memory.db`. This infrastructure lets those instances **discover each other**, **share knowledge**, and **protect sensitive data** — all without a server, without network access, and without forcing any instance to expose anything it doesn't want to.
+
+### What this enables
+
+| Question | Tool |
+|---|---|
+| What Engram instances exist on my machine? | `discover_instances` |
+| What decisions did I make in another project? | `query_instance` |
+| Search "authentication" across all my projects | `search_all_instances` |
+| Import a decision from another project | `import_from_instance` |
+| Lock some decisions so other instances can't see them | `mark_sensitive` |
+| Allow another instance to request access to locked data | `request_access` / `approve_access` |
+
+### Design principles
+
+- **Federated, not centralized** — each database is its own source of truth
+- **Opt-in sharing** — default is `sharing_mode: "none"`; nothing leaks unless you explicitly allow it
+- **Read-only cross-instance access** — foreign databases are opened with `{ readonly: true }`; writes to another instance's DB are architecturally impossible
+- **No HTTP server needed** — all communication is direct SQLite file access; instances don't need to be running to be queried
+- **Machine-local only** — `~/.engram/instances.json` is a local registry; no network traffic
+
+---
+
+## 1. Instance Identity
+
+Every Engram database gets a **stable, unique identity** the first time it initializes after migration v17.
+
+### Identity fields (stored in the `config` table)
+
+| Key | Example | Notes |
+|-----|---------|-------|
+| `instance_id` | `a3f7c2b1-0d4e-4f2a-9c1b-abc123def456` | UUID v4, never changes after first set |
+| `instance_label` | `vscode-Engram` | Auto-generated, human-editable |
+| `instance_created_at` | `2026-02-28T22:40:00.000Z` | ISO timestamp, immutable |
+| `machine_id` | `abc123def456...` | OS hardware fingerprint |
+| `sharing_mode` | `none` | `none` \| `read` \| `full` |
+| `sharing_types` | `["decisions","conventions"]` | JSON array |
+
+### Label format
+
+Labels are auto-generated as `<ide>-<project>`:
+
+```
+vscode-Engram
+cursor-fundi-smart
+claude-MCP-Builder
+```
+
+You can override any label at any time:
+
+```js
+engram_admin({ action: "set_instance_label", label: "my-main-project" })
+```
+
+### Machine ID derivation
+
+| OS | Source |
+|----|--------|
+| Windows | Registry: `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` |
+| macOS | `ioreg -rd1 -c IOPlatformExpertDevice` → `IOPlatformUUID` |
+| Linux | `/etc/machine-id` or `/var/lib/dbus/machine-id` |
+| Fallback | SHA-256 of `hostname + username + homedir` |
+
+---
+
+## 2. Instance Registry
+
+All instances on a machine register themselves in `~/.engram/instances.json`. This is the machine-wide phonebook.
+
+### Registry file format
+
+```json
+{
+  "schema_version": 1,
+  "machine_id": "abc123...",
+  "last_updated": "2026-03-01T00:22:00.000Z",
+  "instances": {
+    "a3f7c2b1-...": {
+      "instance_id": "a3f7c2b1-...",
+      "label": "vscode-Engram",
+      "project_root": "C:/Users/RG/repo/Engram",
+      "db_path": "C:/Users/RG/repo/Engram/.engram/memory.db",
+      "schema_version": 17,
+      "server_version": "1.7.3",
+      "sharing_mode": "read",
+      "sharing_types": ["decisions", "conventions"],
+      "stats": {
+        "sessions": 36,
+        "decisions": 19,
+        "file_notes": 54,
+        "tasks": 8,
+        "conventions": 4,
+        "db_size_kb": 572
+      },
+      "last_heartbeat": "2026-03-01T00:22:00.000Z",
+      "status": "active",
+      "pid": 12345
+    }
+  }
+}
+```
+
+### Registry lifecycle
+
+| Event | What happens |
+|-------|-------------|
+| `initDatabase()` called | Instance registers itself (upsert) |
+| Every 60 seconds (while running) | Heartbeat updates `last_heartbeat` + stats |
+| Process exits | Status set to `"stopped"`, PID cleared |
+| Read by another instance | Entries with heartbeat > 5 min are marked `"stale"` |
+| Entries > 7 days stale | Auto-pruned from registry |
+
+### Concurrency safety
+
+Writes use **atomic temp-file-then-rename**. Each instance only ever writes its own entry — it never modifies another instance's data in the registry file.
+
+---
+
+## 3. Sharing Configuration
+
+Sharing is off by default. You control it per-instance.
+
+### Sharing modes
+
+| Mode | Meaning |
+|------|---------|
+| `none` (default) | Instance is invisible to cross-instance queries |
+| `read` | Other instances can read your shared types |
+| `full` | Other instances can read + import from your shared types |
+
+### Enabling sharing
+
+```js
+// Share decisions and conventions (read access for others)
+engram_admin({ action: "set_sharing", mode: "read" })
+
+// Share with specific types
+engram_admin({ action: "set_sharing", mode: "read", types: ["decisions", "file_notes"] })
+
+// Enable full sharing (allows import)
+engram_admin({ action: "set_sharing", mode: "full" })
+
+// Disable sharing (back to private)
+engram_admin({ action: "set_sharing", mode: "none" })
+```
+
+### Shareable types
+
+| Type | Content |
+|------|---------|
+| `decisions` | Architectural decisions + rationale |
+| `conventions` | Coding conventions |
+| `file_notes` | File metadata and AI summaries |
+| `tasks` | Task board |
+| `sessions` | Session history |
+| `changes` | Change log |
+
+Default `sharing_types` when enabling: `["decisions", "conventions"]`.
+
+---
+
+## 4. Discovering Instances
+
+### List all instances on this machine
+
+```js
+engram_admin({ action: "discover_instances" })
+```
+
+Response:
+
+```json
+{
+  "instances": [
+    {
+      "instance_id": "a3f7c2b1",
+      "label": "vscode-Engram",
+      "project_root": "C:/Users/RG/repo/Engram",
+      "status": "active",
+      "sharing_mode": "read",
+      "sharing_types": ["decisions", "conventions"],
+      "last_heartbeat": "2026-03-01T00:22:00.000Z",
+      "pid": 12345,
+      "is_current": true,
+      "stats": { "sessions": 36, "decisions": 19, "file_notes": 54 }
+    },
+    {
+      "instance_id": "b4e8d3c2",
+      "label": "cursor-fundi-smart",
+      "project_root": "C:/Users/RG/Documents/Apps/fundi-smart",
+      "status": "stale",
+      "sharing_mode": "none",
+      ...
+    }
+  ],
+  "total": 10,
+  "active": 1,
+  "stale": 4,
+  "stopped": 5,
+  "sharing": 1
+}
+```
+
+**Status values:**
+- `active` — running right now (PID alive, recent heartbeat)
+- `stale` — heartbeat > 5 minutes ago (process may have crashed)
+- `stopped` — cleanly shut down
+
+Include stale instances:
+
+```js
+engram_admin({ action: "discover_instances", include_stale: true })
+```
+
+### Get this instance's own info
+
+```js
+engram_admin({ action: "get_instance_info" })
+```
+
+---
+
+## 5. Querying Other Instances
+
+Only works against instances with `sharing_mode: "read"` or `"full"` and the requested type in their `sharing_types`. If the target instance has `sharing_mode: "none"`, the call returns a permission error.
+
+### Query a specific type
+
+```js
+// Get decisions from another instance
+engram_admin({
+  action: "query_instance",
+  instance_id: "b4e8d3c2",
+  type: "decisions"
+})
+
+// Search decisions with a query filter
+engram_admin({
+  action: "query_instance",
+  instance_id: "b4e8d3c2",
+  type: "decisions",
+  query: "authentication",
+  limit: 10
+})
+
+// Get conventions
+engram_admin({ action: "query_instance", instance_id: "b4e8d3c2", type: "conventions" })
+
+// Get file notes
+engram_admin({ action: "query_instance", instance_id: "b4e8d3c2", type: "file_notes" })
+
+// Get tasks filtered by status
+engram_admin({ action: "query_instance", instance_id: "b4e8d3c2", type: "tasks", status: "open" })
+```
+
+**Supported query types:** `decisions`, `conventions`, `file_notes`, `tasks`, `sessions`, `changes`
+
+Response always includes a `source` block:
+
+```json
+{
+  "source": {
+    "label": "cursor-fundi-smart",
+    "instance_id": "b4e8d3c2",
+    "project": "C:/Users/RG/Documents/Apps/fundi-smart"
+  },
+  "type": "decisions",
+  "results": [ ... ],
+  "count": 5
+}
+```
+
+### Search across all sharing instances
+
+```js
+engram_admin({ action: "search_all_instances", query: "authentication" })
+```
+
+Searches all instances with `sharing_mode ≠ "none"` in parallel. Results are grouped by source instance:
+
+```json
+{
+  "query": "authentication",
+  "results": [
+    {
+      "source_label": "cursor-fundi-smart",
+      "source_instance_id": "b4e8d3c2",
+      "count": 2,
+      "items": [ ... ]
+    },
+    {
+      "source_label": "vscode-AuraShield",
+      "source_instance_id": "c5f9e4d3",
+      "count": 3,
+      "items": [ ... ]
+    }
+  ],
+  "instances_searched": 2,
+  "total_results": 5
+}
+```
+
+Narrow the search scope:
+
+```js
+engram_admin({ action: "search_all_instances", query: "auth", scope: "decisions", limit: 5 })
+```
+
+---
+
+## 6. Importing from Another Instance
+
+Importing copies records from a foreign instance into your local database. Requires `sharing_mode: "full"` on the source instance.
+
+```js
+// Import all decisions from another instance
+engram_admin({ action: "import_from_instance", instance_id: "b4e8d3c2", type: "decisions" })
+
+// Import specific records by ID
+engram_admin({ action: "import_from_instance", instance_id: "b4e8d3c2", type: "decisions", ids: [3, 7, 12] })
+
+// Import conventions
+engram_admin({ action: "import_from_instance", instance_id: "b4e8d3c2", type: "conventions" })
+```
+
+Imported records are tagged with the source label to preserve provenance:
+
+```
+[imported from cursor-fundi-smart] Use JWT with 1-hour expiry for API auth
+```
+
+**Supported import types:** `decisions`, `conventions`
+
+---
+
+## 7. Sensitive Data Protection
+
+You can lock specific records so they are **hidden from cross-instance queries** by default. A remote instance can then file an access request, which you approve or deny as the human owner.
+
+### Locking records
+
+```js
+// Lock specific decision IDs as sensitive
+engram_admin({ action: "mark_sensitive", type: "decisions", ids: [5, 12, 18] })
+
+// Lock file notes
+engram_admin({ action: "mark_sensitive", type: "file_notes", ids: [3] })
+```
+
+Locked records are **completely invisible** to `query_instance`, `search_all_instances`, and `import_from_instance`. They are not filtered — they do not appear in results at all.
+
+### Viewing locked records
+
+```js
+engram_admin({ action: "list_sensitive" })
+```
+
+Response:
+
+```json
+{
+  "locked_items": [
+    { "type": "decisions", "count": 3, "ids": [5, 12, 18] },
+    { "type": "file_notes", "count": 1, "ids": [3] }
+  ],
+  "total_locked": 4
+}
+```
+
+### Unlocking records
+
+```js
+engram_admin({ action: "unmark_sensitive", type: "decisions", ids: [12] })
+```
+
+### Access requests
+
+A remote agent can request access to locked records. The request is stored in your database as `"pending"` and shown when you list access requests. You (the human) approve or deny it.
+
+**Remote agent creates a request:**
+
+```js
+// On the instance that WANTS access to locked data on another instance
+engram_admin({
+  action: "request_access",
+  requester_instance_id: "b4e8d3c2",
+  requester_label: "cursor-fundi-smart",
+  type: "decisions",
+  ids: [5, 12],
+  reason: "Need architecture decisions for auth implementation"
+})
+```
+
+Response:
+
+```json
+{ "request_id": 1, "status": "pending" }
+```
+
+**Human reviews and approves/denies (on the instance that OWNS the data):**
+
+```js
+// List pending requests
+engram_admin({ action: "list_access_requests", status: "pending" })
+
+// Approve request #1
+engram_admin({ action: "approve_access", request_id: 1 })
+
+// Deny request #1
+engram_admin({ action: "deny_access", request_id: 1 })
+```
+
+**List all requests (any status):**
+
+```js
+engram_admin({ action: "list_access_requests" })
+engram_admin({ action: "list_access_requests", status: "approved" })
+engram_admin({ action: "list_access_requests", status: "denied" })
+```
+
+---
+
+## 8. How It Works Internally
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                  ~/.engram/instances.json                        │
+│                  (machine-wide registry)                         │
+└──────────┬───────────────┬──────────────────┬───────────────────┘
+           │               │                  │
+    ┌──────┴──────┐  ┌─────┴──────┐  ┌───────┴──────┐
+    │  Instance A  │  │ Instance B │  │  Instance C  │
+    │  sharing:    │  │ sharing:   │  │  sharing:    │
+    │  "read"      │  │ "none"     │  │  "full"      │
+    │  .engram/    │  │ .engram/   │  │  .engram/    │
+    │  memory.db   │  │ memory.db  │  │  memory.db   │
+    └─────────────┘  └────────────┘  └──────────────┘
+             ↑                               │
+             │    readonly SQLite open       │
+             └───────────────────────────────┘
+                   (direct file access)
+```
+
+No HTTP server. No sockets. Instance A opens Instance C's `.db` file directly using `better-sqlite3({ readonly: true })`, runs a read query, and closes (or caches the handle for 5 minutes).
+
+### Service layer
+
+| Service | Location | Responsibility |
+|---------|----------|---------------|
+| `InstanceRegistryService` | `src/services/instance-registry.service.ts` | Manages `instances.json` — register, heartbeat, list, prune |
+| `CrossInstanceService` | `src/services/cross-instance.service.ts` | Opens foreign DBs read-only, runs queries, caches handles |
+| `SensitiveDataService` | `src/services/sensitive-data.service.ts` | Lock management + access request lifecycle |
+
+### DB handle cache
+
+`CrossInstanceService` caches open read-only DB handles with a **5-minute TTL** and a **max of 10 simultaneous handles**. This avoids the overhead of reopening databases on every query while not leaking handles indefinitely.
+
+### Sensitive data storage
+
+- **Locks** are stored as a JSON array in the `config` table under key `sensitive_keys`. Format: `[{"type":"decisions","ids":[5,12]},...]`
+- **Access requests** are stored in the `sensitive_access_requests` table (created by migration v17), with columns: `id`, `requester_instance_id`, `requester_label`, `target_type`, `target_ids` (JSON), `reason`, `status`, `requested_at`, `resolved_at`, `resolved_by`
+
+---
+
+## 9. All Admin Actions Reference
+
+### Discovery & identity
+
+| Action | Params | Description |
+|--------|--------|-------------|
+| `discover_instances` | `{ include_stale?: boolean }` | List all instances on this machine with status, sharing, and stats |
+| `get_instance_info` | `{}` | Detailed info about this instance |
+| `set_instance_label` | `{ label: string }` | Rename this instance |
+| `set_sharing` | `{ mode: "none"\|"read"\|"full", types?: string[] }` | Configure what this instance shares |
+
+### Cross-instance queries
+
+| Action | Params | Description |
+|--------|--------|-------------|
+| `query_instance` | `{ instance_id, type, query?, limit?, status? }` | Read memory from another instance |
+| `search_all_instances` | `{ query, scope?, limit? }` | FTS search across all sharing instances |
+| `import_from_instance` | `{ instance_id, type?, ids? }` | Copy records from another instance (requires `full` sharing) |
+
+### Sensitive data
+
+| Action | Params | Description |
+|--------|--------|-------------|
+| `mark_sensitive` | `{ type: string, ids: number[] }` | Lock records — hidden from all cross-instance queries |
+| `unmark_sensitive` | `{ type: string, ids: number[] }` | Remove sensitivity lock |
+| `list_sensitive` | `{}` | Show all currently locked records by type |
+| `request_access` | `{ requester_instance_id, type, ids, requester_label?, reason? }` | Submit a pending access request for locked data |
+| `approve_access` | `{ request_id: number, resolved_by?: string }` | Approve a pending access request (human action) |
+| `deny_access` | `{ request_id: number, resolved_by?: string }` | Deny a pending access request (human action) |
+| `list_access_requests` | `{ status?: "pending"\|"approved"\|"denied" }` | View access requests |
+
+---
+
+## 10. Quick-Start Walkthrough
+
+### Scenario: you have two projects and want to share decisions between them
+
+**Step 1 — Check what instances exist:**
+
+```js
+engram_admin({ action: "discover_instances" })
+```
+
+Note the `instance_id` of the other project (e.g., `b4e8d3c2`).
+
+**Step 2 — Enable sharing on the source project (run this inside that project's IDE session):**
+
+```js
+engram_admin({ action: "set_sharing", mode: "read" })
+```
+
+**Step 3 — Query from your current project:**
+
+```js
+engram_admin({ action: "query_instance", instance_id: "b4e8d3c2", type: "decisions" })
+```
+
+**Step 4 — Search across everything:**
+
+```js
+engram_admin({ action: "search_all_instances", query: "database schema design" })
+```
+
+**Step 5 — Import a useful decision locally:**
+
+First enable full sharing on the source:
+
+```js
+// on source instance
+engram_admin({ action: "set_sharing", mode: "full" })
+```
+
+Then import:
+
+```js
+// on your instance
+engram_admin({ action: "import_from_instance", instance_id: "b4e8d3c2", type: "decisions", ids: [7] })
+```
+
+---
+
+### Scenario: protecting a sensitive decision
+
+**Step 1 — Find the decision IDs you want to protect:**
+
+```js
+engram_memory({ action: "get_decisions" })
+// note the id values of sensitive decisions
+```
+
+**Step 2 — Lock them:**
+
+```js
+engram_admin({ action: "mark_sensitive", type: "decisions", ids: [11, 15] })
+```
+
+Those decisions will no longer appear in any cross-instance query from any other instance.
+
+**Step 3 — Review what's locked at any time:**
+
+```js
+engram_admin({ action: "list_sensitive" })
+```
+
+---
+
+## 11. Security Notes
+
+| Concern | How it's handled |
+|---------|-----------------|
+| Privacy by default | `sharing_mode: "none"` is the default — nothing is exposed unless you explicitly change it |
+| Foreign DB writes | SQLite opened with `{ readonly: true }` — write attempts throw at the database driver level |
+| Concurrent reads | SQLite WAL mode supports unlimited concurrent readers — no locking issues |
+| Registry race conditions | Atomic temp-file + rename write; each instance only writes its own registry entry |
+| Stale entries | Auto-pruned after 7 days; manual prune available |
+| Sensitive data | Locked records are absent from results entirely — not masked, not redacted, simply not returned |
+| Access request approval | Requires explicit human action (`approve_access`) — agents cannot self-approve |
+| Machine scope | Registry and all queries are machine-local; nothing crosses a network boundary |
+
+---
+
+## 12. File Map
+
+| File | Role |
+|------|------|
+| `src/constants.ts` | Config key constants (`CFG_INSTANCE_ID`, `CFG_SHARING_MODE`, `CFG_SENSITIVE_KEYS`, `HEARTBEAT_INTERVAL_MS`, etc.) |
+| `src/migrations.ts` | Migration v17 — creates `sensitive_access_requests` table |
+| `src/types.ts` | `InstanceEntry`, `InstanceRegistry`, `SensitiveAccessRequest`, `CrossInstanceSearchResult` |
+| `src/utils.ts` | `getMachineId()`, `generateInstanceLabel()` |
+| `src/database.ts` | Initializes identity on first run; wires `InstanceRegistryService`, `CrossInstanceService`, `SensitiveDataService` into `Services` |
+| `src/index.ts` | Shutdown hooks — calls `crossInstance.closeAll()` then `registry.shutdown()` |
+| `src/services/instance-registry.service.ts` | Registry CRUD; heartbeat loop; prune |
+| `src/services/cross-instance.service.ts` | Read-only foreign DB queries; handle cache; permission checks |
+| `src/services/sensitive-data.service.ts` | Lock management; access request lifecycle; `filterSensitive()` |
+| `src/services/index.ts` | Barrel export for all 9 services |
+| `src/tools/dispatcher-admin.ts` | 29 admin actions (7 discovery/sharing + 7 sensitive data) |
+| `src/tools/find.ts` | `ADMIN_CATALOG` — 29 entries including all cross-instance actions |
+| `tests/unit/instance-identity.test.ts` | 13 tests — identity generation, label, machine ID |
+| `tests/services/instance-registry.test.ts` | 20 tests — registry lifecycle, heartbeat, prune |
+| `tests/services/cross-instance.test.ts` | 14 tests — foreign DB queries, sharing checks, cache |
+| `tests/services/sensitive-data.test.ts` | 30 tests — locks, filter, access request lifecycle |
+
 
 Your machine has **10 isolated Engram databases** and **3 IDE installations**, each completely blind to the others:
 
