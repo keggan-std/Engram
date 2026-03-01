@@ -38,10 +38,15 @@ export function getInstallerVersion(): string {
  * workspace path before spawning the server, so findProjectRoot() receives the
  * correct root with no heuristics needed.
  *
+ * ideKey: when provided (global-only IDEs without workspaceVar), `--ide=<key>` is
+ * injected so the server opens a per-IDE DB shard (memory-{key}.db), eliminating
+ * write-lock contention between different IDEs concurrently open on the same project.
+ *
  * @param ide        IDE definition (controls type, cmd wrapper, workspaceVar, etc.)
  * @param universal  When true, adds --mode=universal to args.
+ * @param ideKey     When provided, adds --ide=<ideKey> to args.
  */
-export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<string, any> {
+export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: string): Record<string, any> {
     const entry: Record<string, any> = {};
 
     // Some IDEs require explicit "type": "stdio"
@@ -60,6 +65,13 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false): Record<s
     if (ide.workspaceVar) {
         baseArgs.push(`--project-root=${ide.workspaceVar}`);
     }
+
+  // Per-IDE DB shard: global installs on IDEs without workspaceVar inject --ide=<key>
+  // so each IDE type opens memory-{key}.db, preventing write-lock contention between
+  // different IDEs open on the same project simultaneously.
+  if (ideKey) {
+    baseArgs.push(`--ide=${ideKey}`);
+  }
 
     // Windows cmd /c wrapper for npx (npx is a .cmd on Windows)
     if (ide.requiresCmdWrapper) {
@@ -127,7 +139,7 @@ export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
  *   "upgraded"        — updated from an older tracked version to the current one
  *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era)
  */
-export function addToConfig(configPath: string, ide: IdeDefinition, universal = false): InstallResult {
+export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): InstallResult {
     let config: Record<string, any>;
     try {
         config = readJson(configPath) ?? {};
@@ -149,7 +161,7 @@ export function addToConfig(configPath: string, ide: IdeDefinition, universal = 
     const key = ide.configKey;
     if (!config[key]) config[key] = {};
 
-    const newEntry = makeEngramEntry(ide, universal);
+    const newEntry = makeEngramEntry(ide, universal, ideKey);
     const currentVersion = newEntry._engram_version as string;
 
     if (config[key].engram) {

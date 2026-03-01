@@ -55,8 +55,8 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   // ── First attempt ──────────────────────────────────────────────────
   try {
     const db = new Database(dbPath);
-    db.pragma("busy_timeout = 5000");  // FLAW-2: set BEFORE any other pragma
-    db.pragma("journal_mode = WAL");   // smoke-test (waits up to 5 s if busy)
+    db.pragma("busy_timeout = 15000"); // 15 s — multi-IDE shards may still share a file
+    db.pragma("journal_mode = WAL");   // smoke-test (waits up to 15 s if busy)
     db.pragma("journal_mode = DELETE"); // reset so caller sets it properly
     return db;
   } catch (err: unknown) {
@@ -77,7 +77,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
 
   try {
     const db = new Database(dbPath);
-    db.pragma("busy_timeout = 5000");  // FLAW-2: set here too
+    db.pragma("busy_timeout = 15000"); // 15 s
     db.pragma("journal_mode = WAL");
     db.pragma("journal_mode = DELETE");
     console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
@@ -91,28 +91,36 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try { fs.renameSync(dbPath, dbPath + `.corrupt.${ts}.bak`); } catch { /* best-effort */ }
   console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
   const freshDb = new Database(dbPath);
-  freshDb.pragma("busy_timeout = 5000");  // FLAW-2: set on fresh DB too
+  freshDb.pragma("busy_timeout = 15000"); // 15 s
   return freshDb;
 }
 
 // FLAW-5 FIX: initDatabase is synchronous (better-sqlite3 is sync throughout).
 // The misleading async/Promise wrapper is removed — callers no longer need
 // to remember to await a function that never actually awaits anything.
-export function initDatabase(projectRoot: string): DatabaseType {
+//
+// ideKey: when provided, the DB is opened as memory-{ideKey}.db instead of memory.db.
+// Global-only IDEs (no workspaceVar) pass their IDE key so each IDE type gets its own
+// shard, eliminating write-lock contention between different IDEs on the same project.
+export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType {
   _projectRoot = projectRoot;
   const dbDir = path.join(projectRoot, DB_DIR_NAME);
   fs.mkdirSync(dbDir, { recursive: true });
   ensureGitignore(projectRoot);
 
-  _dbPath = path.join(dbDir, DB_FILE_NAME);
+  // Per-IDE shard: global installs without workspaceVar use memory-{ideKey}.db
+  const dbFileName = ideKey ? `memory-${ideKey}.db` : DB_FILE_NAME;
+  _dbPath = path.join(dbDir, dbFileName);
   _db = openDatabaseWithRecovery(_dbPath);
 
   // Performance pragmas (busy_timeout already set inside openDatabaseWithRecovery)
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
   _db.pragma("synchronous = NORMAL");
-  _db.pragma("cache_size = -8000"); // 8MB cache
-  _db.pragma("busy_timeout = 5000"); // re-affirm after WAL mode switch
+  _db.pragma("cache_size = -8000");       // 8MB cache
+  _db.pragma("wal_autocheckpoint = 100"); // checkpoint every 100 pages for faster readers
+  _db.pragma("mmap_size = 67108864");     // 64MB memory-mapped I/O
+  _db.pragma("busy_timeout = 15000");     // 15 s — handles same-IDE multi-window contention
 
   // Run versioned migrations
   runMigrations(_db);
@@ -121,7 +129,7 @@ export function initDatabase(projectRoot: string): DatabaseType {
   _repos = createRepositories(_db);
 
   // Initialize services
-  const registryService = new InstanceRegistryService(_repos.config, projectRoot, _db);
+  const registryService = new InstanceRegistryService(_repos.config, projectRoot, _db, dbFileName);
   _services = {
     compaction: new CompactionService(_db, _repos),
     scan: new ProjectScanService(_repos),

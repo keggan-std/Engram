@@ -1,3 +1,32 @@
+# v1.8.1 — Hotfix: Multi-IDE Database Isolation
+
+**Released:** v1.8.1 — March 1, 2026
+
+## Overview
+
+v1.8.1 is a hotfix addressing **write-lock contention** when multiple IDEs are open on the same project simultaneously. No new features. Zero breaking changes.
+
+### What was broken
+
+Every IDE spawns its own `engram-mcp-server` process. All global IDE installs (Claude Desktop, Windsurf, Cline, JetBrains, etc.) were opening the same `{project}/.engram/memory.db`. SQLite allows one writer at a time; under concurrent write load processes blocked synchronously for up to 5 s (the old `busy_timeout`), causing MCP client disconnects and lost writes.
+
+### How it's fixed
+
+| Fix | Detail |
+|-----|--------|
+| **Per-IDE DB sharding** | Global IDEs without `workspaceVar` now get `--ide=<key>` injected by the installer. The server opens `memory-{key}.db` — separate file per IDE type, zero write-lock competition |
+| **`busy_timeout` 5 s → 15 s** | Handles the residual case: same IDE, multiple windows on same project still share one shard |
+| **WAL pragmas** | Added `wal_autocheckpoint=100` and `mmap_size=64MB` for faster readers and smaller WAL files |
+| **Instance registry uses real db path** | `~/.engram/instances.json` now records the actual shard filename; cross-instance discovery works correctly for all shards |
+
+See [docs/hotfix-1.8.1.md](docs/hotfix-1.8.1.md) for the full technical write-up.
+
+### Upgrade
+
+Re-run `npx -y engram-mcp-server install` to pick up the `--ide=<key>` injection in your global MCP config entries. Existing project-level installs and `memory.db` files are untouched.
+
+---
+
 # v1.8.0 — Cross-Instance Infrastructure & Sensitive Data Protection
 
 **Released:** v1.8.0 — March 1, 2026
