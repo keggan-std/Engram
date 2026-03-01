@@ -1,4 +1,103 @@
+# v1.8.0 — Cross-Instance Infrastructure & Sensitive Data Protection
+
+**Released:** v1.8.0 — March 1, 2026
+
+## Overview
+
+v1.8.0 introduces **cross-instance infrastructure** — the foundation for multi-project memory federation. Engram instances on the same machine can now discover each other, query each other's memory (opt-in), and protect sensitive records behind a human-approval gate. Zero breaking changes.
+
+| Feature | Actions |
+|---------|---------|
+| Discover all Engram instances on this machine | `discover_instances` |
+| Query decisions/conventions/tasks from another project | `query_instance` |
+| Full-text search across all sharing projects | `search_all_instances` |
+| Import records with provenance from another instance | `import_from_instance` |
+| Lock records from cross-instance visibility | `mark_sensitive` / `unmark_sensitive` |
+| Human-gated access request workflow | `request_access` / `approve_access` / `deny_access` |
+
+---
+
+## What's New
+
+### Instance Identity (Migration v17)
+
+Every Engram database now gets a **stable, unique identity** on first startup after upgrading. No manual steps — identities are generated automatically and stored in the `config` table.
+
+| Key | Value | Notes |
+|-----|-------|-------|
+| `instance_id` | UUID v4 | Immutable after first set |
+| `instance_label` | e.g. `vscode-Engram` | Auto-generated, user-editable |
+| `instance_created_at` | ISO timestamp | Immutable |
+| `machine_id` | OS hardware fingerprint | Windows/macOS/Linux/fallback |
+| `sharing_mode` | `none` \| `read` \| `full` | Default: `none` |
+| `sharing_types` | JSON array | Default: `["decisions","conventions"]` |
+
+Migration v17 also creates the `sensitive_access_requests` table.
+
+### Machine-Wide Instance Registry (`~/.engram/instances.json`)
+
+All running instances register in a shared JSON file under the user's home directory. Each instance maintains a 60-second heartbeat. The registry tracks status (`active` / `stale` / `stopped`), stats, and sharing config for every known instance. Writes are atomic (temp file + rename). Stale entries (heartbeat > 5 min) are surfaced as such; entries older than 7 days are auto-pruned.
+
+### Cross-Instance Queries — 7 New `engram_admin` Actions
+
+Foreign databases are opened with `{ readonly: true }` — writes to another instance's DB are architecturally impossible. A 5-minute DB handle cache (max 10 slots) avoids repeated open/close overhead. FTS5 full-text search with `LIKE` fallback for simpler schemas.
+
+| Action | Description |
+|--------|-------------|
+| `discover_instances` | List all instances on this machine with status, sharing config, and live stats |
+| `get_instance_info` | Detailed identity + sharing config for the current instance |
+| `set_sharing` | Set `sharing_mode` (`none`/`read`/`full`) and optional `sharing_types` |
+| `query_instance` | Read `decisions`/`conventions`/`file_notes`/`tasks`/`sessions`/`changes` from another instance |
+| `search_all_instances` | FTS federated search across all sharing instances simultaneously |
+| `import_from_instance` | Copy records locally with provenance tagging — requires `"full"` sharing on source |
+| `set_instance_label` | Rename this instance's human-readable label |
+
+### Sensitive Data Protection — 7 New `engram_admin` Actions
+
+Locked records are **completely absent** from all cross-instance query results — not masked, not redacted. Access can only be granted by explicit human approval.
+
+| Action | Description |
+|--------|-------------|
+| `mark_sensitive` | Lock specific record IDs by type — hidden from all cross-instance queries |
+| `unmark_sensitive` | Remove sensitivity locks |
+| `list_sensitive` | View all currently locked records grouped by type |
+| `request_access` | Remote instance submits a pending access request with reason |
+| `approve_access` | Human approves a pending request — grants the requester visibility |
+| `deny_access` | Human denies a pending request |
+| `list_access_requests` | List requests filtered by `pending` / `approved` / `denied` |
+
+---
+
+## Security
+
+- **Privacy by default** — `sharing_mode: "none"` until you explicitly change it
+- **Read-only foreign access** — `better-sqlite3({ readonly: true })` enforced at driver level
+- **No network** — all cross-instance communication is local filesystem access
+- **Human-gated access** — agents cannot self-approve sensitive data requests
+- **Atomic registry writes** — each instance only writes its own entry, never others'
+
+---
+
+## Upgrade Notes
+
+1. **Automatic** — migration v17 runs on first startup; instance identity is written once, never overwritten.
+2. **Sharing is off by default** — existing instances are invisible to cross-instance queries until you run `set_sharing`.
+3. **All IDE instances** (VS Code, Cursor, Claude Desktop) share `~/.engram/instances.json` automatically.
+
+---
+
+## Stats
+
+- **196 tests** total (77 new in this release)
+- **14 new `engram_admin` actions** (7 cross-instance + 7 sensitive data)
+- **3 new services** — `InstanceRegistryService`, `CrossInstanceService`, `SensitiveDataService`
+- **3,161 lines added** across 21 files
+- Build: clean TypeScript, zero warnings
+
+---
+
 # v1.7.2 — Hotfix: Enum Validation, Targeted Broadcasts & API Correctness
+
 
 **Released:** v1.7.2
 
