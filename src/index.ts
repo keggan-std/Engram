@@ -20,6 +20,8 @@ import { initDatabase, getProjectRoot, getServices } from "./database.js";
 import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer/index.js";
+import { ensureToken } from "./http-auth.js";
+import { createHttpServer } from "./http-server.js";
 
 // ─── v1.6 Lean Surface — 4 dispatcher tools ──────────────────────────────────
 import { registerSessionDispatcher } from "./tools/sessions.js";
@@ -128,6 +130,37 @@ async function main(): Promise<void> {
   if (args.includes("record-commit")) {
     await runRecordCommit();
     return;
+  }
+
+  // ─── HTTP / Dashboard mode ─────────────────────────────────────────
+  const isHttpMode =
+    args.includes("--mode=http") ||
+    args.includes("--mode=dashboard") ||
+    process.env.ENGRAM_MODE === "http" ||
+    process.env.ENGRAM_MODE === "dashboard";
+
+  if (isHttpMode) {
+    const projectRoot = findProjectRoot();
+    const ideArg2 = args.find(a => a.startsWith("--ide="));
+    const ideKey2 = ideArg2 ? ideArg2.slice("--ide=".length).trim() : undefined;
+    initDatabase(projectRoot, ideKey2);
+
+    const portArg = args.find(a => a.startsWith("--port="));
+    const port = portArg ? Number(portArg.slice("--port=".length)) : 7432;
+
+    const token = ensureToken(projectRoot);
+    const { app } = createHttpServer({ port, token });
+
+    app.listen(port, "127.0.0.1", async () => {
+      log.info(`Engram Dashboard API listening on http://127.0.0.1:${port}`);
+      if (!args.includes("--no-open")) {
+        const { default: open } = await import("open");
+        open(`http://localhost:${port}?token=${token}`).catch(() => {});
+      }
+    });
+
+    try { getServices().update.scheduleCheck(); } catch { /* best-effort */ }
+    return; // keep process alive — app.listen holds the event loop
   }
 
   // Detect project root
