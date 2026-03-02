@@ -6,7 +6,7 @@ interface Props { data: ActivityPoint[]; }
 export default function ActivityChart({ data }: Props) {
   if (!data.length) return null;
   return (
-    <ResponsiveContainer width="100%" height={140}>
+    <ResponsiveContainer width="100%" height={200}>
       <BarChart data={data} margin={{ top: 4, right: 0, bottom: 0, left: -24 }}>
         <XAxis
           dataKey="date"
@@ -29,9 +29,15 @@ export default function ActivityChart({ data }: Props) {
             fontSize: 12,
             color: "var(--text-primary)",
           }}
-          cursor={{ fill: "var(--bg-hover)" }}
+          cursor={false}
         />
-        <Bar dataKey="count" fill="var(--accent)" radius={[3, 3, 0, 0]} maxBarSize={18} />
+        <Bar
+          dataKey="count"
+          fill="var(--accent)"
+          radius={[3, 3, 0, 0]}
+          maxBarSize={18}
+          activeBar={{ fill: "var(--accent-hover)" }}
+        />
       </BarChart>
     </ResponsiveContainer>
   );

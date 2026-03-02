@@ -36,6 +36,7 @@ export default function Shell({ currentPage, onNavigate, children }: ShellProps)
           flex: 1,
           overflow: "auto",
           padding: "var(--space-6)",
+          overflowAnchor: "none",
         }}>
           {children}
         </main>

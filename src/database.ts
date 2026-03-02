@@ -56,8 +56,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s — multi-IDE shards may still share a file
-    db.pragma("journal_mode = WAL");   // smoke-test (waits up to 15 s if busy)
-    db.pragma("journal_mode = DELETE"); // reset so caller sets it properly
+    db.pragma("journal_mode = WAL");   // set WAL (or confirm already in WAL) — no-op if already WAL
     return db;
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? "";
@@ -79,7 +78,6 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s
     db.pragma("journal_mode = WAL");
-    db.pragma("journal_mode = DELETE");
     console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
     return db;
   } catch (err: unknown) {

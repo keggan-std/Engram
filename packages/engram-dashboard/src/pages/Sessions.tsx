@@ -5,7 +5,7 @@ import EmptyState from "../components/EmptyState.js";
 import { useUiStore } from "../stores/ui.store.js";
 
 export default function Sessions() {
-  const { data, isLoading, isError } = useQuery<{ data: Session[] }>({
+  const { data, isLoading, isError } = useQuery<Session[]>({
     queryKey: ["sessions"],
     queryFn: () => api.get("/sessions?limit=100"),
   });
@@ -14,7 +14,7 @@ export default function Sessions() {
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load sessions.</p></div>;
 
-  const sessions = data?.data ?? [];
+  const sessions = data ?? [];
 
   return (
     <div className="page">
@@ -23,6 +23,12 @@ export default function Sessions() {
         <EmptyState title="No sessions yet" message="Sessions are recorded automatically when an agent calls session start." />
       ) : (
         <table className="data-table">
+          <colgroup>
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "16%" }} />
+            <col />
+          </colgroup>
           <thead>
             <tr>
               <th>Agent</th>
@@ -38,10 +44,10 @@ export default function Sessions() {
                 onClick={() => selectEntity({ type: "session", data: s as unknown as Record<string, unknown> })}
                 className={selected?.data?.id === s.id ? "row-selected" : "row-clickable"}
               >
-                <td className="text-mono">{s.agent_name}</td>
-                <td className="text-faint">{new Date(s.started_at).toLocaleString()}</td>
-                <td className="text-faint">{s.ended_at ? new Date(s.ended_at).toLocaleString() : "—"}</td>
-                <td className="text-wrap">{s.summary ?? "—"}</td>
+                <td className="text-mono cell-clip">{s.agent_name}</td>
+                <td className="text-faint cell-clip">{new Date(s.started_at).toLocaleString()}</td>
+                <td className="text-faint cell-clip">{s.ended_at ? new Date(s.ended_at).toLocaleString() : "—"}</td>
+                <td className="text-faint cell-wrap">{s.summary ?? "—"}</td>
               </tr>
             ))}
           </tbody>

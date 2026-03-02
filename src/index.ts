@@ -149,6 +149,10 @@ async function main(): Promise<void> {
     const portArg = args.find(a => a.startsWith("--port="));
     const port = portArg ? Number(portArg.slice("--port=".length)) : 7432;
 
+    // --open-port=N: open the browser on a different port (e.g. Vite dev server at 5173)
+    const openPortArg = args.find(a => a.startsWith("--open-port="));
+    const openPort = openPortArg ? Number(openPortArg.slice("--open-port=".length)) : port;
+
     const token = ensureToken(projectRoot);
     const { app } = createHttpServer({ port, token });
 
@@ -161,6 +165,47 @@ async function main(): Promise<void> {
     const httpServer = createHttpNodeServer(app);
     const wss = new WebSocketServer({ noServer: true });
     broadcaster.attach(wss);
+
+    // ── Auto-shutdown on inactivity ───────────────────────────────────
+    // Gracefully exits when the dashboard is closed and the server has been
+    // idle (no WS clients, no HTTP requests) for IDLE_TIMEOUT_MS.
+    const IDLE_TIMEOUT_MS  = 5 * 60 * 1000; // 5 min: hard idle cutoff
+    const WS_GRACE_MS      = 2 * 60 * 1000; // 2 min: grace after last WS client leaves
+    let lastActivityMs = Date.now();
+    let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetActivity = () => { lastActivityMs = Date.now(); };
+
+    const doShutdown = () => {
+      log.info("[Dashboard] No active clients — shutting down.");
+      wss.close();
+      httpServer.close(() => process.exit(0));
+      // Force-exit if graceful close stalls
+      setTimeout(() => process.exit(0), 3000).unref();
+    };
+
+    const scheduleShutdown = (delay: number) => {
+      if (shutdownTimer) clearTimeout(shutdownTimer);
+      shutdownTimer = setTimeout(() => {
+        shutdownTimer = null;
+        // Final check: bail out if clients reconnected
+        if (wss.clients.size > 0) return;
+        const idle = Date.now() - lastActivityMs;
+        if (idle >= IDLE_TIMEOUT_MS) {
+          doShutdown();
+        } else {
+          // Not idle long enough yet — wait out the remainder
+          scheduleShutdown(IDLE_TIMEOUT_MS - idle);
+        }
+      }, delay);
+    };
+
+    const cancelShutdown = () => {
+      if (shutdownTimer) { clearTimeout(shutdownTimer); shutdownTimer = null; }
+    };
+
+    // Track HTTP activity (fires on every request, before any route handlers)
+    httpServer.on("request", resetActivity);
 
     // Validate token + route upgrade to /ws only
     httpServer.on("upgrade", (req, socket, head) => {
@@ -179,9 +224,20 @@ async function main(): Promise<void> {
       });
     });
 
-    // Send a "connected" ping on every new WS connection
+    // Track WS activity; manage shutdown timer based on client presence
     wss.on("connection", (ws) => {
+      resetActivity();
+      cancelShutdown(); // dashboard is open — cancel any pending shutdown
       ws.send(JSON.stringify({ type: "connected", ts: Date.now() }));
+
+      ws.on("message", resetActivity);
+
+      ws.on("close", () => {
+        if (wss.clients.size === 0) {
+          // Last client disconnected: wait WS_GRACE_MS, then begin idle check
+          scheduleShutdown(WS_GRACE_MS);
+        }
+      });
     });
 
     httpServer.listen(port, "127.0.0.1", async () => {
@@ -189,7 +245,7 @@ async function main(): Promise<void> {
       log.info(`WebSocket live-updates on ws://127.0.0.1:${port}/ws`);
       if (!args.includes("--no-open")) {
         const { default: open } = await import("open");
-        open(`http://localhost:${port}?token=${token}`).catch(() => {});
+        open(`http://localhost:${openPort}?token=${token}`).catch(() => {});
       }
     });
 

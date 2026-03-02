@@ -29,6 +29,7 @@
 - [How Engram Works?](#how-engram-works)
 - [Installation](#installation)
 - [Features](#features)
+- [Dashboard](#dashboard)
 - [Architecture](#architecture)
 - [Tools Reference](#tools-reference)
 - [AI Agent Instructions](#ai-agent-instructions)
@@ -525,6 +526,60 @@ No cloud. No telemetry. No authentication surface. Memory lives in a local SQLit
 ---
 
 > For the full version history and per-release breakdown, see [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
+---
+
+## Dashboard
+
+Engram ships with a built-in **visual dashboard** — a React SPA that gives you a live window into your agent's memory without touching the CLI.
+
+### Starting the Dashboard
+
+```bash
+npm run dashboard
+```
+
+This builds the server, installs dashboard dependencies, and starts both the API and the Vite dev server concurrently. The terminal prints the full URL including the auth token:
+
+```
+[api]  Engram HTTP server running on port 7432
+[ui]   VITE ready in 320ms
+
+  ➜  Local:   http://localhost:5173?token=<token>
+```
+
+Open the printed URL directly — the token is embedded in the link and required for access.
+
+> **Security note:** The dashboard is intended for local development. The token prevents other local processes from reading your memory data. Do not expose ports `5173` or `7432` to a network.
+
+### Pages
+
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Overview — session count, task totals, decisions, and change volume at a glance. Clickable stat cards navigate to the relevant page. Instance cards show per-database stats with expand/collapse. Activity chart displays recent change volume. |
+| **Tasks** | All persistent work items with status, priority, and tags. |
+| **Decisions** | Architectural decisions with rationale, affected files, and dependency chains. |
+| **Changes** | Full change history — every file edit recorded by agents and git hooks. |
+| **Conventions** | Project standards enforced every session. |
+| **File Notes** | Agent-generated file intelligence — purpose, layer, complexity, and executive summary. |
+| **Sessions** | Past session summaries with agent names and timestamps. |
+| **Events** | Scheduled and triggered events, including context-pressure warnings. |
+| **Milestones** | Named project milestones. |
+| **Audit** | Raw event log for debugging and auditing. |
+| **Settings** | Runtime config management — view and update config keys live. |
+
+### Dashboard Features
+
+- **Live updates** — WebSocket connection delivers real-time pushes when any memory record changes. A live badge in the header shows connection status.
+- **Cmd+K palette** — keyboard-driven quick navigation to any page.
+- **Theme toggle** — dark/light mode, persisted to `localStorage`.
+- **Toast notifications** — non-blocking feedback for actions and live events.
+- **Detail panel** — click any table row to expand full content in a side panel.
+- **Token auth** — every HTTP request and WebSocket connection is validated against the `?token=<value>` query parameter.
+
+### Requirements
+
+The dashboard is included in the package but its frontend dependencies are installed on first run. Node.js v18+ and an internet connection for the initial `npm install` are required. Subsequent runs use the cached install.
 
 ---
 

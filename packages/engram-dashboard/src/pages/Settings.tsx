@@ -10,20 +10,25 @@ export default function Settings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editVal, setEditVal] = useState("");
 
-  const { data, isLoading, isError } = useQuery<{ data: ConfigEntry[] }>({
+  const { data, isLoading, isError } = useQuery<ConfigEntry[]>({
     queryKey: ["config"],
-    queryFn: () => api.get("/config"),
+    queryFn: () =>
+      api.get<Record<string, string>>("/settings").then(obj =>
+        Object.entries(obj as Record<string, string>)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, value]) => ({ key, value }))
+      ),
   });
 
   const save = useMutation({
-    mutationFn: ({ key, value }: ConfigEntry) => api.put(`/config/${encodeURIComponent(key)}`, { value }),
+    mutationFn: ({ key, value }: ConfigEntry) => api.put(`/settings/${encodeURIComponent(key)}`, { value }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["config"] }); setEditing(null); },
   });
 
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load settings.</p></div>;
 
-  const entries = data?.data ?? [];
+  const entries = data ?? [];
 
   return (
     <div className="page">

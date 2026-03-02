@@ -7,7 +7,7 @@ import { useUiStore } from "../stores/ui.store.js";
 
 export default function Tasks() {
   const qc = useQueryClient();
-  const { data, isLoading, isError } = useQuery<{ data: Task[] }>({
+  const { data, isLoading, isError } = useQuery<Task[]>({
     queryKey: ["tasks"],
     queryFn: () => api.get("/tasks?limit=200"),
   });
@@ -22,7 +22,7 @@ export default function Tasks() {
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load tasks.</p></div>;
 
-  const tasks = data?.data ?? [];
+  const tasks = data ?? [];
   const statuses = ["not-started", "in-progress", "done", "blocked", "cancelled"];
 
   return (
@@ -32,6 +32,12 @@ export default function Tasks() {
         <EmptyState title="No tasks" message="Create tasks via engram_memory create_task." />
       ) : (
         <table className="data-table">
+          <colgroup>
+            <col style={{ width: "28%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "14%" }} />
+            <col />
+          </colgroup>
           <thead>
             <tr>
               <th>Title</th>
@@ -47,7 +53,7 @@ export default function Tasks() {
                 onClick={() => selectEntity({ type: "task", data: t as unknown as Record<string, unknown> })}
                 className={selected?.data?.id === t.id ? "row-selected" : "row-clickable"}
               >
-                <td className="text-wrap">{t.title}</td>
+                <td className="cell-wrap">{t.title}</td>
                 <td><StatusBadge status={t.priority} /></td>
                 <td onClick={e => e.stopPropagation()}>
                   <select
@@ -58,7 +64,7 @@ export default function Tasks() {
                     {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
-                <td className="text-faint text-wrap">{t.description ?? "—"}</td>
+                <td className="text-faint cell-wrap">{t.description ?? "—"}</td>
               </tr>
             ))}
           </tbody>

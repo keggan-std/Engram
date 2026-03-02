@@ -15,7 +15,7 @@ const CHANGE_COLORS: Record<string, string> = {
 };
 
 export default function Changes() {
-  const { data, isLoading, isError } = useQuery<{ data: Change[] }>({
+  const { data, isLoading, isError } = useQuery<Change[]>({
     queryKey: ["changes"],
     queryFn: () => api.get("/changes?limit=200"),
   });
@@ -24,7 +24,7 @@ export default function Changes() {
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load changes.</p></div>;
 
-  const changes = data?.data ?? [];
+  const changes = data ?? [];
 
   return (
     <div className="page">
@@ -33,13 +33,20 @@ export default function Changes() {
         <EmptyState title="No changes recorded" message="Changes are recorded via engram_memory record_change." />
       ) : (
         <table className="data-table">
+          <colgroup>
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "9%" }} />
+            <col />
+            <col style={{ width: "6%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>File</th>
               <th>Type</th>
               <th>Scope</th>
               <th>Description</th>
-              <th>Session</th>
+              <th>Sess.</th>
             </tr>
           </thead>
           <tbody>
@@ -49,14 +56,14 @@ export default function Changes() {
                 onClick={() => selectEntity({ type: "change", data: c as unknown as Record<string, unknown> })}
                 className={selected?.data?.id === c.id ? "row-selected" : "row-clickable"}
               >
-                <td className="text-mono" style={{ maxWidth: 220 }}>{c.file_path}</td>
+                <td className="text-mono cell-clip">{c.file_path}</td>
                 <td>
                   <span className={`badge ${CHANGE_COLORS[c.change_type] ?? "badge-low"}`}>
                     {c.change_type}
                   </span>
                 </td>
                 <td className="text-faint">{c.impact_scope}</td>
-                <td className="text-wrap">{c.description}</td>
+                <td className="cell-wrap">{c.description}</td>
                 <td className="text-faint">{c.session_id ?? "—"}</td>
               </tr>
             ))}

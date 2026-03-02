@@ -60,7 +60,9 @@ export default function App() {
 
   return (
     <Shell currentPage={page} onNavigate={setPage}>
-      <PageComponent />
+      {page === "dashboard"
+        ? <Dashboard onNavigate={setPage} />
+        : <PageComponent />}
     </Shell>
   );
 }

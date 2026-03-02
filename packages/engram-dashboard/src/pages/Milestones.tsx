@@ -4,7 +4,7 @@ import type { Milestone } from "../api/types.js";
 import EmptyState from "../components/EmptyState.js";
 
 export default function Milestones() {
-  const { data, isLoading, isError } = useQuery<{ data: Milestone[] }>({
+  const { data, isLoading, isError } = useQuery<Milestone[]>({
     queryKey: ["milestones"],
     queryFn: () => api.get("/milestones?limit=100"),
   });
@@ -12,7 +12,7 @@ export default function Milestones() {
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load milestones.</p></div>;
 
-  const milestones = data?.data ?? [];
+  const milestones = data ?? [];
 
   return (
     <div className="page">

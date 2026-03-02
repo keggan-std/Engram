@@ -1,3 +1,79 @@
+# v1.9.0 — Built-in Visual Dashboard
+
+**Released:** v1.9.0 — March 3, 2026
+
+## Overview
+
+v1.9.0 introduces the **Engram Dashboard** — a built-in React SPA that gives you a live, visual window into your agent's memory. Start it with a single command, get a real-time view of all sessions, tasks, decisions, changes, conventions, file notes, events, milestones, and settings — no CLI required.
+
+Zero breaking changes. All MCP tool behaviour is unchanged.
+
+### Quick start
+
+```bash
+npm run dashboard
+```
+
+The terminal prints the full URL including a secure auth token. Open it in your browser.
+
+---
+
+## What's New
+
+### HTTP API Layer (`--mode=http`)
+
+A new operating mode runs an Express HTTP server alongside the normal MCP stdio server. All 11 dashboard pages are backed by typed REST endpoints:
+
+| Endpoint group | Coverage |
+|---------------|----------|
+| `/api/sessions` | Session list, summary, history |
+| `/api/tasks` | Tasks CRUD and status updates |
+| `/api/decisions` | Decisions with dependency chains |
+| `/api/changes` | Change history with diff summaries |
+| `/api/conventions` | Active conventions |
+| `/api/file-notes` | File notes with staleness metadata |
+| `/api/events` | Scheduled and triggered events |
+| `/api/milestones` | Project milestones |
+| `/api/audit` | Raw audit log |
+| `/api/settings` | Runtime config read/write |
+| `/api/stats` | Aggregated stats per page |
+
+All endpoints require a `?token=<value>` query parameter. The token is printed at server startup.
+
+### WebSocket Live Updates
+
+A WebSocket server (`/ws`) broadcasts a typed event to all connected clients whenever any memory record changes — task updates, new decisions, file note writes, etc. The dashboard header shows a live connection badge (green = connected, grey = reconnecting).
+
+### React Dashboard SPA (React 19 + Vite 6)
+
+| Feature | Detail |
+|---------|--------|
+| **11 pages** | Dashboard, Tasks, Decisions, Changes, Conventions, File Notes, Sessions, Events, Milestones, Audit, Settings |
+| **Stat cards** | Clickable — navigate to the corresponding page |
+| **Instance cards** | Per-database stats with smooth accordion expand |
+| **Activity chart** | Recent change volume (Recharts) |
+| **Detail panel** | Click any row to expand full content in a slide-out panel |
+| **Cmd+K palette** | Keyboard-driven page navigation |
+| **Theme toggle** | Dark/light mode, persisted to `localStorage` |
+| **Toast stack** | Non-blocking notifications for live events |
+| **Adaptive columns** | Table columns use `%` widths — scale at any viewport |
+
+### Bundling
+
+Vite `manualChunks` splits vendor bundles (React, Recharts, Router) below the 500 KB threshold. The dashboard build output is excluded from the npm package — it is built on first use via `npm run dashboard`.
+
+---
+
+## Stats
+
+- **285 tests** total (89 new for this release)
+- **1 new server mode** (`--mode=http`)
+- **11 REST endpoint groups** + WebSocket broadcaster
+- **11 dashboard pages** in React 19 + Vite 6
+- **~3,400 lines added** across dashboard source, API, and tests
+
+---
+
 # v1.8.1 — Hotfix: Multi-IDE Database Isolation
 
 **Released:** v1.8.1 — March 1, 2026

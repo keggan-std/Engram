@@ -7,7 +7,7 @@ import { useUiStore } from "../stores/ui.store.js";
 
 export default function FileNotes() {
   const [search, setSearch] = useState("");
-  const { data, isLoading, isError } = useQuery<{ data: FileNote[] }>({
+  const { data, isLoading, isError } = useQuery<FileNote[]>({
     queryKey: ["file-notes"],
     queryFn: () => api.get("/file-notes?limit=500"),
   });
@@ -16,7 +16,7 @@ export default function FileNotes() {
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load file notes.</p></div>;
 
-  const notes = (data?.data ?? []).filter(n =>
+  const notes = (data ?? []).filter(n =>
     !search || n.file_path.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -35,6 +35,12 @@ export default function FileNotes() {
         <EmptyState title="No file notes" message="File notes are added via engram_memory get_file_notes / set_file_notes." />
       ) : (
         <table className="data-table">
+          <colgroup>
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "14%" }} />
+            <col />
+            <col style={{ width: "8%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th>File</th>
@@ -50,9 +56,9 @@ export default function FileNotes() {
                 onClick={() => selectEntity({ type: "file-note", data: n as unknown as Record<string, unknown> })}
                 className={selected?.data?.file_path === n.file_path ? "row-selected" : "row-clickable"}
               >
-                <td className="text-mono" style={{ maxWidth: 280 }}>{n.file_path}</td>
-                <td>{n.purpose ?? "—"}</td>
-                <td className="text-wrap text-faint" style={{ maxWidth: 300 }}>{n.executive_summary ?? "—"}</td>
+                <td className="text-mono cell-clip">{n.file_path}</td>
+                <td className="cell-clip">{n.purpose ?? "—"}</td>
+                <td className="text-faint cell-wrap">{n.executive_summary ?? "—"}</td>
                 <td><span className={`badge badge-${n.confidence ?? 'medium'}`}>{n.confidence ?? '—'}</span></td>
               </tr>
             ))}
