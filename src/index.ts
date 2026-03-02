@@ -22,6 +22,7 @@ import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer/index.js";
 import { ensureToken } from "./http-auth.js";
 import { createHttpServer } from "./http-server.js";
+import { broadcaster } from "./ws-broadcaster.js";
 
 // ─── v1.6 Lean Surface — 4 dispatcher tools ──────────────────────────────────
 import { registerSessionDispatcher } from "./tools/sessions.js";
@@ -151,8 +152,41 @@ async function main(): Promise<void> {
     const token = ensureToken(projectRoot);
     const { app } = createHttpServer({ port, token });
 
-    app.listen(port, "127.0.0.1", async () => {
+    // ── Phase 3: WebSocket live-update layer ─────────────────────────
+    // Node's http.createServer wraps the Express app so we can intercept
+    // the HTTP Upgrade handshake and attach a WebSocket server on /ws.
+    const { createServer: createHttpNodeServer } = await import("node:http");
+    const { WebSocketServer } = await import("ws");
+
+    const httpServer = createHttpNodeServer(app);
+    const wss = new WebSocketServer({ noServer: true });
+    broadcaster.attach(wss);
+
+    // Validate token + route upgrade to /ws only
+    httpServer.on("upgrade", (req, socket, head) => {
+      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+      if (url.pathname !== "/ws") {
+        socket.destroy();
+        return;
+      }
+      if (url.searchParams.get("token") !== token) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    });
+
+    // Send a "connected" ping on every new WS connection
+    wss.on("connection", (ws) => {
+      ws.send(JSON.stringify({ type: "connected", ts: Date.now() }));
+    });
+
+    httpServer.listen(port, "127.0.0.1", async () => {
       log.info(`Engram Dashboard API listening on http://127.0.0.1:${port}`);
+      log.info(`WebSocket live-updates on ws://127.0.0.1:${port}/ws`);
       if (!args.includes("--no-open")) {
         const { default: open } = await import("open");
         open(`http://localhost:${port}?token=${token}`).catch(() => {});

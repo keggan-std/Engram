@@ -6,6 +6,7 @@ import CommandPalette from "../components/CommandPalette.js";
 import DetailPanel from "../components/DetailPanel.js";
 import ToastStack from "../components/Toast.js";
 import { useUiStore } from "../stores/ui.store.js";
+import { useLiveSync } from "../hooks/useLiveSync.js";
 
 interface ShellProps {
   currentPage: Page;
@@ -15,6 +16,7 @@ interface ShellProps {
 
 export default function Shell({ currentPage, onNavigate, children }: ShellProps) {
   const { selected, selectEntity } = useUiStore();
+  const { connected } = useLiveSync();
 
   // Escape: close detail panel
   useEffect(() => {
@@ -29,7 +31,7 @@ export default function Shell({ currentPage, onNavigate, children }: ShellProps)
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", position: "relative" }}>
       <Sidebar currentPage={currentPage} onNavigate={onNavigate} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <TopBar currentPage={currentPage} onNavigate={onNavigate} />
+        <TopBar currentPage={currentPage} onNavigate={onNavigate} wsConnected={connected} />
         <main style={{
           flex: 1,
           overflow: "auto",

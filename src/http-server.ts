@@ -12,6 +12,7 @@ import * as fs from "fs";
 import { fileURLToPath } from "url";
 import type { WebSocketServer } from "ws";
 import { bearerAuth } from "./http-auth.js";
+import { broadcaster } from "./ws-broadcaster.js";
 
 // ─── Route imports ────────────────────────────────────────────────────────────
 import { sessionsRouter } from "./http-routes/sessions.routes.js";
@@ -72,6 +73,25 @@ export function createHttpServer(options: HttpServerOptions) {
 
   // ─── Auth guard on all /api routes ────────────────────────────────
   app.use("/api", bearerAuth(token));
+
+  // ─── WS mutation broadcaster ───────────────────────────────────────
+  // After any successful mutating request, broadcast a "mutated" event
+  // so connected dashboard clients can invalidate their query cache.
+  app.use((req, res, next) => {
+    res.on("finish", () => {
+      if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
+      if (res.statusCode < 200 || res.statusCode >= 300) return;
+      const match = req.path.match(/^\/api\/v1\/([^/]+)/);
+      if (!match) return;
+      broadcaster.broadcast({
+        type: "mutated",
+        resource: match[1],
+        method: req.method,
+        ts: Date.now(),
+      });
+    });
+    next();
+  });
 
   // ─── API v1 routes ────────────────────────────────────────────────
   const v1 = express.Router();

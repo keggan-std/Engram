@@ -18,9 +18,10 @@ const PAGE_LABELS: Record<Page, string> = {
 interface Props {
   currentPage: Page;
   onNavigate: (page: Page) => void;
+  wsConnected?: boolean;
 }
 
-export default function TopBar({ currentPage }: Props) {
+export default function TopBar({ currentPage, wsConnected = false }: Props) {
   const { theme, toggleTheme, openCmdPalette } = useUiStore();
   const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
@@ -80,10 +81,13 @@ export default function TopBar({ currentPage }: Props) {
         )}
       </button>
 
-      {/* Connection badge */}
-      <div className="topbar-badge">
-        <span style={{ color: "var(--success)", fontSize: 8 }}>●</span>
-        <span>127.0.0.1:7432</span>
+      {/* Connection badge — green when WS live, amber when reconnecting */}
+      <div
+        className="topbar-badge"
+        title={wsConnected ? "Live: WebSocket connected" : "Connecting to live updates…"}
+      >
+        <span style={{ color: wsConnected ? "var(--success)" : "var(--warning)", fontSize: 8, transition: "color 0.3s" }}>●</span>
+        <span>{wsConnected ? "Live" : "Connecting…"}</span>
       </div>
     </header>
   );
