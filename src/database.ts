@@ -186,6 +186,87 @@ export function getDbPath(): string {
   return _dbPath;
 }
 
+// ─── Runtime Re-Initialization ───────────────────────────────────────
+
+/**
+ * Re-initialize the database at a new project root.
+ *
+ * Used when the agent provides the correct project_root at session start
+ * and the server originally resolved to the wrong location (e.g. the
+ * global fallback because the IDE spawned from $HOME).
+ *
+ * If the old DB at the incorrect location contains data, this function
+ * copies it to the new location so previous sessions/decisions/etc. survive.
+ *
+ * @returns {{ migrated: boolean; oldPath: string; newPath: string; message: string }}
+ */
+export function reinitDatabase(newProjectRoot: string, ideKey?: string): {
+  migrated: boolean;
+  oldPath: string;
+  newPath: string;
+  message: string;
+} {
+  const oldProjectRoot = _projectRoot;
+  const oldDbPath = _dbPath;
+
+  // Nothing to do if already at the correct root
+  const normalizedOld = oldProjectRoot.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  const normalizedNew = newProjectRoot.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  if (normalizedOld === normalizedNew) {
+    return { migrated: false, oldPath: oldDbPath, newPath: oldDbPath, message: "Already at correct project root." };
+  }
+
+  // Compute new DB path
+  const newDbDir = path.join(newProjectRoot, DB_DIR_NAME);
+  const dbFileName = ideKey ? `memory-${ideKey}.db` : DB_FILE_NAME;
+  const newDbPath = path.join(newDbDir, dbFileName);
+
+  // Close old DB
+  if (_db) {
+    try {
+      // Flush instance registry before closing
+      _services?.registry.shutdown();
+    } catch { /* best effort */ }
+    try { _db.close(); } catch { /* best effort */ }
+    _db = null;
+    _repos = null;
+    _services = null;
+  }
+
+  // Ensure new directory exists
+  fs.mkdirSync(newDbDir, { recursive: true });
+
+  // If new DB doesn't exist yet AND old DB has data, copy old → new
+  let migrated = false;
+  if (!fs.existsSync(newDbPath) && fs.existsSync(oldDbPath)) {
+    try {
+      fs.copyFileSync(oldDbPath, newDbPath);
+      // Also copy WAL/SHM if present (ensures consistency)
+      for (const suffix of ["-wal", "-shm"]) {
+        const src = oldDbPath + suffix;
+        if (fs.existsSync(src)) {
+          fs.copyFileSync(src, newDbPath + suffix);
+        }
+      }
+      migrated = true;
+      console.error(`[Engram] [INFO] Migrated database from ${oldDbPath} → ${newDbPath}`);
+    } catch (err) {
+      console.error(`[Engram] [WARN] Failed to migrate database: ${err}. Starting fresh.`);
+    }
+  }
+
+  // Re-initialize at the new location
+  initDatabase(newProjectRoot, ideKey);
+
+  const msg = migrated
+    ? `Database migrated from ${oldProjectRoot} to ${newProjectRoot}. Previous data preserved.`
+    : fs.existsSync(oldDbPath) && oldDbPath !== newDbPath
+      ? `Database re-initialized at ${newProjectRoot}. Old data remains at ${oldDbPath}.`
+      : `Database initialized at ${newProjectRoot}.`;
+
+  return { migrated, oldPath: oldDbPath, newPath: newDbPath, message: msg };
+}
+
 // ─── Backup ──────────────────────────────────────────────────────────
 
 /**

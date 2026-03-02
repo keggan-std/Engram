@@ -10,8 +10,10 @@ Every agent working in this repo MUST follow these rules every chat, no exceptio
 
 ### Session Start — ALWAYS FIRST
 ```js
-engram_session({ action: "start", agent_name: "claude", verbosity: "summary", focus: "topic if known" })
+engram_session({ action: "start", agent_name: "claude", verbosity: "summary", focus: "topic if known", project_root: "/absolute/path/to/project" })
 ```
+- `project_root` (optional): Pass the absolute path to the workspace when the IDE may not set cwd to the project directory (e.g. Antigravity, Windsurf, Claude Desktop). Engram will re-initialize its database at the correct location. Omit if the IDE already provides `${workspaceFolder}` (VS Code, Cursor).
+
 Act on everything returned: `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `agent_rules`, `triggered_events`.  
 Unknown action? → `engram_find({ query: "what I want to do" })`
 

@@ -82,6 +82,14 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
         entry.args = [...baseArgs];
     }
 
+    // Env injection: for IDEs without workspaceVar, inject ENGRAM_PROJECT_ROOT
+    // via the env block so the server's Tier-1 detection picks it up.
+    // If the IDE doesn't expand the variable, the value is passed as-is and
+    // findProjectRoot() skips it (non-existent path).
+    if (ide.envVar && !ide.workspaceVar) {
+        entry.env = { ENGRAM_PROJECT_ROOT: ide.envVar };
+    }
+
     // Version stamp — used by the installer to detect upgrades and legacy installs
     entry._engram_version = getInstallerVersion();
     if (universal) {
