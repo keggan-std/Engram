@@ -4,12 +4,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall } from "../database.js";
+import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
 import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
 import type { SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
+import * as os from "os";
+import * as path from "path";
 import { buildToolCatalog, AGENT_RULES } from "./find.js";
 
 
@@ -59,6 +61,7 @@ Actions:
         action: z.enum(["start", "end", "get_history", "handoff", "acknowledge_handoff"]).describe("Session operation to perform."),
         // start params
         agent_name: z.string().optional().describe("Your agent identifier. For: start."),
+        project_root: z.string().optional().describe("Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location."),
         resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
         verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. nano=counts+rules only (~10 tokens), minimal=counts+agent_rules, summary=default, full=everything."),
         focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
@@ -79,10 +82,10 @@ Actions:
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
-      const repos = getRepos();
-      const services = getServices();
-      const projectRoot = getProjectRoot();
-      const db = getDb();
+      let repos = getRepos();
+      let services = getServices();
+      let projectRoot = getProjectRoot();
+      let db = getDb();
 
       switch (params.action) {
 
@@ -91,6 +94,30 @@ Actions:
           const verbosity = params.verbosity ?? "summary";
           const focus = params.focus;          const resume_task = params.resume_task;
           const timestamp = now();
+
+          // ── Runtime project root override ──────────────────────────────────
+          // For IDEs that spawn MCP servers from $HOME or a non-project dir
+          // (e.g. Antigravity, Windsurf), the agent can pass project_root to
+          // redirect the database to the correct project location.
+          let dbMigrationNote: string | undefined;
+          if (params.project_root && params.project_root.trim()) {
+            const requested = params.project_root.trim();
+            const currentRoot = getProjectRoot();
+            const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+            if (norm(requested) !== norm(currentRoot)) {
+              // Detect the --ide=<key> from process args (if present)
+              const ideArg = process.argv.find(a => a.startsWith("--ide="));
+              const ideKey = ideArg ? ideArg.slice("--ide=".length).trim() : undefined;
+              const result = reinitDatabase(requested, ideKey);
+              dbMigrationNote = result.message;
+              log.info(`[Session] DB re-initialized: ${result.message}`);
+              // Refresh all references after re-initialization
+              repos = getRepos();
+              services = getServices();
+              projectRoot = getProjectRoot();
+              db = getDb();
+            }
+          }
 
           // ── Sub-agent path: task-scoped context (~300-500 tokens) ─────────
           if (params.agent_role === "sub") {
@@ -204,6 +231,23 @@ Actions:
 
           logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} (dispatcher)`);
 
+          // ── Global fallback detection ──────────────────────────────────────
+          // When the DB landed at ~/.engram/global/ (no project root detected),
+          // prompt the agent to ask the user for the correct project path.
+          // ONLY when --ide=<key> is present (IDE couldn't provide the root).
+          // If no --ide flag, the user deliberately chose a global install and
+          // the global location is intentional — don't nag.
+          const globalFallback = path.join(os.homedir(), ".engram", "global");
+          const normRoot = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+          const hasIdeFlag = process.argv.some(a => a.startsWith("--ide="));
+          let projectRootRequired: { warning: string; action: string } | undefined;
+          if (normRoot(projectRoot) === normRoot(globalFallback) && !dbMigrationNote && hasIdeFlag) {
+            projectRootRequired = {
+              warning: "Engram could not detect your project directory. Memory is currently stored in a shared global location, which means different projects would share the same data.",
+              action: "Ask the user: 'What is the absolute path to your project directory?' (This is the root folder of the project you're working on — for example C:\\Users\\you\\projects\\my-app or /home/you/projects/my-app). Then call engram_session again with project_root set to that path. Example: engram_session({ action: 'start', project_root: '/path/to/project' })",
+            };
+          }
+
           // Build response
           const catalogTier = selectCatalogTier(agent_name, verbosity);
           storeCatalogDelivery(agent_name, catalogTier);
@@ -224,6 +268,8 @@ Actions:
             agent_rules_source: rulesResult.source,
             tool_catalog: buildToolCatalog(catalogTier),
             triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
+            db_migration: dbMigrationNote ?? undefined,
+            project_root_required: projectRootRequired ?? undefined,
           };
 
           if (verbosity === "nano") {
@@ -236,6 +282,8 @@ Actions:
               tool_catalog: buildToolCatalog(0),
               triggered_events: triggeredEvents.length > 0 ? triggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
               update_available: updateNotification ?? undefined,
+              db_migration: dbMigrationNote ?? undefined,
+              project_root_required: projectRootRequired ?? undefined,
               message: `Session #${sessionId} started (nano). Use engram_memory — see tool_catalog.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}`,
             });
           }

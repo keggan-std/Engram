@@ -44,6 +44,15 @@ export interface IdeDefinition {
      * Examples: "${workspaceFolder}" (VS Code/Cursor), "${SolutionDir}" (VS)
      */
     workspaceVar?: string;
+    /**
+     * IDE-native variable injected as env var ENGRAM_PROJECT_ROOT in the MCP
+     * config's "env" block.  Used for IDEs that don't support workspaceVar in
+     * args but DO expand variables in env values.
+     *
+     * Falls back gracefully: if the IDE doesn't expand the variable, the
+     * server's findProjectRoot() detection chain handles it.
+     */
+    envVar?: string;
     scopes: {
         global?: string[];
         localDirs?: string[];
@@ -88,6 +97,8 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
+        // Windsurf does not document a workspaceVar; envVar is a best-effort hint.
+        envVar: "${workspaceFolder}",
         scopes: {
             // Confirmed: ~/.codeium/windsurf/mcp_config.json on all platforms.
             // Source: https://docs.windsurf.com/windsurf/cascade/mcp
@@ -102,6 +113,10 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
+        // Antigravity (Google) spawns MCP servers from $HOME, not the project dir.
+        // The envVar hints the IDE to set ENGRAM_PROJECT_ROOT if it supports
+        // variable expansion in the env block.
+        envVar: "${workspaceFolder}",
         scopes: {
             // NOTE: Antigravity (Google) is newly announced; this path is unconfirmed.
             // Marked best-effort until official docs are published.

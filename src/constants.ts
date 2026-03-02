@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { readFileSync } from "fs";
+import os from "os";
 import { fileURLToPath } from "url";
 import path from "path";
 
@@ -68,7 +69,12 @@ export const EXCLUDED_DIRS = new Set([
  */
 export const STRONG_PROJECT_MARKERS = [
   ".git",
-  ".engram",   // already-initialised Engram project
+  // NOTE: .engram was removed from STRONG markers in v1.9.1 hotfix.
+  // It is self-referential — Engram creates .engram/, so its presence
+  // cannot prove a *project* boundary.  When cwd = HOME, any stale
+  // ~/.engram/ made the home directory look like a project root,
+  // causing all global-only IDEs to share one database.  Real projects
+  // always have .git or a soft marker (package.json, etc.).
 ] as const;
 
 /**
@@ -130,6 +136,16 @@ export const BLOCKED_PATH_PATTERNS: RegExp[] = [
   /[/\\]lib[/\\]node_modules[/\\]/i,
   /[/\\]node_modules\.bin[/\\]/i,
 ];
+
+/**
+ * Returns true if the given directory is the user's home directory.
+ * The home dir is never a valid project root — no one's "project" is ~/.
+ * This prevents the bootstrap trap where ~/.engram/ makes HOME look like a project.
+ */
+export function isHomeDirectory(dirPath: string): boolean {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  return norm(dirPath) === norm(os.homedir());
+}
 
 // Update check
 export const NPM_REGISTRY_URL = "https://registry.npmjs.org/engram-mcp-server/latest";

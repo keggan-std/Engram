@@ -16,6 +16,7 @@ import {
   MAX_FILE_TREE_ENTRIES,
   SOFT_PROJECT_MARKERS,
   STRONG_PROJECT_MARKERS,
+  isHomeDirectory,
 } from "./constants.js";
 import type { ArchLayer } from "./types.js";
 
@@ -179,7 +180,7 @@ export function findProjectRoot(startDir?: string): string {
   // Blocked paths are checked so we don't accept a git repo that is the IDE
   // install dir itself (unlikely but possible with developer setups).
   const gitRoot = detectGitRoot(cwd);
-  if (gitRoot && !isBlockedPath(gitRoot)) {
+  if (gitRoot && !isBlockedPath(gitRoot) && !isHomeDirectory(gitRoot)) {
     console.error(`[Engram] [INFO] Project root ← git: ${gitRoot}`);
     return gitRoot;
   }
@@ -190,7 +191,7 @@ export function findProjectRoot(startDir?: string): string {
   while (dir !== path.dirname(dir)) {
     for (const marker of STRONG_PROJECT_MARKERS) {
       if (fs.existsSync(path.join(dir, marker))) {
-        if (!isBlockedPath(dir)) {
+        if (!isBlockedPath(dir) && !isHomeDirectory(dir)) {
           console.error(`[Engram] [INFO] Project root ← strong marker (${marker}): ${dir}`);
           return dir;
         }
@@ -206,7 +207,7 @@ export function findProjectRoot(startDir?: string): string {
   // (running from our own source tree).
   dir = cwd;
   while (dir !== path.dirname(dir)) {
-    if (!isBlockedPath(dir)) {
+    if (!isBlockedPath(dir) && !isHomeDirectory(dir)) {
       for (const marker of SOFT_PROJECT_MARKERS) {
         if (fs.existsSync(path.join(dir, marker))) {
           // Extra guard: our own package — skip it

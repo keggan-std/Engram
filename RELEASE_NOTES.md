@@ -1,3 +1,71 @@
+# v1.9.1 — Project Root Detection Hotfix
+
+**Released:** v1.9.1 — March 3, 2026
+
+## Overview
+
+v1.9.1 is a critical hotfix for IDEs that spawn MCP servers from the user's home directory instead of the project directory (Antigravity, Windsurf, Claude Desktop, Cline, JetBrains). Previously, all projects in these IDEs shared a single database — causing data leakage, convention bleed-through, and privacy violations between unrelated projects.
+
+Zero breaking changes. All MCP tool behaviour is unchanged.
+
+---
+
+## What's Fixed
+
+### Home Directory Bootstrap Trap
+
+**Problem:** When an IDE spawns the MCP server from `$HOME`, `findProjectRoot()` found `~/.engram/` (a directory Engram itself created) and treated the home directory as a valid project root. Every project opened in that IDE shared one database at `~/.engram/memory-{ide}.db`.
+
+**Fix — 3 layers:**
+
+1. **Home directory is now blocked as a project root.** A new `isHomeDirectory()` guard is applied to all detection tiers (git root, strong markers, soft markers). `~/` is never accepted.
+
+2. **`.engram` removed from strong project markers.** It was self-referential — Engram creates `.engram/`, so its presence can't prove a project boundary. Real projects always have `.git`, `package.json`, or other language-specific markers.
+
+3. **Env var injection for global-only IDEs.** The installer now injects `"env": { "ENGRAM_PROJECT_ROOT": "${workspaceFolder}" }` into the MCP config for IDEs without `workspaceVar` support (Antigravity, Windsurf). If the IDE expands the variable, the server receives the correct project path immediately.
+
+### Runtime `project_root` Override (Session Start)
+
+Agents can now pass `project_root` when calling `engram_session({ action: "start" })`. When the agent knows the correct workspace path (which it usually does), it can redirect the database to the right location at session start — even if the IDE spawned from the wrong directory.
+
+- If the old misplaced DB exists and the new location is empty, Engram **copies the data over** automatically (session history, decisions, conventions — everything preserved).
+- Response includes a `db_migration` note confirming the move.
+
+### Interactive Fallback Prompt
+
+When all detection fails and the database lands at the global fallback (`~/.engram/global/`), the session start response now includes `project_root_required` — an explicit instruction for the agent to ask the user:
+
+> "What is the absolute path to your project directory?"
+
+The agent then calls `engram_session({ action: "start", project_root: "/path/to/project" })` to fix it. This ensures project isolation even in the worst case.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/constants.ts` | Removed `.engram` from `STRONG_PROJECT_MARKERS`. Added `isHomeDirectory()`. |
+| `src/utils.ts` | Added home-dir guard to all `findProjectRoot()` tiers. |
+| `src/database.ts` | Added `reinitDatabase()` for runtime DB relocation with migration. |
+| `src/tools/sessions.ts` | Added `project_root` param to session start. Added `project_root_required` fallback. |
+| `src/installer/ide-configs.ts` | Added `envVar` field. Set for Antigravity and Windsurf. |
+| `src/installer/config-writer.ts` | Injects `ENGRAM_PROJECT_ROOT` env var when IDE has `envVar`. |
+| `.github/copilot-instructions.md` | Documented `project_root` param. |
+| `README.md` | Updated session start example with `project_root`. |
+
+---
+
+## Upgrade
+
+```bash
+npx -y engram-mcp-server@latest install
+```
+
+If you previously used Engram with Antigravity, Windsurf, or another global-only IDE, your existing data at `~/.engram/` will be automatically migrated to the correct project directory on the next session start (when `project_root` is provided).
+
+---
+
 # v1.9.0 — Built-in Visual Dashboard
 
 **Released:** v1.9.0 — March 3, 2026
