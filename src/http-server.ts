@@ -39,10 +39,14 @@ export interface HttpServerOptions {
   port: number;
   token: string;
   wss?: WebSocketServer;
+  /** Injectable broadcaster — used in tests to avoid ESM singleton isolation issues. */
+  broadcaster?: { broadcast: (event: import("./ws-broadcaster.js").WsEvent) => void };
 }
 
 export function createHttpServer(options: HttpServerOptions) {
   const { port, token } = options;
+  // Allow tests to inject a mock broadcaster; fall back to the module singleton.
+  const bc = options.broadcaster ?? broadcaster;
 
   const app = express();
 
@@ -81,9 +85,9 @@ export function createHttpServer(options: HttpServerOptions) {
     res.on("finish", () => {
       if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
       if (res.statusCode < 200 || res.statusCode >= 300) return;
-      const match = req.path.match(/^\/api\/v1\/([^/]+)/);
+      const match = req.originalUrl.match(/^\/api\/v1\/([^/?#]+)/);
       if (!match) return;
-      broadcaster.broadcast({
+      bc.broadcast({
         type: "mutated",
         resource: match[1],
         method: req.method,
