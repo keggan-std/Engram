@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client.js";
 import type { FileNote } from "../api/types.js";
 import EmptyState from "../components/EmptyState.js";
+import { useUiStore } from "../stores/ui.store.js";
 
 export default function FileNotes() {
   const [search, setSearch] = useState("");
@@ -10,6 +11,7 @@ export default function FileNotes() {
     queryKey: ["file-notes"],
     queryFn: () => api.get("/file-notes?limit=500"),
   });
+  const { selectEntity, selected } = useUiStore();
 
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load file notes.</p></div>;
@@ -43,10 +45,14 @@ export default function FileNotes() {
           </thead>
           <tbody>
             {notes.map(n => (
-              <tr key={n.file_path}>
-                <td className="text-mono">{n.file_path}</td>
+              <tr
+                key={n.file_path}
+                onClick={() => selectEntity({ type: "file-note", data: n as unknown as Record<string, unknown> })}
+                className={selected?.data?.file_path === n.file_path ? "row-selected" : "row-clickable"}
+              >
+                <td className="text-mono" style={{ maxWidth: 280 }}>{n.file_path}</td>
                 <td>{n.purpose ?? "—"}</td>
-                <td className="text-wrap text-faint">{n.executive_summary ?? "—"}</td>
+                <td className="text-wrap text-faint" style={{ maxWidth: 300 }}>{n.executive_summary ?? "—"}</td>
                 <td><span className={`badge badge-${n.confidence ?? 'medium'}`}>{n.confidence ?? '—'}</span></td>
               </tr>
             ))}

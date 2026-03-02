@@ -3,6 +3,7 @@ import { api } from "../api/client.js";
 import type { Task } from "../api/types.js";
 import StatusBadge from "../components/StatusBadge.js";
 import EmptyState from "../components/EmptyState.js";
+import { useUiStore } from "../stores/ui.store.js";
 
 export default function Tasks() {
   const qc = useQueryClient();
@@ -10,6 +11,7 @@ export default function Tasks() {
     queryKey: ["tasks"],
     queryFn: () => api.get("/tasks?limit=200"),
   });
+  const { selectEntity, selected } = useUiStore();
 
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) =>
@@ -40,10 +42,14 @@ export default function Tasks() {
           </thead>
           <tbody>
             {tasks.map(t => (
-              <tr key={t.id}>
+              <tr
+                key={t.id}
+                onClick={() => selectEntity({ type: "task", data: t as unknown as Record<string, unknown> })}
+                className={selected?.data?.id === t.id ? "row-selected" : "row-clickable"}
+              >
                 <td className="text-wrap">{t.title}</td>
                 <td><StatusBadge status={t.priority} /></td>
-                <td>
+                <td onClick={e => e.stopPropagation()}>
                   <select
                     className="inline-select"
                     value={t.status}

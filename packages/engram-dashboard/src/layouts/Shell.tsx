@@ -1,6 +1,11 @@
+import { useEffect } from "react";
 import type { Page } from "../App.js";
 import Sidebar from "./Sidebar.js";
 import TopBar from "./TopBar.js";
+import CommandPalette from "../components/CommandPalette.js";
+import DetailPanel from "../components/DetailPanel.js";
+import ToastStack from "../components/Toast.js";
+import { useUiStore } from "../stores/ui.store.js";
 
 interface ShellProps {
   currentPage: Page;
@@ -9,11 +14,22 @@ interface ShellProps {
 }
 
 export default function Shell({ currentPage, onNavigate, children }: ShellProps) {
+  const { selected, selectEntity } = useUiStore();
+
+  // Escape: close detail panel
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && selected) selectEntity(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selected, selectEntity]);
+
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", position: "relative" }}>
       <Sidebar currentPage={currentPage} onNavigate={onNavigate} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <TopBar currentPage={currentPage} />
+        <TopBar currentPage={currentPage} onNavigate={onNavigate} />
         <main style={{
           flex: 1,
           overflow: "auto",
@@ -22,6 +38,15 @@ export default function Shell({ currentPage, onNavigate, children }: ShellProps)
           {children}
         </main>
       </div>
+
+      {/* Slide-in detail panel (sits in document flow on the right) */}
+      <DetailPanel />
+
+      {/* Cmd+K command palette (portal/dialog) */}
+      <CommandPalette onNavigate={onNavigate} />
+
+      {/* Toast notification stack */}
+      <ToastStack />
     </div>
   );
 }

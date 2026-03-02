@@ -3,12 +3,14 @@ import { api } from "../api/client.js";
 import type { Decision } from "../api/types.js";
 import StatusBadge from "../components/StatusBadge.js";
 import EmptyState from "../components/EmptyState.js";
+import { useUiStore } from "../stores/ui.store.js";
 
 export default function Decisions() {
   const { data, isLoading, isError } = useQuery<{ data: Decision[] }>({
     queryKey: ["decisions"],
     queryFn: () => api.get("/decisions?limit=200"),
   });
+  const { selectEntity, selected } = useUiStore();
 
   if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
   if (isError) return <div className="page"><p className="error-text">Failed to load decisions.</p></div>;
@@ -32,11 +34,15 @@ export default function Decisions() {
           </thead>
           <tbody>
             {decisions.map(d => (
-              <tr key={d.id}>
+              <tr
+                key={d.id}
+                onClick={() => selectEntity({ type: "decision", data: d as unknown as Record<string, unknown> })}
+                className={selected?.data?.id === d.id ? "row-selected" : "row-clickable"}
+              >
                 <td className="text-wrap">{d.decision}</td>
                 <td><StatusBadge status={d.status} /></td>
                 <td className="text-faint">{d.tags ?? "—"}</td>
-                <td className="text-wrap text-faint">{d.rationale ?? "—"}</td>
+                <td className="text-wrap text-faint" style={{ maxWidth: 300 }}>{d.rationale ?? "—"}</td>
               </tr>
             ))}
           </tbody>
