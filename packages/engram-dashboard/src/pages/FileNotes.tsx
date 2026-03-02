@@ -1,0 +1,70 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client.js";
+import type { FileNote } from "../api/types.js";
+import EmptyState from "../components/EmptyState.js";
+import { useUiStore } from "../stores/ui.store.js";
+
+export default function FileNotes() {
+  const [search, setSearch] = useState("");
+  const { data, isLoading, isError } = useQuery<FileNote[]>({
+    queryKey: ["file-notes"],
+    queryFn: () => api.get("/file-notes?limit=500"),
+  });
+  const { selectEntity, selected } = useUiStore();
+
+  if (isLoading) return <div className="page"><p className="loading-text">Loading…</p></div>;
+  if (isError) return <div className="page"><p className="error-text">Failed to load file notes.</p></div>;
+
+  const notes = (data ?? []).filter(n =>
+    !search || n.file_path.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="page">
+      <h1 className="page-title">File Notes</h1>
+      <div className="toolbar">
+        <input
+          className="search-input"
+          placeholder="Filter by path…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+      {notes.length === 0 ? (
+        <EmptyState title="No file notes" message="File notes are added via engram_memory get_file_notes / set_file_notes." />
+      ) : (
+        <table className="data-table">
+          <colgroup>
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "14%" }} />
+            <col />
+            <col style={{ width: "8%" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Purpose</th>
+              <th>Summary</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notes.map(n => (
+              <tr
+                key={n.file_path}
+                onClick={() => selectEntity({ type: "file-note", data: n as unknown as Record<string, unknown> })}
+                className={selected?.data?.file_path === n.file_path ? "row-selected" : "row-clickable"}
+              >
+                <td className="text-mono cell-clip">{n.file_path}</td>
+                <td className="cell-clip">{n.purpose ?? "—"}</td>
+                <td className="text-faint cell-wrap">{n.executive_summary ?? "—"}</td>
+                <td><span className={`badge badge-${n.confidence ?? 'medium'}`}>{n.confidence ?? '—'}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}

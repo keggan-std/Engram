@@ -16,9 +16,7 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 17; // V7 agent-safety, V8 ctx-pressure, V9 knowledge-graph, V10 handoffs, V11 tool_call_log
-                              // V12 checkpoints, V13 content_hash, V14 executive_summary, V15 agent specializations
-                              // V16 targeted broadcasts, V17 instance identity
+export const DB_VERSION = 22; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
@@ -156,6 +154,7 @@ export const CFG_MACHINE_ID = "machine_id";
 export const CFG_SHARING_MODE = "sharing_mode";       // "none" | "read" | "full"
 export const CFG_SHARING_TYPES = "sharing_types";     // JSON array of table names
 export const CFG_SENSITIVE_KEYS = "sensitive_keys";   // JSON array of decision/convention IDs marked sensitive
+export const CFG_HTTP_TOKEN = "http_token";           // Bearer token for dashboard API (file fallback: .engram/token)
 
 // Instance registry
 export const INSTANCE_REGISTRY_DIR = ".engram";
