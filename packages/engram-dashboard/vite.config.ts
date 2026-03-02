@@ -20,5 +20,20 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react":   ["react", "react-dom"],
+          "vendor-tanstack": [
+            "@tanstack/react-query",
+            "@tanstack/react-table",
+            "@tanstack/react-virtual",
+          ],
+          "vendor-charts":  ["recharts"],
+          "vendor-ui":      ["cmdk", "lucide-react"],
+          "vendor-utils":   ["date-fns", "zustand"],
+        },
+      },
+    },
   },
 });
