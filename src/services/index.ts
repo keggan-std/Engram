@@ -12,3 +12,5 @@ export { AgentRulesService } from "./agent-rules.service.js";
 export { InstanceRegistryService } from "./instance-registry.service.js";
 export { CrossInstanceService } from "./cross-instance.service.js";
 export { SensitiveDataService } from "./sensitive-data.service.js";
+export { PMDiagnosticsTracker, pmSafe } from "./pm-diagnostics.js";
+export type { PMFailureRecord, PMStatusReport } from "./pm-diagnostics.js";

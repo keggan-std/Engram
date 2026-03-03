@@ -67,3 +67,50 @@ export class NoActiveSessionError extends EngramError {
         this.name = "NoActiveSessionError";
     }
 }
+
+// ============================================================================
+// PM Framework Errors — Non-fatal. PM failures degrade gracefully and never
+// block core Engram operations. All PM code paths use pmSafe() wrappers.
+// ============================================================================
+
+/**
+ * Base class for all PM framework errors.
+ * PM errors are non-fatal — they degrade PM features without blocking core
+ * Engram operations. Catch with PMFrameworkError to handle all PM failures.
+ */
+export class PMFrameworkError extends EngramError {
+    constructor(message: string, code: string = "PM_FRAMEWORK_ERROR", context?: Record<string, unknown>) {
+        super(message, code, context);
+        this.name = "PMFrameworkError";
+    }
+}
+
+/**
+ * Thrown when a knowledge base query fails (data corruption, missing entry, bad input).
+ */
+export class PMKnowledgeError extends PMFrameworkError {
+    constructor(message: string, context?: Record<string, unknown>) {
+        super(message, "PM_KNOWLEDGE_ERROR", context);
+        this.name = "PMKnowledgeError";
+    }
+}
+
+/**
+ * Thrown when a workflow advisor check fails (state inconsistency, repo error).
+ */
+export class PMAdvisorError extends PMFrameworkError {
+    constructor(message: string, context?: Record<string, unknown>) {
+        super(message, "PM_ADVISOR_ERROR", context);
+        this.name = "PMAdvisorError";
+    }
+}
+
+/**
+ * Thrown when phase detection or phase gate automation fails.
+ */
+export class PMPhaseError extends PMFrameworkError {
+    constructor(message: string, context?: Record<string, unknown>) {
+        super(message, "PM_PHASE_ERROR", context);
+        this.name = "PMPhaseError";
+    }
+}
