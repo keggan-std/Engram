@@ -47,9 +47,7 @@ export async function runInstaller(args: string[]) {
         if (path.resolve(process.cwd()) === runningRoot) {
             const cwdPkg = readJson(path.join(process.cwd(), "package.json"));
             if (cwdPkg?.name === "engram-mcp-server") {
-                console.warn("\n⚠️  Running from the engram source directory.");
-                console.warn("   Version shown reflects the local build — not the published npm package.");
-                console.warn("   For an accurate check: npm install -g engram-mcp-server@latest && engram --check\n");
+                console.log(`\n✅ Dev mode: running local build v${cwdPkg.version} (dist/index.js)\n`);
             }
         }
     } catch { /* ignore — detection is best-effort */ }
