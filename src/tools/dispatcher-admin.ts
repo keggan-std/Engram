@@ -56,7 +56,8 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         prune_old: z.boolean().optional(),
         // Cross-instance params
         instance_id: z.string().optional().describe("Target instance UUID for cross-instance queries."),
-        type: z.string().optional().describe("Memory type to query: decisions, conventions, file_notes, tasks, sessions, changes."),
+        type: z.string().optional().describe("Memory type: decisions, conventions, file_notes, tasks, sessions, changes. Used by mark_sensitive, unmark_sensitive, list_sensitive, import_from_instance."),
+        query_type: z.string().optional().describe("Memory type to query for query_instance: decisions, conventions, file_notes, tasks, sessions, changes. Alias for type when using query_instance."),
         query: z.string().optional().describe("Search query for cross-instance search."),
         limit: z.number().int().optional().describe("Max results to return."),
         mode: z.string().optional().describe("Sharing mode: none, read, or full."),
@@ -364,10 +365,27 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── GET INSTANCE INFO ───────────────────────────────────────────
         case "get_instance_info": {
-          const self = services.registry.getSelf();
+          const selfId = services.registry.getInstanceId();
+          const targetId = params.instance_id;
+
+          // Self or no instance_id specified — return live local info
+          if (!targetId || targetId === selfId) {
+            const self = services.registry.getSelf();
+            return success({
+              ...self,
+              message: `Instance '${self.label}' (${self.instance_id}). Sharing: ${self.sharing_mode}. Types: ${self.sharing_types.join(", ")}.`,
+            });
+          }
+
+          // Foreign instance — look up from registry
+          const instances = services.registry.listInstances(true);
+          const target = instances.find(i => i.instance_id === targetId);
+          if (!target) {
+            return error(`Instance '${targetId}' not found in registry. Is it running?`);
+          }
           return success({
-            ...self,
-            message: `Instance '${self.label}' (${self.instance_id}). Sharing: ${self.sharing_mode}. Types: ${self.sharing_types.join(", ")}.`,
+            ...target,
+            message: `Instance '${target.label}' (${target.instance_id}). Sharing: ${target.sharing_mode}. Types: ${target.sharing_types.join(", ")}.`,
           });
         }
 
@@ -390,7 +408,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         // ─── QUERY INSTANCE ─────────────────────────────────────────────
         case "query_instance": {
           if (!params.instance_id) return error("instance_id is required.");
-          const queryType = params.type ?? "decisions";
+          const queryType = params.query_type ?? params.type ?? "decisions";
           try {
             let result: { source: { label: string; instance_id: string; project_root: string }; results: Record<string, unknown>[] };
             switch (queryType) {

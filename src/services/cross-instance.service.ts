@@ -8,6 +8,7 @@
 import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import * as fs from "fs";
+import * as path from "path";
 import type { InstanceRegistryService } from "./instance-registry.service.js";
 import type { InstanceEntry, CrossInstanceSearchResult, SharingMode } from "../types.js";
 import { log } from "../logger.js";
@@ -50,6 +51,50 @@ export class CrossInstanceService {
     return this.registry.listInstances(includeStale);
   }
 
+  // ─── DB Path Resolution ──────────────────────────────────────────
+
+  /**
+   * Resolve the actual DB file path for a foreign instance.
+   * Falls back to scanning <project_root>/.engram/ for memory*.db files when
+   * db_path is absent (registry entries written by older Engram versions).
+   */
+  private resolveDbPath(entry: InstanceEntry): string | null {
+    // Happy path: db_path already present and file exists
+    if (entry.db_path && fs.existsSync(entry.db_path)) {
+      return entry.db_path;
+    }
+
+    // Fallback: scan the .engram directory for any memory*.db file
+    const engramDir = path.join(entry.project_root, ".engram");
+    if (!fs.existsSync(engramDir)) {
+      log.warn(`[cross-instance] .engram dir not found for '${entry.label}': ${engramDir}`);
+      return null;
+    }
+
+    let candidates: string[];
+    try {
+      candidates = fs.readdirSync(engramDir)
+        .filter(f => f.startsWith("memory") && f.endsWith(".db"))
+        .map(f => path.join(engramDir, f));
+    } catch {
+      return null;
+    }
+
+    if (candidates.length === 0) {
+      log.warn(`[cross-instance] No memory*.db found in ${engramDir}`);
+      return null;
+    }
+
+    // Prefer most recently modified file
+    const sorted = candidates
+      .map(f => ({ f, mtime: fs.statSync(f).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    const resolved = sorted[0].f;
+    log.info(`[cross-instance] Resolved db_path via scan for '${entry.label}': ${resolved}`);
+    return resolved;
+  }
+
   // ─── Permission Checks ────────────────────────────────────────────
 
   /**
@@ -84,7 +129,16 @@ export class CrossInstanceService {
       );
     }
 
-    return target;
+    // Resolve db_path now — handles missing field from older registry entries
+    const resolvedPath = this.resolveDbPath(target);
+    if (!resolvedPath) {
+      throw new Error(
+        `Cannot locate database for instance '${target.label}'. ` +
+        `Ensure the instance has run at least once with Engram v1.9.2+.`
+      );
+    }
+    // Return a shallow copy with the resolved path so callers always get a valid db_path
+    return { ...target, db_path: resolvedPath };
   }
 
   /**

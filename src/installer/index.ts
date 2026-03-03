@@ -483,8 +483,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         if (nonInteractive) {
             // Use cwd as the project root
             const localDirPrefix = ide.scopes.localDirs![0];
-            let configFileName = "mcp.json";
-            if (localDirPrefix === "") configFileName = ".mcp.json";
+            const configFileName = ide.scopes.localFile ?? (localDirPrefix === "" ? ".mcp.json" : "mcp.json");
             const configPath = path.join(process.cwd(), localDirPrefix, configFileName);
             await installToPath(configPath, ide, universal);
         } else {
@@ -492,8 +491,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             const solutionDir = await askQuestion(`Enter the absolute path to your ${ide.name} project directory:\n  [${cwd}]: `);
             const resolvedDir = solutionDir.trim() || cwd;
             const localDirPrefix = ide.scopes.localDirs![0];
-            let configFileName = "mcp.json";
-            if (localDirPrefix === "") configFileName = ".mcp.json";
+            const configFileName = ide.scopes.localFile ?? (localDirPrefix === "" ? ".mcp.json" : "mcp.json");
             const configPath = path.join(resolvedDir, localDirPrefix, configFileName);
             await installToPath(configPath, ide, universal);
         }

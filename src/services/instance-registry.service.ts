@@ -226,6 +226,10 @@ export class InstanceRegistryService {
         } catch {
           existing.sharing_types = DEFAULT_SHARING_TYPES;
         }
+        // Refresh db_path if missing — entries written by older Engram versions lacked this field
+        if (!existing.db_path) {
+          existing.db_path = path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName);
+        }
       } else {
         // Entry was pruned or registry was reset — re-register
         registry.instances[id] = this.buildEntry();

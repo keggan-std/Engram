@@ -46,16 +46,21 @@ export interface IdeDefinition {
     workspaceVar?: string;
     /**
      * IDE-native variable injected as env var ENGRAM_PROJECT_ROOT in the MCP
-     * config's "env" block.  Used for IDEs that don't support workspaceVar in
-     * args but DO expand variables in env values.
-     *
-     * Falls back gracefully: if the IDE doesn't expand the variable, the
-     * server's findProjectRoot() detection chain handles it.
+     * config's "env" block.  Only set this when the IDE is confirmed to expand
+     * workspace-aware variables in env values (e.g. a hypothetical "${workspace}").
+     * Do NOT set for IDEs that only expand real OS env vars ($VAR/${VAR}) — the
+     * literal placeholder string would be passed to the server and silently ignored.
      */
     envVar?: string;
     scopes: {
         global?: string[];
         localDirs?: string[];
+        /**
+         * Override the default config filename for local installs.
+         * Defaults: "mcp.json" for non-empty localDirPrefix, ".mcp.json" for empty ("").
+         * Example: Gemini CLI uses "settings.json" not "mcp.json".
+         */
+        localFile?: string;
         /** CLI command for IDE-native installation (e.g. claude mcp add-json) */
         cli?: string;
     };
@@ -97,30 +102,39 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
-        // Windsurf does not document a workspaceVar; envVar is a best-effort hint.
-        envVar: "${workspaceFolder}",
+        // No workspaceVar — Windsurf does not expose a workspace placeholder in MCP configs.
+        // No envVar — Windsurf config interpolation uses ${env:VAR_NAME} syntax for real OS
+        // env vars only; there is no workspace-folder variable equivalent.
+        // For global installs the project_root_required fallback handles path resolution.
         scopes: {
             // Confirmed: ~/.codeium/windsurf/mcp_config.json on all platforms.
             // Source: https://docs.windsurf.com/windsurf/cascade/mcp
-            // Old fallback APPDATA/Windsurf/mcp.json was wrong: wrong dir + wrong filename.
             global: [
                 path.join(HOME, ".codeium", "windsurf", "mcp_config.json"),
             ],
         },
     },
     antigravity: {
-        name: "Antigravity IDE",
+        name: "Antigravity IDE (Gemini CLI)",
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
-        // Antigravity (Google) spawns MCP servers from $HOME, not the project dir.
-        // The envVar hints the IDE to set ENGRAM_PROJECT_ROOT if it supports
-        // variable expansion in the env block.
-        envVar: "${workspaceFolder}",
+        // No workspaceVar — Gemini CLI does not expose a workspace placeholder in MCP configs.
+        // No envVar — Gemini CLI only expands real OS env vars ($VAR or ${VAR} syntax);
+        // setting ${workspaceFolder} would pass the literal string instead of the resolved path.
+        //
+        // FIX: localDirs enables project-level installs (.gemini/settings.json in the project
+        // root). When installed locally, Gemini CLI spawns the server with cwd = project dir,
+        // so git-root detection (Tier 3) works automatically. For global installs the
+        // project_root_required fallback prompts the agent to supply the path at session start.
         scopes: {
-            // NOTE: Antigravity (Google) is newly announced; this path is unconfirmed.
-            // Marked best-effort until official docs are published.
-            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
+            // Confirmed: ~/.gemini/settings.json (global user-level config)
+            // Source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md
+            global: [path.join(HOME, ".gemini", "settings.json")],
+            // Project-level: .gemini/settings.json in the project root
+            // (Gemini CLI also reads this when run from a project directory)
+            localDirs: [".gemini"],
+            localFile: "settings.json",
         },
     },
 
