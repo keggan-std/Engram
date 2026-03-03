@@ -82,10 +82,11 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
         entry.args = [...baseArgs];
     }
 
-    // Env injection: for IDEs without workspaceVar, inject ENGRAM_PROJECT_ROOT
-    // via the env block so the server's Tier-1 detection picks it up.
-    // If the IDE doesn't expand the variable, the value is passed as-is and
-    // findProjectRoot() skips it (non-existent path).
+    // Env injection: only for IDEs that are confirmed to expand workspace-aware
+    // variables in env values. The resolved value is picked up by the server's
+    // Tier-2 (ENGRAM_PROJECT_ROOT env var) detection. This is intentionally
+    // never set for Gemini CLI or Windsurf — those IDEs only expand real OS env
+    // vars ($VAR syntax), not IDE-specific workspace placeholders.
     if (ide.envVar && !ide.workspaceVar) {
         entry.env = { ENGRAM_PROJECT_ROOT: ide.envVar };
     }
