@@ -5,11 +5,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
-import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY } from "../constants.js";
+import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
-import type { SessionContext, ProjectSnapshot, ScheduledEventRow } from "../types.js";
+import type { SessionContext, ProjectSnapshot, ScheduledEventRow, ConventionRow } from "../types.js";
+import { getPMConventions, getPhaseOverview } from "../knowledge/index.js";
+import { pmSafe } from "../services/index.js";
 import * as os from "os";
 import * as path from "path";
 import { buildToolCatalog, AGENT_RULES } from "./find.js";
@@ -67,6 +69,7 @@ Actions:
         focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
         agent_role: z.enum(["primary", "sub"]).optional().default("primary").describe("'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~300-500 tokens)."),
         task_id: z.number().int().optional().describe("Task ID to scope context around. Required when agent_role='sub'."),
+        intent: z.enum(["full_context", "quick_op", "phase_work"]).optional().default("full_context").describe("Session start intent. For: start. full_context=current behavior (default, ~730 tokens); quick_op=minimal (session_id+rules+catalog only, ~200 tokens); phase_work=full context + current phase knowledge for PM-Full (~900 tokens)."),
         // end params
         summary: z.string().optional().describe("Session accomplishments summary. Required for: end."),
         tags: coerceStringArray().optional().describe("Tags for session. For: end."),
@@ -92,7 +95,9 @@ Actions:
         case "start": {
           const agent_name = params.agent_name ?? "unknown";
           const verbosity = params.verbosity ?? "summary";
-          const focus = params.focus;          const resume_task = params.resume_task;
+          const focus = params.focus;
+          const resume_task = params.resume_task;
+          const intent = params.intent ?? 'full_context';
           const timestamp = now();
 
           // ── Runtime project root override ──────────────────────────────────
@@ -117,6 +122,23 @@ Actions:
               projectRoot = getProjectRoot();
               db = getDb();
             }
+          }
+
+          // ── Global fallback detection ──────────────────────────────────────
+          // When the DB landed at ~/.engram/global/ (no project root detected),
+          // prompt the agent to ask the user for the correct project path.
+          // ONLY when --ide=<key> is present (IDE couldn't provide the root).
+          // If no --ide flag, the user deliberately chose a global install and
+          // the global location is intentional — don't nag.
+          const globalFallback = path.join(os.homedir(), ".engram", "global");
+          const normRoot = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+          const hasIdeFlag = process.argv.some(a => a.startsWith("--ide="));
+          let projectRootRequired: { warning: string; action: string } | undefined;
+          if (normRoot(projectRoot) === normRoot(globalFallback) && !dbMigrationNote && hasIdeFlag) {
+            projectRootRequired = {
+              warning: "Engram could not detect your project directory. Memory is currently stored in a shared global location, which means different projects would share the same data.",
+              action: "Ask the user: 'What is the absolute path to your project directory?' (This is the root folder of the project you're working on — for example C:\\Users\\you\\projects\\my-app or /home/you/projects/my-app). Then call engram_session again with project_root set to that path. Example: engram_session({ action: 'start', project_root: '/path/to/project' })",
+            };
           }
 
           // ── Sub-agent path: task-scoped context (~300-500 tokens) ─────────
@@ -171,6 +193,39 @@ Actions:
           let autoCompacted = false;
           try { autoCompacted = services.compaction.autoCompact(COMPACTION_THRESHOLD_SESSIONS); } catch { /* best effort */ }
 
+          // ── PM mode config ─────────────────────────────────────────────────
+          let pmLiteEnabled = false;
+          let pmFullEnabled = false;
+          try {
+            pmLiteEnabled = repos.config.get('pm_lite_enabled') === 'true';
+            pmFullEnabled = repos.config.get('pm_full_enabled') === 'true';
+          } catch { /* best effort — config table may not exist yet in older DBs */ }
+          const pmMode: 'full' | 'lite' | 'disabled' = pmFullEnabled ? 'full' : (pmLiteEnabled ? 'lite' : 'disabled');
+
+          // ── quick_op: minimal response — session_id + rules + catalog only ─
+          if (intent === 'quick_op') {
+            const qCatalogTier = selectCatalogTier(agent_name, verbosity);
+            storeCatalogDelivery(agent_name, qCatalogTier);
+            const qRulesResult = services.agentRules.getRules();
+            let qTriggeredEvents: ScheduledEventRow[] = [];
+            try { qTriggeredEvents = services.events.triggerSessionEvents(); } catch { /* best effort */ }
+            const qUpdateNotification = services.update.getNotification();
+            logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=quick_op (dispatcher)`);
+            return success({
+              session_id: sessionId,
+              intent: 'quick_op',
+              pm_mode: pmMode === 'disabled' ? undefined : pmMode,
+              agent_rules: qRulesResult.rules,
+              agent_rules_source: qRulesResult.source,
+              tool_catalog: buildToolCatalog(qCatalogTier),
+              triggered_events: qTriggeredEvents.length > 0 ? qTriggeredEvents.map(e => ({ id: e.id, title: e.title, priority: e.priority })) : undefined,
+              update_available: qUpdateNotification ?? undefined,
+              db_migration: dbMigrationNote ?? undefined,
+              project_root_required: projectRootRequired ?? undefined,
+              message: `Session #${sessionId} started (quick_op). Agent rules + tool catalog loaded. Use engram_memory — see tool_catalog.`,
+            });
+          }
+
           let recordedChanges = lastSession?.ended_at ? repos.changes.getSince(lastSession.ended_at) : [];
           const gitBranch = services.git.getBranch();
           const gitHead = services.git.getHead();
@@ -179,11 +234,23 @@ Actions:
           // Focus filtering
           let focusInfo: import("../types.js").SessionFocusInfo | undefined;
           let activeDecisions = repos.decisions.getActive(20);
-          const activeConventions = repos.conventions.getActive();
+          let activeConventions = repos.conventions.getActive();
           // Sort: enforced conventions first, then most recently added — so the most important appear in capped responses
           activeConventions.sort((a, b) => ((b.enforced ? 1 : 0) - (a.enforced ? 1 : 0)) || (b.id - a.id));
           const totalConventions = activeConventions.length;
-          const capConventions = (cap: number) => activeConventions.slice(0, cap).map(c => ({ id: c.id, category: c.category, rule: truncate(c.rule, 100), enforced: c.enforced }));
+          // capConventions: deliver summary (80-char intent-first), append PM conventions when PM-Full active
+          const capConventions = (cap: number) => {
+            const mapped = activeConventions.slice(0, cap).map(c => ({ id: c.id, category: c.category, summary: c.summary || truncate(c.rule, 80), enforced: c.enforced }));
+            if (pmFullEnabled) {
+              const pmConvs = pmSafe(
+                () => getPMConventions().map(p => ({ id: `pm-${p.id}`, category: p.category, summary: p.compact, enforced: true })),
+                [] as { id: string | number; category: string; summary: string; enforced: boolean | number }[],
+                'inject PM conventions'
+              );
+              return [...mapped, ...pmConvs];
+            }
+            return mapped;
+          };
           let openTasks = repos.tasks.getOpen(15, resume_task || undefined);
 
           if (focus && focus.trim().length > 0) {
@@ -192,6 +259,7 @@ Actions:
             const totalTasks = openTasks.length;
             const totalChanges = recordedChanges.length;
             try { activeDecisions = repos.decisions.getActiveFocused(ftsQuery, FOCUS_MAX_ITEMS_PER_CATEGORY); } catch { /* FTS unavailable */ }
+            try { activeConventions = repos.conventions.getActiveFocused(ftsQuery, FOCUS_MAX_ITEMS_PER_CATEGORY); } catch { /* FTS unavailable */ }
             try { openTasks = repos.tasks.getOpenFocused(ftsQuery, FOCUS_MAX_ITEMS_PER_CATEGORY); } catch { /* FTS unavailable */ }
             const focusWords = focus.toLowerCase().split(/\s+/).filter(Boolean);
             const focusedChanges = recordedChanges.filter(c =>
@@ -229,24 +297,41 @@ Actions:
             if (candidates.length > 0) suggestedFocus = candidates[0];
           }
 
-          logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} (dispatcher)`);
+          logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=${intent} (dispatcher)`);
 
-          // ── Global fallback detection ──────────────────────────────────────
-          // When the DB landed at ~/.engram/global/ (no project root detected),
-          // prompt the agent to ask the user for the correct project path.
-          // ONLY when --ide=<key> is present (IDE couldn't provide the root).
-          // If no --ide flag, the user deliberately chose a global install and
-          // the global location is intentional — don't nag.
-          const globalFallback = path.join(os.homedir(), ".engram", "global");
-          const normRoot = (p: string) => p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-          const hasIdeFlag = process.argv.some(a => a.startsWith("--ide="));
-          let projectRootRequired: { warning: string; action: string } | undefined;
-          if (normRoot(projectRoot) === normRoot(globalFallback) && !dbMigrationNote && hasIdeFlag) {
-            projectRootRequired = {
-              warning: "Engram could not detect your project directory. Memory is currently stored in a shared global location, which means different projects would share the same data.",
-              action: "Ask the user: 'What is the absolute path to your project directory?' (This is the root folder of the project you're working on — for example C:\\Users\\you\\projects\\my-app or /home/you/projects/my-app). Then call engram_session again with project_root set to that path. Example: engram_session({ action: 'start', project_root: '/path/to/project' })",
-            };
+          // ── phase_work: detect current phase from task tags ────────────────
+          let phaseKnowledge: { phase: number; name: string; label: string; compact: string; entryCriteria: string[]; exitCriteria: string[]; instructionSummaries: string[] } | undefined;
+          if (intent === 'phase_work' && pmFullEnabled) {
+            let detectedPhase: number | undefined;
+            // First pass: look for explicit phase:N tags on open tasks
+            for (const t of openTasks) {
+              const tags: string[] = t.tags ? (typeof t.tags === 'string' ? JSON.parse(t.tags) : t.tags as string[]) : [];
+              for (const tag of tags) {
+                const m = tag.match(/^phase:(\d+)$/);
+                if (m) { const n = parseInt(m[1]); if (!detectedPhase || n > detectedPhase) detectedPhase = n; }
+              }
+            }
+            // Second pass: keyword match against task titles
+            if (!detectedPhase) {
+              for (const t of openTasks) {
+                const lower = t.title.toLowerCase();
+                for (const [keyword, phase] of Object.entries(PHASE_MAP)) {
+                  if (lower.includes(keyword)) { if (!detectedPhase || phase > detectedPhase) detectedPhase = phase; }
+                }
+              }
+            }
+            if (detectedPhase !== undefined) {
+              const overview = pmSafe(() => getPhaseOverview(detectedPhase!), null as ReturnType<typeof getPhaseOverview>, 'get phase overview');
+              if (overview) phaseKnowledge = overview;
+            }
           }
+
+          // ── PM-Full agent rules injection ──────────────────────────────────
+          const pmAgentRules = pmFullEnabled ? [
+            { priority: "HIGH", condition: "pm_full", rule: "When working on phase-tagged tasks, check phase gate checklist before marking the phase complete. Use get_knowledge(phase:N, type:'checklist')." },
+            { priority: "MEDIUM", condition: "pm_full", rule: "Tag new tasks with phase:N (e.g., phase:planning, phase:execution) for phase tracking and automatic gate detection." },
+            { priority: "MEDIUM", condition: "pm_full", rule: "Use get_knowledge(type:'estimation') before providing time estimates. Apply PERT formula: E=(O+4M+P)/6." },
+          ] : undefined;
 
           // Build response
           const catalogTier = selectCatalogTier(agent_name, verbosity);
@@ -256,6 +341,9 @@ Actions:
           const rulesResult = services.agentRules.getRules();
           const baseResponse = {
             session_id: sessionId,
+            intent: intent !== 'full_context' ? intent : undefined,
+            pm_mode: pmMode === 'disabled' ? undefined : pmMode,
+            pm_agent_rules: pmAgentRules,
             previous_session: lastSession ? { id: lastSession.id, summary: lastSession.summary, ended_at: lastSession.ended_at, agent: lastSession.agent_name } : null,
             git: { branch: gitBranch, head: gitHead },
             auto_compacted: autoCompacted,
@@ -293,13 +381,13 @@ Actions:
           }
 
           if (verbosity === "summary") {
-            return success({ ...baseResponse, verbosity: "summary", changes_since_last: { count: recordedChanges.length, recent: recordedChanges.slice(0, 5).map(c => ({ file_path: c.file_path, change_type: c.change_type, description: truncate(c.description, 120), timestamp: c.timestamp })), git_log: gitLog ? truncate(gitLog, 500) : "" }, active_decisions: activeDecisions.slice(0, 5).map(d => ({ id: d.id, decision: truncate(d.decision, 120), status: d.status, tags: d.tags })), active_conventions: capConventions(10), total_conventions: totalConventions, conventions_note: totalConventions > 10 ? `Showing 10 of ${totalConventions} conventions. Use engram_memory(action:'get_conventions') for all.` : undefined, open_tasks: openTasks.slice(0, 5).map(t => ({ id: t.id, title: t.title, status: t.status, priority: t.priority })), total_file_notes: repos.fileNotes.countAll(), git_hook_log: gitHookLog || undefined, message: lastSession ? `Session #${sessionId} started. Resuming from #${lastSession.id}. ${recordedChanges.length} changes since. Use engram_memory — see tool_catalog.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}` : `Session #${sessionId} started. First session. Use engram_memory — see tool_catalog.` });
+            return success({ ...baseResponse, verbosity: "summary", changes_since_last: { count: recordedChanges.length, recent: recordedChanges.slice(0, 5).map(c => ({ file_path: c.file_path, change_type: c.change_type, description: truncate(c.description, 120), timestamp: c.timestamp })), git_log: gitLog ? truncate(gitLog, 500) : "" }, active_decisions: activeDecisions.slice(0, 5).map(d => ({ id: d.id, decision: truncate(d.decision, 120), status: d.status, tags: d.tags })), active_conventions: capConventions(10), total_conventions: totalConventions, conventions_note: totalConventions > 10 ? `Showing 10 of ${totalConventions} conventions. Use engram_memory(action:'get_conventions') for all.` : undefined, open_tasks: openTasks.slice(0, 5).map(t => ({ id: t.id, title: t.title, status: t.status, priority: t.priority })), total_file_notes: repos.fileNotes.countAll(), git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started. Resuming from #${lastSession.id}. ${recordedChanges.length} changes since. Use engram_memory — see tool_catalog.${suggestedFocus ? ` 💡 Suggested focus: "${suggestedFocus}".` : ""}` : `Session #${sessionId} started. First session. Use engram_memory — see tool_catalog.` });
           }
 
           // full verbosity
           let projectSnapshot = null;
           try { projectSnapshot = services.scan.getOrRefresh(projectRoot); } catch { /* best effort */ }
-          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: activeDecisions, active_conventions: activeConventions, open_tasks: openTasks, project_snapshot: projectSnapshot, git_hook_log: gitHookLog || undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
+          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: activeDecisions, active_conventions: capConventions(activeConventions.length + 10), open_tasks: openTasks, project_snapshot: projectSnapshot, git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
         }
 
         case "end": {
