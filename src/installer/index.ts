@@ -47,7 +47,9 @@ export async function runInstaller(args: string[]) {
         if (path.resolve(process.cwd()) === runningRoot) {
             const cwdPkg = readJson(path.join(process.cwd(), "package.json"));
             if (cwdPkg?.name === "engram-mcp-server") {
-                console.log(`\n✅ Dev mode: running local build v${cwdPkg.version} (dist/index.js)\n`);
+                console.warn("\n⚠️  Running from the engram source directory.");
+                console.warn("   Version shown reflects the local build — not the published npm package.");
+                console.warn("   For an accurate check: npm install -g engram-mcp-server@latest && engram --check\n");
             }
         }
     } catch { /* ignore — detection is best-effort */ }
@@ -141,9 +143,21 @@ Examples:
         process.exit(0);
     }
 
-    // ─── --check ─────────────────────────────────────────────────────
+    // ─── --check ─────────────────────────────────────────────────────────────
     if (args.includes("--check")) {
         const currentVersion = getInstallerVersion();
+        const cwd = process.cwd();
+
+        // ── ANSI color helpers (TTY only) ──────────────────────────────────────
+        const usesColor = process.stdout.isTTY ?? false;
+        const clr = (code: string, t: string) => usesColor ? `\x1b[${code}m${t}\x1b[0m` : t;
+        const bold   = (t: string) => clr("1",   t);
+        const dim    = (t: string) => clr("2",   t);
+        const green  = (t: string) => clr("32",  t);
+        const yellow = (t: string) => clr("33",  t);
+        const cyan   = (t: string) => clr("36",  t);
+        const gray   = (t: string) => clr("90",  t);
+        const hr = "─".repeat(66);
 
         const semverCmp = (a: string, b: string): number => {
             const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
@@ -151,8 +165,8 @@ Examples:
             return 0;
         };
 
-        // Fetch npm latest FIRST — it is the authoritative reference for all comparisons.
-        process.stdout.write(`\nEngram Version Check\n\n  npm latest      : checking...`);
+        // ── Fetch npm latest ───────────────────────────────────────────────────
+        process.stdout.write(`\n  ${bold("Engram Installation Check")}\n\n  Checking npm registry...`);
         let npmLatest: string | null = null;
         try {
             const controller = new AbortController();
@@ -163,72 +177,159 @@ Examples:
             });
             clearTimeout(timer);
             if (res.ok) {
-                const data = await res.json() as Record<string, unknown>;
-                npmLatest = data["version"] as string;
-                const cmp = semverCmp(currentVersion, npmLatest);
-                const runningLabel = cmp === 0
-                    ? "✅ up to date"
-                    : cmp > 0
-                        ? `⚡ running pre-release (v${currentVersion} > npm v${npmLatest})`
-                        : `⬆  update available`;
-                process.stdout.write(`\r  npm latest      : v${npmLatest}\n`);
-                console.log(`  Running version : v${currentVersion}  ${runningLabel}`);
-            } else {
-                process.stdout.write(`\r  npm latest      : (registry unreachable)\n`);
-                console.log(`  Running version : v${currentVersion}`);
+                npmLatest = ((await res.json() as Record<string, unknown>)["version"] as string);
             }
-        } catch {
-            process.stdout.write(`\r  npm latest      : (network error — check manually)\n`);
-            console.log(`  Running version : v${currentVersion}`);
-        }
+        } catch { /* network error — best effort */ }
 
-        console.log(`\n  IDE Configurations:\n`);
+        const selfCmp    = npmLatest ? semverCmp(currentVersion, npmLatest) : 0;
+        const selfStatus = !npmLatest    ? gray("(npm unreachable)")
+                         : selfCmp >  0  ? yellow("⚡ pre-release")
+                         : selfCmp === 0 ? green("✅ up to date")
+                         :                 yellow(`⬆  v${npmLatest} is available`);
 
-        for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-            if (!ide.scopes.global) continue;
-            const foundPath = ide.scopes.global.find(p => fs.existsSync(p));
-            if (!foundPath) {
-                console.log(`  ${id.padEnd(14)} (not detected)`);
-                continue;
-            }
-            let entry: any = null;
-            try {
-                const config = readJson(foundPath);
-                entry = config?.[ide.configKey]?.engram ?? null;
-            } catch (e) {
-                if (e instanceof ConfigParseError) {
-                    console.log(`  ${id.padEnd(14)} ${foundPath}`);
-                    console.log(`  ${"  ".repeat(7)} ⚠️  Invalid JSON in config — run 'engram install' to repair`);
-                    console.log();
-                    continue;
-                }
+        process.stdout.write(`\r  This build : ${cyan("v" + currentVersion)}  ${selfStatus}\n`);
+        if (npmLatest) process.stdout.write(`  npm latest : ${cyan("v" + npmLatest)}\n`);
+        process.stdout.write(`  CWD        : ${gray(cwd)}\n`);
+
+        // ── Entry resolver ─────────────────────────────────────────────────────
+        type EntryResult =
+            | { state: "not-found";     scope: "global" | "local"; filePath: string }
+            | { state: "not-installed"; scope: "global" | "local"; filePath: string }
+            | { state: "invalid-json";  scope: "global" | "local"; filePath: string }
+            | { state: "installed";     scope: "global" | "local"; filePath: string;
+                instance: string; version: string; icon: string; statusLine: string };
+
+        const resolveEntry = (filePath: string, scope: "global" | "local", ide: IdeDefinition): EntryResult => {
+            if (!fs.existsSync(filePath)) return { state: "not-found", scope, filePath };
+            let config: Record<string, unknown>;
+            try { config = readJson(filePath) as Record<string, unknown>; }
+            catch (e) {
+                if (e instanceof ConfigParseError) return { state: "invalid-json", scope, filePath };
                 throw e;
             }
-            if (!entry) {
-                console.log(`  ${id.padEnd(14)} ${foundPath}`);
-                console.log(`  ${"".padEnd(14)} Not installed`);
-            } else {
-                const installedVersion: string = entry._engram_version || "unknown (pre-tracking)";
-                // Compare the IDE config version against npm latest (the authoritative reference).
-                // Fall back to the running version only when the registry was unreachable.
-                const reference = npmLatest ?? currentVersion;
-                const cmp = installedVersion === "unknown (pre-tracking)" ? -1 : semverCmp(installedVersion, reference);
-                const statusIcon = cmp >= 0 ? "✅" : "⬆";
-                const statusLabel = cmp >= 0
-                    ? "up to date"
-                    : npmLatest
-                        ? `update available — run: npx -y engram-mcp-server install`
-                        : `behind running version (v${currentVersion})`;
-                console.log(`  ${id.padEnd(14)} ${foundPath}`);
-                console.log(`  ${"".padEnd(14)} Installed: v${installedVersion}  ${statusIcon} ${statusLabel}`);
+            const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
+            const instanceKey = Object.keys(serverMap).find(k => {
+                const en = serverMap[k];
+                return k === "engram"
+                    || String(en?.command ?? "").includes("engram")
+                    || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
+            });
+            if (!instanceKey) return { state: "not-installed", scope, filePath };
+            const entry = serverMap[instanceKey];
+            const installedVersion = String(entry?._engram_version ?? "?");
+            const ref     = npmLatest ?? currentVersion;
+            const isUnknown = installedVersion === "?";
+            const icmp    = isUnknown ? -1 : semverCmp(installedVersion, ref);
+            const icon       = icmp >= 0 ? green("✅") : yellow("⬆ ");
+            const statusLine = icmp >= 0 ? green("up to date")
+                             : npmLatest  ? yellow("update available")
+                             :              yellow(`behind v${currentVersion}`);
+            return { state: "installed", scope, filePath, instance: instanceKey,
+                     version: installedVersion, icon, statusLine };
+        };
+
+        // ── Collect results for every IDE ──────────────────────────────────────
+        type IdeResult = { name: string; entries: EntryResult[] };
+        const results: IdeResult[] = [];
+
+        for (const [, ide] of Object.entries(IDE_CONFIGS)) {
+            const entries: EntryResult[] = [];
+
+            // Global: use first found path. If none found, keep a not-found placeholder so
+            // "detected config but no engram entry" stays distinct from "IDE not present at all".
+            if (ide.scopes.global?.length) {
+                let found = false;
+                for (const gp of ide.scopes.global) {
+                    const e = resolveEntry(gp, "global", ide);
+                    if (e.state !== "not-found") { entries.push(e); found = true; break; }
+                }
+                if (!found) entries.push({ state: "not-found", scope: "global", filePath: ide.scopes.global[0] });
             }
-            console.log();
+
+            // Local: scan each dir relative to CWD; add only files that actually exist.
+            if (ide.scopes.localDirs?.length) {
+                for (const dir of ide.scopes.localDirs) {
+                    const localFile = ide.scopes.localFile ?? (dir === "" ? ".mcp.json" : "mcp.json");
+                    const lp = path.join(cwd, dir, localFile);
+                    const e = resolveEntry(lp, "local", ide);
+                    if (e.state !== "not-found") entries.push(e);
+                }
+            }
+
+            results.push({ name: ide.name, entries });
         }
 
-        console.log(`  To update: npx -y engram-mcp-server install`);
-        console.log(`  Releases : https://github.com/keggan-std/Engram/releases\n`);
+        // ── Print ──────────────────────────────────────────────────────────────
+        let countInstalled = 0, countNeedUpdate = 0, countNotInstalled = 0, countNotDetected = 0;
+
+        console.log(`\n  ${gray(hr)}\n`);
+
+        for (const { name, entries } of results) {
+            const anyFound     = entries.some(e => e.state !== "not-found");
+            const anyInstalled = entries.some(e => e.state === "installed");
+
+            if (!anyFound) {
+                console.log(`  ${dim(name.padEnd(26))}  ${gray("not detected")}`);
+                countNotDetected++;
+                continue;
+            }
+
+            console.log(`  ${bold(name)}`);
+
+            let ideNotInstalled = false;
+            for (const e of entries) {
+                const tag     = e.scope === "global" ? "global" : "local ";
+                const relPath = e.scope === "local"
+                    ? (path.relative(cwd, e.filePath) || e.filePath)
+                    : e.filePath;
+
+                if (e.state === "not-found") continue;
+
+                if (e.state === "not-installed") {
+                    console.log(`    ${dim(tag)}  ${gray("not installed")}`);
+                    console.log(`           ${gray("↳ " + relPath)}`);
+                    ideNotInstalled = true;
+                    continue;
+                }
+                if (e.state === "invalid-json") {
+                    console.log(`    ${dim(tag)}  ${yellow("⚠ invalid JSON")}  ${gray("→ engram install")}`);
+                    console.log(`           ${gray("↳ " + relPath)}`);
+                    continue;
+                }
+                // installed
+                const ver = e.version === "?" ? gray("v?") : cyan(`v${e.version}`);
+                console.log(`    ${tag}  ${gray('"' + e.instance + '"')}  ${ver}  ${e.icon} ${e.statusLine}`);
+                console.log(`           ${gray("↳ " + relPath)}`);
+            }
+            console.log();
+
+            if (anyInstalled) {
+                countInstalled++;
+                const needsUpdate = (entries as EntryResult[]).some(
+                    e => e.state === "installed" && (e.statusLine.includes("update") || e.statusLine.includes("behind"))
+                );
+                if (needsUpdate) countNeedUpdate++;
+            } else if (ideNotInstalled) {
+                countNotInstalled++;
+            }
+        }
+
+        // ── Summary ────────────────────────────────────────────────────────────
+        const summaryParts: string[] = [];
+        if (countInstalled)    summaryParts.push(green(`✅ ${countInstalled} installed`));
+        if (countNeedUpdate)   summaryParts.push(yellow(`⬆  ${countNeedUpdate} need update`));
+        if (countNotInstalled) summaryParts.push(`⬜ ${countNotInstalled} not installed`);
+        if (countNotDetected)  summaryParts.push(dim(`${countNotDetected} not detected`));
+
+        console.log(`  ${gray(hr)}`);
+        console.log(`  ${summaryParts.join(gray("  ·  "))}\n`);
+        if (countNeedUpdate > 0 || countNotInstalled > 0) {
+            console.log(`  Run:      npx -y engram-mcp-server install`);
+        }
+        console.log(`  Releases: https://github.com/keggan-std/Engram/releases\n`);
         process.exit(0);
     }
+
 
     // ─── --install-hooks / --remove-hooks ────────────────────────────
     if (args.includes("--install-hooks")) {
