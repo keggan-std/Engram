@@ -115,26 +115,24 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         },
     },
     antigravity: {
-        name: "Antigravity IDE (Gemini CLI)",
+        name: "Antigravity IDE (Gemini)",
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
-        // No workspaceVar — Gemini CLI does not expose a workspace placeholder in MCP configs.
+        // No workspaceVar — Gemini/Antigravity does not expose a workspace placeholder in MCP configs.
         // No envVar — Gemini CLI only expands real OS env vars ($VAR or ${VAR} syntax);
         // setting ${workspaceFolder} would pass the literal string instead of the resolved path.
         //
-        // FIX: localDirs enables project-level installs (.gemini/settings.json in the project
-        // root). When installed locally, Gemini CLI spawns the server with cwd = project dir,
-        // so git-root detection (Tier 3) works automatically. For global installs the
-        // project_root_required fallback prompts the agent to supply the path at session start.
+        // No localDirs — Antigravity is an IDE, not a CLI. It always reads the global user-level
+        // config (~/.gemini/settings.json). Project-local .gemini/settings.json is only read by
+        // the Gemini CLI tool when invoked from a terminal inside a project directory, NOT by the IDE.
+        // The Engram database location (per-project) is handled at session start by findProjectRoot()
+        // and the project_root_required fallback (v1.9.1) — it is orthogonal to MCP config placement.
         scopes: {
-            // Confirmed: ~/.gemini/settings.json (global user-level config)
-            // Source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md
-            global: [path.join(HOME, ".gemini", "settings.json")],
-            // Project-level: .gemini/settings.json in the project root
-            // (Gemini CLI also reads this when run from a project directory)
-            localDirs: [".gemini"],
-            localFile: "settings.json",
+            // User-verified: ~/.gemini/antigravity/mcp_config.json
+            // This is the Antigravity desktop IDE app path — distinct from Gemini CLI.
+            // Source: user-verified on Windows (C:\Users\~ RG\.gemini\antigravity\mcp_config.json)
+            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
         },
     },
 
@@ -187,20 +185,64 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
 
     // ─── Other IDEs ─────────────────────────────────────────────────
     cline: {
-        name: "Cline / Roo Code",
+        name: "Cline",
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
-            // With corrected APPDATA:
+            // Global: VS Code extension globalStorage
             //   Windows : %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
             //   macOS   : ~/Library/Application Support/Code/User/globalStorage/.../cline_mcp_settings.json
             //   Linux   : ~/.config/Code/User/globalStorage/.../cline_mcp_settings.json
+            // Source: confirmed from cline/cline disk.ts GlobalFileNames.mcpSettings
             global: [
                 path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-                // Roo Code uses a different extension ID
-                path.join(APPDATA, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"),
             ],
+        },
+    },
+    roocode: {
+        name: "Roo Code",
+        configKey: "mcpServers",
+        requiresType: false,
+        requiresCmdWrapper: false,
+        scopes: {
+            // Global: VS Code extension globalStorage — filename is mcp_settings.json (not cline_mcp_settings.json)
+            // Source: RooCodeInc/Roo-Code src/shared/globalFileNames.ts mcpSettings = "mcp_settings.json"
+            global: [
+                path.join(APPDATA, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"),
+            ],
+            // Project-level: .roo/mcp.json in workspace root
+            // Source: RooCodeInc/Roo-Code McpHub.ts#getProjectMcpPath — watches .roo/mcp.json
+            localDirs: [".roo"],
+        },
+    },
+    geminicli: {
+        name: "Gemini CLI",
+        configKey: "mcpServers",
+        requiresType: false,
+        requiresCmdWrapper: false,
+        // No workspaceVar — Gemini CLI only expands real OS env vars ($VAR or ${VAR}),
+        // not workspace-folder placeholders.
+        scopes: {
+            // Global user config: ~/.gemini/settings.json
+            // Source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md
+            global: [path.join(HOME, ".gemini", "settings.json")],
+            // Project-level: .gemini/settings.json (uses settings.json, not mcp.json)
+            // Source: https://firebase.google.com/docs/studio/mcp-servers
+            localDirs: [".gemini"],
+            localFile: "settings.json",
+        },
+    },
+    firebasestudio: {
+        name: "Firebase Studio (IDX)",
+        configKey: "mcpServers",
+        requiresType: false,
+        requiresCmdWrapper: false,
+        scopes: {
+            // Cloud-based IDE (formerly Project IDX): project-level config at .idx/mcp.json.
+            // Interactive chat uses .idx/mcp.json; Gemini CLI inside Firebase Studio uses .gemini/settings.json.
+            // Source: https://firebase.google.com/docs/studio/mcp-servers
+            localDirs: [".idx"],
         },
     },
     trae: {
@@ -208,19 +250,26 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: true,
         requiresCmdWrapper: false,
+        // FLAW-4 FIX: Trae officially supports ${workspaceFolder} in args/command fields.
+        // Source: https://docs.trae.ai/ide/add-mcp-servers
+        workspaceVar: "${workspaceFolder}",
         scopes: {
             localDirs: [".trae"],
         },
     },
     jetbrains: {
         name: "JetBrains (Copilot Plugin)",
-        configKey: "mcpServers",
+        // Confirmed: uses "servers" key (same as VS Code Copilot).
+        // Source: https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/extend-copilot-chat-with-mcp?tool=jetbrains
+        configKey: "servers",
         requiresType: false,
         requiresCmdWrapper: false,
         scopes: {
             // ~/.config/github-copilot/intellij/mcp.json on Mac/Linux.
             // On Windows the GitHub Copilot JetBrains plugin uses the same
             // ~/.config path (it does NOT use %APPDATA%).
+            // Note: JetBrains docs don't expose the raw file path publicly (always opened via UI),
+            // but this path is consistent with how the GitHub Copilot plugin stores data.
             global: [
                 path.join(HOME, ".config", "github-copilot", "intellij", "mcp.json"),
             ],
