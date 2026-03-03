@@ -1,3 +1,58 @@
+# v1.9.3 — IDE Config Paths, Correct Config Keys & Docs Refresh
+
+**Released:** v1.9.3 — March 3, 2026
+
+## Overview
+
+v1.9.3 is a correctness and documentation release. The automated installer config paths for all 13 supported IDEs have been audited and corrected against live source/docs research. README installation docs have been completely rewritten with accurate per-IDE config snippets, correct config key names, and a new section documenting Engram's database location behaviour.
+
+Zero breaking changes. No schema migration required.
+
+---
+
+## What's Fixed
+
+### IDE MCP Config Paths & Keys Corrected (`src/installer/ide-configs.ts`)
+
+Every IDE entry was verified against its official documentation and source code:
+
+- **Config key `"servers"` vs `"mcpServers"`** — VS Code, Visual Studio, and JetBrains use `"servers"`. All other IDEs use `"mcpServers"`. Previously several entries had the wrong key.
+- **Correct file paths** for all 13 IDEs: VS Code (`.vscode/mcp.json` local / `{APPDATA}/Code/User/mcp.json` global), Cursor (`.cursor/mcp.json` local / `~/.cursor/mcp.json` global), Windsurf (`~/.codeium/windsurf/mcp_config.json`), Antigravity (`~/.gemini/antigravity/mcp_config.json`), Claude Code (`~/.claude.json` global / `.mcp.json` local), Claude Desktop (`{APPDATA}/Claude/claude_desktop_config.json`), Visual Studio (`.vs/mcp.json` or `.mcp.json` local / `%USERPROFILE%\.mcp.json` global), Cline, Roo Code, Gemini CLI, Firebase Studio, Trae, JetBrains.
+- **`workspaceVar` and `--project-root` injection** — IDEs that expand workspace variables (VS Code, Cursor, Visual Studio, Trae) now correctly inject `--project-root=${workspaceFolder}` (or `${SolutionDir}`) into args.
+- **Windows `cmd` wrapper** — Claude Code and Claude Desktop on Windows correctly use `"command":"cmd","args":["/c","npx",...]` since `npx` is a `.cmd` file.
+
+### Installer Default Scope Changed to Global (`src/installer/index.ts`)
+
+When an IDE supports both local and global MCP config, the installer now defaults to **global** (was local). Global is the correct default for most users who want all their projects in that IDE to use Engram without per-project setup. The scope prompt was also updated to clarify that scope selection only controls WHERE the MCP is registered — not where Engram stores its database.
+
+### README Installation Section Rewrite (`README.md`)
+
+- All 13 IDE manual-config `<details>` blocks rewritten with correct JSON snippets, config key names, and file paths.
+- New **Engram Database Location** section documents the database path resolution logic: project-local `.engram/memory.db` by default, global fallback `~/.engram/global/memory.db` when no project root is found, and how `npm install -g` + global IDE config interacts with this.
+- `--ide` values in Option 2 updated to include all 13 IDs: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/installer/ide-configs.ts` | Corrected config paths, config keys, workspaceVar, and cmd wrapper for all 13 IDEs |
+| `src/installer/index.ts` | Default scope → global; updated scope prompt with DB location clarification |
+| `README.md` | Installation section rewrite: all 13 IDEs, correct config keys, DB location docs |
+
+---
+
+## Upgrade
+
+```bash
+npx -y engram-mcp-server@latest install
+```
+
+No configuration migration needed. Re-run the installer to pick up updated config paths if any were wrong in your previous installation.
+
+---
+
 # v1.9.2 — Cross-Instance Sharing Hotfix
 
 **Released:** v1.9.2 — March 3, 2026

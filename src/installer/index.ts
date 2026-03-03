@@ -456,19 +456,23 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         console.log(`   ${ide.scopes.cli} engram ${quotedEntry} --scope user`);
     }
 
-    // Default to project-level (local) when the IDE supports it.
-    // Global is only used when the IDE has no local support, or when --global is explicitly passed.
-    let targetScope = supportsLocal ? "local" : "global";
+    // Default to global. Local is only used when the IDE has no global support,
+    // or when the user explicitly picks it from the scope prompt below.
+    let targetScope = supportsGlobal ? "global" : "local";
 
     if (forceGlobal && supportsGlobal) {
         // User explicitly requested global via --global flag
         targetScope = "global";
     } else if (supportsLocal && supportsGlobal && !nonInteractive) {
-        console.log(`\n${ide.name} supports both project-level and global installation.`);
-        console.log(`  1. Global  (Applies to all projects)`);
-        console.log(`  2. Local   (Project-level — recommended)`);
-        const scopeAns = await askQuestion("Select scope [1-2] (default 2): ");
-        if (scopeAns.trim() === "1") {
+        console.log(`\n${ide.name} supports two MCP config file locations:`);
+        console.log(`  1. Global  — writes to your user-level IDE config (all projects use this MCP)`);
+        console.log(`  2. Local   — writes to a config file inside a specific project folder`);
+        console.log(`\n  Note: This only controls WHERE the MCP is registered, not where Engram stores`);
+        console.log(`  its database. The database is always placed at your project root automatically.`);
+        const scopeAns = await askQuestion("Select scope [1-2] (default 1): ");
+        if (scopeAns.trim() === "2") {
+            targetScope = "local";
+        } else {
             targetScope = "global";
         }
     }
