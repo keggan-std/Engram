@@ -194,7 +194,7 @@ npm install -g engram-mcp-server
 engram install --ide <your-ide>
 ```
 
-Available `--ide` values: `claudecode`, `claudedesktop`, `vscode`, `cursor`, `windsurf`, `antigravity`, `visualstudio`, `cline`, `trae`, `jetbrains`
+Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
@@ -271,48 +271,46 @@ The original separate proxy package for maximum token efficiency. Still works; p
 
 > The agent should call `engram({"action":"start"})` first. The response includes `tool_catalog` with all available actions.
 
+### Engram Database Location
+
+Engram maintains a **SQLite database** — one per project — that stores all agent memory.
+
+| How you run Engram | Database path |
+|---|---|
+| Project-local MCP config (default) | `<project-root>/.engram/memory.db` — auto-detected via git root, `.engram` marker, `package.json` walk-up |
+| No project root found (non-project dir) | `~/.engram/global/memory.db` — global fallback, logged as a warning |
+| `npm install -g engram-mcp-server` + global IDE config (no `--project-root`) | `~/.engram/global/memory.db` — global memory shared across all projects |
+
+> **`--project-root` flag** — The most reliable way to pin the database. IDEs that support workspace variables (VS Code, Cursor, Visual Studio, Trae) inject this automatically. For IDEs without workspace variable support (Windsurf, Antigravity, Gemini CLI, Claude Desktop), add `"--project-root=/absolute/path/to/your/project"` to the `args` array manually.
+>
+> `npm install -g engram-mcp-server` makes the `engram` command available globally. When Engram is configured in a **user-level** (global) IDE config without `--project-root`, it cannot detect a specific project and initializes its database at the global fallback `~/.engram/global/memory.db`. This is intentional — a global config serves all projects simultaneously.
+
+---
+
 ### Option 5: Manual Configuration
 
-If you prefer to configure manually, find your IDE below:
+If you prefer to configure manually, find your IDE below. Each entry shows the correct config file path and JSON format.
+
+> **Config key note:** VS Code, Visual Studio, and JetBrains use `"servers"` as the top-level key. All other IDEs use `"mcpServers"`.
 
 <details>
-<summary><strong>Claude Code (CLI)</strong></summary>
+<summary><strong>VS Code (GitHub Copilot)</strong></summary>
 
-Run this in your terminal:
-
-```bash
-claude mcp add-json --scope=user engram '{"type":"stdio","command":"cmd","args":["/c","npx","-y","engram-mcp-server"]}'
-```
-
-_(Omit `"command":"cmd"` and `"args":["/c", ...]` on Mac/Linux, use just `"command":"npx"`)._
-
-</details>
-
-<details>
-<summary><strong>Claude Desktop</strong></summary>
-
-Add to your `claude_desktop_config.json`:
-
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-- **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Local (recommended)** — create `.vscode/mcp.json` in your project root:
 
 ```json
 {
-    "mcpServers": {
+    "servers": {
         "engram": {
+            "type": "stdio",
             "command": "npx",
-            "args": ["-y", "engram-mcp-server"]
+            "args": ["-y", "engram-mcp-server", "--project-root=${workspaceFolder}"]
         }
     }
 }
 ```
 
-</details>
-
-<details>
-<summary><strong>VS Code (GitHub Copilot)</strong></summary>
-
-Create `.vscode/mcp.json` in your project root, or add to your global user `settings.json`:
+**Global** — `%APPDATA%\Code\User\mcp.json` (Windows) / `~/Library/Application Support/Code/User/mcp.json` (Mac) / `~/.config/Code/User/mcp.json` (Linux):
 
 ```json
 {
@@ -326,12 +324,27 @@ Create `.vscode/mcp.json` in your project root, or add to your global user `sett
 }
 ```
 
+> `${workspaceFolder}` is expanded by VS Code at spawn time — the database is always placed at the correct project root automatically.
+
 </details>
 
 <details>
-<summary><strong>Cursor & Windsurf</strong></summary>
+<summary><strong>Cursor</strong></summary>
 
-For Cursor, edit `~/.cursor/mcp.json`. For Windsurf, edit `~/.codeium/windsurf/mcp_config.json`:
+**Local** — `.cursor/mcp.json` in your project root:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=${workspaceFolder}"]
+        }
+    }
+}
+```
+
+**Global** — `~/.cursor/mcp.json`:
 
 ```json
 {
@@ -344,30 +357,64 @@ For Cursor, edit `~/.cursor/mcp.json`. For Windsurf, edit `~/.codeium/windsurf/m
 }
 ```
 
+> `${workspaceFolder}` is supported in Cursor's `args` field and is expanded at spawn time.
+
 </details>
 
 <details>
-<summary><strong>Visual Studio 2022/2026</strong></summary>
+<summary><strong>Windsurf</strong></summary>
 
-Create `.vs/mcp.json` in your solution root:
+**Global** — `~/.codeium/windsurf/mcp_config.json` (Windsurf only supports a single global config):
 
 ```json
 {
     "mcpServers": {
         "engram": {
             "command": "npx",
-            "args": ["-y", "engram-mcp-server"]
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
         }
     }
 }
 ```
 
+> Windsurf does not expand workspace-folder variables in MCP args. Replace `/absolute/path/to/your/project` with the actual path, or omit `--project-root` to let Engram auto-detect it (requires the IDE to spawn the process from within a project directory).
+
 </details>
 
 <details>
-<summary><strong>Trae IDE</strong></summary>
+<summary><strong>Antigravity IDE (Gemini)</strong></summary>
 
-For Trae IDE, edit `.trae/mcp.json` in your project root:
+**Global** — `~/.gemini/antigravity/mcp_config.json`:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+        }
+    }
+}
+```
+
+> Antigravity IDE (the desktop app) uses a separate config file from the Gemini CLI. Replace `/absolute/path/to/your/project` with your project path. Antigravity does not expand workspace-folder variables in MCP args.
+
+</details>
+
+<details>
+<summary><strong>Claude Code (CLI)</strong></summary>
+
+**Via CLI (user-level, recommended):**
+
+```bash
+# Windows
+claude mcp add-json --scope=user engram '{"type":"stdio","command":"cmd","args":["/c","npx","-y","engram-mcp-server"]}'
+
+# Mac / Linux
+claude mcp add-json --scope=user engram '{"type":"stdio","command":"npx","args":["-y","engram-mcp-server"]}'
+```
+
+**Project-level** — `.mcp.json` in your project root:
 
 ```json
 {
@@ -381,12 +428,102 @@ For Trae IDE, edit `.trae/mcp.json` in your project root:
 }
 ```
 
+**User-level** — `~/.claude.json`:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
+    }
+}
+```
+
+> Claude Code auto-detects the project root from the working directory when the server is spawned. Add `"--project-root=/path/to/project"` to `args` to pin it explicitly.
+
 </details>
 
 <details>
-<summary><strong>JetBrains (Copilot Plugin)</strong></summary>
+<summary><strong>Claude Desktop</strong></summary>
 
-Edit `~/.config/github-copilot/intellij/mcp.json` or use the built-in Settings → MCP Server:
+Edit `claude_desktop_config.json`:
+
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Mac:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+        }
+    }
+}
+```
+
+**Windows** (use `cmd` wrapper — `npx` is a `.cmd` file on Windows):
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "cmd",
+            "args": ["/c", "npx", "-y", "engram-mcp-server", "--project-root=C:\\path\\to\\your\\project"]
+        }
+    }
+}
+```
+
+> Claude Desktop is a global app with no concept of a current project. Always specify `--project-root` to direct Engram to the correct project database. Without it, Engram falls back to `~/.engram/global/memory.db`.
+
+</details>
+
+<details>
+<summary><strong>Visual Studio 2022 / 2026</strong></summary>
+
+**Local (recommended)** — `.vs/mcp.json` or `.mcp.json` in your solution root:
+
+```json
+{
+    "servers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=${SolutionDir}"]
+        }
+    }
+}
+```
+
+**Global** — `%USERPROFILE%\.mcp.json`:
+
+```json
+{
+    "servers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
+    }
+}
+```
+
+> Note: Visual Studio uses `"servers"` (not `"mcpServers"`) as the config key. `${SolutionDir}` is expanded by Visual Studio at spawn time.
+
+</details>
+
+<details>
+<summary><strong>Cline</strong></summary>
+
+Open the Cline extension settings → MCP Servers, or edit the settings file directly:
+
+- **Windows:** `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`
+- **Mac:** `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
+- **Linux:** `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`
 
 ```json
 {
@@ -399,12 +536,20 @@ Edit `~/.config/github-copilot/intellij/mcp.json` or use the built-in Settings �
 }
 ```
 
+> Cline spawns the MCP server with the VS Code workspace as CWD, so Engram auto-detects the correct project root in most cases.
+
 </details>
 
 <details>
-<summary><strong>Cline / Roo Code</strong></summary>
+<summary><strong>Roo Code</strong></summary>
 
-In the extension settings → MCP Servers:
+**Global** — open Roo Code settings → MCP Servers, or edit:
+
+- **Windows:** `%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\settings\mcp_settings.json`
+- **Mac:** `~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`
+- **Linux:** `~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json`
+
+**Local (project-level)** — `.roo/mcp.json` in your project root:
 
 ```json
 {
@@ -416,6 +561,104 @@ In the extension settings → MCP Servers:
     }
 }
 ```
+
+> Roo Code is the fork of Cline under a separate VS Code extension (`rooveterinaryinc.roo-cline`). The settings filename is `mcp_settings.json` — different from Cline's `cline_mcp_settings.json`.
+
+</details>
+
+<details>
+<summary><strong>Gemini CLI</strong></summary>
+
+**Global** — `~/.gemini/settings.json`:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+        }
+    }
+}
+```
+
+**Local (project-level)** — `.gemini/settings.json` in your project root:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
+    }
+}
+```
+
+> Gemini CLI reads both `~/.gemini/settings.json` (global) and `.gemini/settings.json` (project-level). The project-level config is only read when Gemini CLI is invoked from within that directory. Gemini CLI expands `$VAR` and `${VAR}` OS environment variables only — not workspace-folder placeholders.
+
+</details>
+
+<details>
+<summary><strong>Firebase Studio (Project IDX)</strong></summary>
+
+**Local** — `.idx/mcp.json` in your workspace root (Firebase Studio / Project IDX uses project-level config only):
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server"]
+        }
+    }
+}
+```
+
+> Create the file via **Explorer → `.idx` directory → New file → `mcp.json`**, or use the Command Palette: **Firebase Studio: Add MCP Server**. For Gemini CLI inside Firebase Studio, use `.gemini/settings.json` instead (see Gemini CLI above).
+
+</details>
+
+<details>
+<summary><strong>Trae IDE</strong></summary>
+
+**Local** — `.trae/mcp.json` in your project root:
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=${workspaceFolder}"]
+        }
+    }
+}
+```
+
+> Trae IDE supports `${workspaceFolder}` in `args` and expands it at spawn time. Trae only supports project-level (local) MCP config — no user-level global config path is documented.
+
+</details>
+
+<details>
+<summary><strong>JetBrains (GitHub Copilot Plugin)</strong></summary>
+
+**Recommended:** configure via **Settings → Tools → AI Assistant → Model Context Protocol (MCP)**.
+
+**Manual file** — `~/.config/github-copilot/intellij/mcp.json` (community-sourced path; not officially documented by JetBrains):
+
+```json
+{
+    "servers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+        }
+    }
+}
+```
+
+> Note: JetBrains uses `"servers"` (not `"mcpServers"`) as the config key — same as VS Code. The file-based path above is best-effort; use the Settings UI for a guaranteed configuration.
 
 </details>
 
