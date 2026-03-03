@@ -70,6 +70,8 @@ export interface ConventionRow {
   rule: string;
   examples: string | null;       // JSON array
   enforced: boolean;
+  summary: string | null;        // compact 80-char summary for session delivery (V23+)
+  tags: string | null;           // JSON array of topic tags for FTS filtering (V23+)
 }
 
 export interface TaskRow {

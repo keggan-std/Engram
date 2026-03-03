@@ -17,7 +17,35 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 22; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations
+export const DB_VERSION = 23; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade
+
+// PM Framework — Phase / Keyword / Nudge constants
+/** Maps canonical phase name strings (from task tags like `phase:planning`) to phase numbers 1-6. */
+export const PHASE_MAP: Record<string, number> = {
+  initiation:    1,
+  planning:      2,
+  execution:     3,
+  quality:       4,
+  finalization:  5,
+  handover:      6,
+  documentation: 6,
+};
+
+/** Keywords in task titles that indicate PM-heavy work and may trigger PM-Full offer. */
+export const PM_KEYWORDS: ReadonlyArray<string> = [
+  "milestone",
+  "phase gate",
+  "deliverable",
+  "wbs",
+  "risk register",
+  "sprint",
+  "iteration",
+  "kickoff",
+  "handover",
+];
+
+/** Maximum number of PM nudges that can be surfaced within a single session. */
+export const PM_MAX_NUDGES = 5;
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
