@@ -1,3 +1,59 @@
+# v1.9.2 — Cross-Instance Sharing Hotfix
+
+**Released:** v1.9.2 — March 3, 2026
+
+## Overview
+
+v1.9.2 fixes four bugs that made cross-instance sharing non-functional. All `query_instance`, `get_instance_info`, and `search_all_instances` calls were silently returning wrong data or failing to open foreign databases — particularly on IDEs like Antigravity that suffix the DB filename (e.g. `memory-antigravity.db`).
+
+Zero breaking changes. No schema migration required.
+
+---
+
+## What's Fixed
+
+### `get_instance_info` always returned self (Bug #29)
+
+`get_instance_info` ignored the `instance_id` parameter and always returned the calling instance's own data. Now correctly routes to the foreign instance via the registry when `instance_id` differs from self.
+
+### `query_instance` type routing was broken (Bug #27)
+
+All `query_type` values (`conventions`, `file_notes`, `tasks`, `sessions`, `changes`) silently fell back to returning `decisions` with no error. Added `query_type` as an explicit Zod param; handler now uses `params.query_type ?? params.type ?? 'decisions'` with a full type-switch router.
+
+### IDE-suffixed DB filenames not locatable (Bug #28)
+
+The instance registry stored `project_root` but not the actual DB filename. Any IDE that suffixes the DB (e.g. Antigravity → `memory-antigravity.db`, Cursor → `memory-cursor.db`) caused `SQLITE_CANTOPEN` on all cross-instance reads.
+
+**Two-layer fix:**
+1. `heartbeat()` now writes `db_path` back into the registry entry if the field is absent — retroactively patching older entries.
+2. `resolveDbPath()` fallback scans `<project_root>/.engram/` for `memory*.db` files sorted by mtime when `db_path` is absent, selecting the most recently modified one.
+
+### `checkPermission()` gave no actionable error on missing DB (Bug #26 root cause)
+
+`checkPermission()` now calls `resolveDbPath()` internally and returns a copy of the entry with a confirmed, verified `db_path`. If no DB can be found at all, it throws a clear error naming the instance and explaining what to do.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/services/instance-registry.service.ts` | `heartbeat()` refreshes `db_path` if field missing from old entries |
+| `src/services/cross-instance.service.ts` | Added `resolveDbPath()` fallback; `checkPermission()` always resolves path; added `path` import |
+| `src/tools/dispatcher-admin.ts` | `get_instance_info` routes by `instance_id`; `query_type` param added for `query_instance` |
+
+---
+
+## Upgrade
+
+```bash
+npx -y engram-mcp-server@latest install
+```
+
+No data migration needed. Existing instances will have `db_path` written to their registry entries on next heartbeat.
+
+---
+
 # v1.9.1 — Project Root Detection Hotfix
 
 **Released:** v1.9.1 — March 3, 2026
