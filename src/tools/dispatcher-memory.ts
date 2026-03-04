@@ -19,6 +19,7 @@ import {
   MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
 } from "../constants.js";
 import { pmSafe } from "../services/index.js";
+import { getKnowledge } from "../knowledge/index.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness, ScheduledEventRow } from "../types.js";
 
 // ─── File Lock Helpers ─────────────────────────────────────────────────────
@@ -173,6 +174,7 @@ const MEMORY_ACTIONS = [
   "record_milestone", "get_milestones",
   "schedule_event", "get_scheduled_events", "update_scheduled_event", "acknowledge_event", "check_events",
   "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast", "route_task",
+  "get_knowledge",
 ] as const;
 
 // ─── Dispatcher ────────────────────────────────────────────────────────────
@@ -298,6 +300,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         specializations: z.array(z.string()).optional(),
         session_id: z.number().int().optional(),
         include_tool_log: z.boolean().optional(),
+        // PM Knowledge
+        phase: z.number().int().optional().describe("Phase number 1-6 for phase_info, checklist, or instructions."),
+        knowledge_type: z.enum(["principles", "phase_info", "checklist", "instructions", "estimation", "conventions", "all"]).optional(),
+        compact: z.boolean().optional().describe("Return compact forms only (default: true)."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -1099,8 +1105,27 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           } catch { return error("Broadcast table not initialised. Ensure migrations have run."); }
         }
 
+        // ── PM KNOWLEDGE ─────────────────────────────────────────────────────
+
+        case "get_knowledge": {
+          const pmFull = repos.config.get('pm_full_enabled');
+          if (pmFull !== 'true') {
+            return error('get_knowledge requires PM-Full mode. Call engram_admin({ action: "enable_pm" }) to activate.');
+          }
+          const knowledgeType = (params.knowledge_type ?? 'phase_info') as
+            'principles' | 'phase_info' | 'checklist' | 'instructions' | 'estimation' | 'conventions' | 'all';
+          const isCompact = params.compact !== false;
+          const result = pmSafe(
+            () => getKnowledge(knowledgeType, params.phase, isCompact),
+            { error: 'Knowledge base unavailable' },
+            'get_knowledge'
+          );
+          return success(result as Record<string, unknown>);
+        }
+
         default:
           return error(`Unknown memory action: ${(params as Record<string, unknown>).action}`);
+
       }
       })(); // end action IIFE
 

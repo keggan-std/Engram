@@ -9,6 +9,9 @@ import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDataba
 import { success, error } from "../response.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
+import { pmSafe } from "../services/index.js";
+import { detectCurrentPhase } from "../services/event-trigger.service.js";
+import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
 import path from "path";
 import fs from "fs";
 
@@ -30,6 +33,9 @@ const ADMIN_ACTIONS = [
   // Sensitive data actions
   "mark_sensitive", "unmark_sensitive", "list_sensitive",
   "request_access", "approve_access", "deny_access", "list_access_requests",
+  // PM Framework actions
+  "enable_pm", "disable_pm", "enable_pm_lite", "disable_pm_lite",
+  "decline_pm", "reset_pm_offer", "pm_status",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -39,7 +45,7 @@ export function registerAdminDispatcher(server: McpServer): void {
       title: "Admin Operations",
       description: `Engram admin and maintenance operations. Use only when needed.
 
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests.`,
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
       inputSchema: {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
@@ -634,6 +640,67 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         default:
           return error(`Unknown admin action: ${(params as Record<string, unknown>).action}`);
+
+        // ── PM FRAMEWORK ACTIONS ───────────────────────────────────────────────────────
+
+        case "enable_pm": {
+          const ts = now();
+          repos.config.set('pm_full_enabled', 'true', ts);
+          repos.config.set('pm_full_declined', 'false', ts);
+          return success({ pm_full: true, message: 'PM-Full activated. Phase gates, checklists, and workflow guidance are now available.' });
+        }
+
+        case "disable_pm": {
+          repos.config.set('pm_full_enabled', 'false', now());
+          return success({ pm_full: false, message: 'PM-Full deactivated.' });
+        }
+
+        case "enable_pm_lite": {
+          repos.config.set('pm_lite_enabled', 'true', now());
+          return success({ pm_lite: true, message: 'PM-Lite workflow nudges enabled.' });
+        }
+
+        case "disable_pm_lite": {
+          repos.config.set('pm_lite_enabled', 'false', now());
+          return success({ pm_lite: false, message: 'PM-Lite workflow nudges disabled.' });
+        }
+
+        case "decline_pm": {
+          const ts = now();
+          repos.config.set('pm_full_declined', 'true', ts);
+          repos.config.set('pm_full_offered', 'true', ts);
+          return success({ pm_full_declined: true, message: 'PM-Full offer declined. No further offers will be made. Use enable_pm to activate manually.' });
+        }
+
+        case "reset_pm_offer": {
+          const ts = now();
+          repos.config.set('pm_full_offered', 'false', ts);
+          repos.config.set('pm_full_declined', 'false', ts);
+          return success({ reset: true, message: 'PM-Full offer and decline flags cleared. The offer may appear again when criteria are met.' });
+        }
+
+        case "pm_status": {
+          const pmLiteEnabled = repos.config.get('pm_lite_enabled') !== 'false';
+          const pmFullEnabled = repos.config.get('pm_full_enabled') === 'true';
+          const pmOffered = repos.config.get('pm_full_offered') === 'true';
+          const pmDeclined = repos.config.get('pm_full_declined') === 'true';
+          const advisorStats = pmSafe(() => services.advisor.stats, { delivered: 0, available: [] as string[] }, 'pm_status.advisor');
+          const diagStatus = pmSafe(() => services.diagnostics.getStatus(), { pm_lite_healthy: true, pm_full_healthy: true, failure_count: 0, recent_failures: [], uptime_ms: 0 }, 'pm_status.diagnostics');
+          const currentPhase = pmFullEnabled ? pmSafe(() => detectCurrentPhase(repos), null as number | null, 'pm_status.phase') : null;
+          const kbVersion = pmSafe(() => KNOWLEDGE_BASE_VERSION, '1.0', 'pm_status.kbVersion');
+          return success({
+            pm_lite: { enabled: pmLiteEnabled, healthy: true },
+            pm_full: { enabled: pmFullEnabled, offered: pmOffered, declined: pmDeclined },
+            current_phase: currentPhase,
+            advisor: {
+              nudges_delivered: advisorStats.delivered,
+              nudges_available: advisorStats.available,
+            },
+            diagnostics: diagStatus,
+            knowledge_base_version: kbVersion,
+          });
+        }
+
       }
     }
   );
