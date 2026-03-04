@@ -730,6 +730,51 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V24: Observations Table ─────────────────────────────────────
+  {
+    version: 24,
+    description: "Create observations table + FTS5 — lightweight non-decision notes for agents",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observations (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id  INTEGER REFERENCES sessions(id),
+          timestamp   TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          category    TEXT NOT NULL DEFAULT 'other',
+          file_path   TEXT,
+          tags        TEXT,
+          agent_name  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_observations_session   ON observations(session_id);
+        CREATE INDEX IF NOT EXISTS idx_observations_category  ON observations(category);
+        CREATE INDEX IF NOT EXISTS idx_observations_file_path ON observations(file_path);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_observations USING fts5(
+          content,
+          tags,
+          content='observations',
+          content_rowid='id'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO fts_observations(rowid, content, tags)
+            VALUES (new.id, new.content, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO fts_observations(fts_observations, rowid, content, tags)
+            VALUES('delete', old.id, old.content, old.tags);
+          INSERT INTO fts_observations(rowid, content, tags)
+            VALUES (new.id, new.content, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO fts_observations(fts_observations, rowid, content, tags)
+            VALUES('delete', old.id, old.content, old.tags);
+        END;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

@@ -40,6 +40,23 @@ export function coerceStringArray() {
 }
 
 /**
+ * Zod preprocessor that accepts either a real number array OR a JSON-string-
+ * encoded array (e.g. '[1,2,3]'). Mirrors coerceStringArray() for integer
+ * array parameters like `depends_on`, `blocked_by`, `ids`, etc.
+ *
+ * Usage:  depends_on: coerceNumberArray().optional()
+ *         (replaces: z.array(z.number().int()).optional())
+ */
+export function coerceNumberArray() {
+  return z.preprocess((v) => {
+    if (typeof v === "string") {
+      try { return JSON.parse(v); } catch { return v; }
+    }
+    return v;
+  }, z.array(z.number().int()));
+}
+
+/**
  * Normalize a file path for consistent storage as a database key.
  * 1. Replace backslashes with forward slashes
  * 2. If absolute and projectRoot provided, convert to relative

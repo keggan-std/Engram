@@ -58,6 +58,9 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   broadcast:            { desc: "Send a message to all agents, or to a specific agent only.", params: "{ from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }" },
   // PM Knowledge (PM-Full required)
   get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
+  // Observations
+  record_observation:   { desc: "Record a lightweight observation — findings, patterns, concerns, ideas, friction.", params: "{ content: string, observation_category?: 'finding'|'pattern'|'concern'|'idea'|'friction'|'behavior'|'other', file_path?: string, tags?: string[] }" },
+  get_observations:     { desc: "Retrieve stored observations, optionally filtered.", params: "{ query?: string, observation_category?: string, file_path?: string, session_id?: number, limit?: number }" },
 };
 
 export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {

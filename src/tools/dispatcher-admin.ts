@@ -15,7 +15,7 @@ import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
 import path from "path";
 import fs from "fs";
 
-import { coerceStringArray } from "../utils.js";
+import { coerceStringArray, coerceNumberArray } from "../utils.js";
 
 const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
@@ -72,7 +72,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
         include_offline: z.boolean().optional().describe("Include permanently enrolled instances that are currently offline (default true)."),
         visible: z.union([z.boolean(), z.string()]).optional().describe("Visibility toggle for set_visibility: true = permanently enrolled in dashboard, false = heartbeat-only (default)."),
-        ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
+        ids: coerceNumberArray().optional().describe("Record IDs for selective import."),
         status: z.string().optional().describe("Filter by status."),
         reason: z.string().optional().describe("Reason for access request."),
         request_id: z.number().int().optional().describe("Access request ID for approve/deny."),
@@ -227,7 +227,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             server_version: SERVER_VERSION, schema_version: schemaVersion,
             total_sessions: count("sessions"), total_changes: count("changes"), total_decisions: count("decisions"),
             total_file_notes: count("file_notes"), total_conventions: count("conventions"), total_tasks: count("tasks"),
-            total_milestones: count("milestones"),
+            total_milestones: count("milestones"), total_observations: count("observations"),
             oldest_session: oldest?.started_at || null, database_size_kb: getDbSizeKb(),
             most_changed_files: mostChanged, tasks_by_status: tasksByStatus,
             update_status: updateAvailable ? { available: true, version: updateAvailable, releases_url: GITHUB_RELEASES_URL } : { available: false },

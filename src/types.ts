@@ -145,6 +145,17 @@ export interface ScheduledEventRow {
   recurrence: EventRecurrence | null;
 }
 
+export interface ObservationRow {
+  id: number;
+  session_id: number | null;
+  timestamp: string;
+  content: string;
+  category: ObservationCategory;
+  file_path: string | null;
+  tags: string | null;             // JSON array
+  agent_name: string | null;
+}
+
 // ─── Enum Types ─────────────────────────────────────────────────────────────
 
 export type ChangeType =
@@ -199,6 +210,15 @@ export type ConventionCategory =
   | "error_handling"
   | "performance"
   | "security"
+  | "other";
+
+export type ObservationCategory =
+  | "finding"
+  | "pattern"
+  | "concern"
+  | "idea"
+  | "friction"
+  | "behavior"
   | "other";
 
 export type TaskStatus =
