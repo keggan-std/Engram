@@ -56,6 +56,8 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   get_agents:           { desc: "List all registered agents.", params: "{}" },
   route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
   broadcast:            { desc: "Send a message to all agents, or to a specific agent only.", params: "{ from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }" },
+  // PM Knowledge (PM-Full required)
+  get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
 };
 
 export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
@@ -90,6 +92,14 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   approve_access:     { desc: "Approve a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   deny_access:        { desc: "Deny a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   list_access_requests: { desc: "List access requests, optionally filtered by status.", params: "{ status?: 'pending'|'approved'|'denied' }" },
+  // PM Framework
+  enable_pm:            { desc: "Activate PM-Full mode (phase gates, checklists, workflow guidance).", params: "{}" },
+  disable_pm:           { desc: "Deactivate PM-Full mode.", params: "{}" },
+  enable_pm_lite:       { desc: "Enable PM-Lite workflow nudges.", params: "{}" },
+  disable_pm_lite:      { desc: "Disable PM-Lite workflow nudges.", params: "{}" },
+  decline_pm:           { desc: "Permanently decline the PM-Full offer for this project.", params: "{}" },
+  reset_pm_offer:       { desc: "Clear the PM-Full offer/declined flags so the offer can re-appear.", params: "{}" },
+  pm_status:            { desc: "Get full PM framework health status, advisor stats, and config.", params: "{}" },
 };
 
 // ─── BM25-style keyword search over catalog entries ──────────────────────────

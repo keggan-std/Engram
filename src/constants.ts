@@ -47,6 +47,9 @@ export const PM_KEYWORDS: ReadonlyArray<string> = [
 /** Maximum number of PM nudges that can be surfaced within a single session. */
 export const PM_MAX_NUDGES = 5;
 
+/** Semantic version of the bundled PM knowledge base (principles, phases, checklists). */
+export const KNOWLEDGE_BASE_VERSION = "1.0";
+
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
 export const MAX_FILE_TREE_ENTRIES = 500;
