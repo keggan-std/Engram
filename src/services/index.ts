@@ -14,3 +14,4 @@ export { CrossInstanceService } from "./cross-instance.service.js";
 export { SensitiveDataService } from "./sensitive-data.service.js";
 export { PMDiagnosticsTracker, pmSafe } from "./pm-diagnostics.js";
 export type { PMFailureRecord, PMStatusReport } from "./pm-diagnostics.js";
+export { WorkflowAdvisorService } from "./workflow-advisor.service.js";

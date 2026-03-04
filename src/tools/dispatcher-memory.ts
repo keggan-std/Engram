@@ -6,7 +6,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  now, getCurrentSessionId, getRepos, getProjectRoot, getDb
+  now, getCurrentSessionId, getRepos, getProjectRoot, getDb, getServices
 } from "../database.js";
 import {
   normalizePath, coerceStringArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
@@ -18,6 +18,7 @@ import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
   MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
 } from "../constants.js";
+import { pmSafe } from "../services/index.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness, ScheduledEventRow } from "../types.js";
 
 // ─── File Lock Helpers ─────────────────────────────────────────────────────
@@ -301,6 +302,11 @@ Use engram_find(query: "...") to look up exact param schemas.`,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── PM Advisor: record this action (best-effort) ─────────────────────
+      pmSafe(() => getServices().advisor.recordAction(String(params.action), params as Record<string, unknown>), undefined, 'advisor.recordAction');
+
+      // Execute the action in an IIFE so we can intercept the result for nudge injection
+      const _result = await (async () => {
       const { action } = params;
       const repos = getRepos();
       const db = getDb();
@@ -1096,6 +1102,17 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         default:
           return error(`Unknown memory action: ${(params as Record<string, unknown>).action}`);
       }
+      })(); // end action IIFE
+
+      // ── PM Advisor: inject nudge if warranted (best-effort) ───────────────
+      const _nudge = pmSafe(() => getServices().advisor.checkNudge(), null as string | null, 'advisor.checkNudge');
+      if (_nudge) {
+        try {
+          const _parsed = JSON.parse(_result.content[0].text);
+          _result.content[0].text = JSON.stringify({ ..._parsed, _advisor: _nudge });
+        } catch { /* best effort */ }
+      }
+      return _result;
     }
   );
 }
