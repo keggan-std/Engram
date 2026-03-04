@@ -9,7 +9,7 @@ import * as path from "path";
 import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
-import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService, CrossInstanceService, SensitiveDataService } from "./services/index.js";
+import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService, CrossInstanceService, SensitiveDataService, WorkflowAdvisorService, PMDiagnosticsTracker } from "./services/index.js";
 import { SERVER_VERSION, CFG_INSTANCE_ID, CFG_INSTANCE_LABEL, CFG_INSTANCE_CREATED_AT, CFG_MACHINE_ID, CFG_SHARING_MODE, CFG_SHARING_TYPES, DEFAULT_SHARING_MODE, DEFAULT_SHARING_TYPES } from "./constants.js";
 import { getMachineId, generateInstanceLabel } from "./utils.js";
 import { randomUUID } from "crypto";
@@ -24,6 +24,8 @@ export interface Services {
   registry: InstanceRegistryService;
   crossInstance: CrossInstanceService;
   sensitiveData: SensitiveDataService;
+  advisor: WorkflowAdvisorService;
+  diagnostics: PMDiagnosticsTracker;
 }
 
 let _db: DatabaseType | null = null;
@@ -128,6 +130,7 @@ export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType
 
   // Initialize services
   const registryService = new InstanceRegistryService(_repos.config, projectRoot, _db, dbFileName);
+  const diagnosticsTracker = new PMDiagnosticsTracker();
   _services = {
     compaction: new CompactionService(_db, _repos),
     scan: new ProjectScanService(_repos),
@@ -138,6 +141,8 @@ export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType
     registry: registryService,
     crossInstance: new CrossInstanceService(registryService),
     sensitiveData: new SensitiveDataService(_repos.config, _db),
+    advisor: new WorkflowAdvisorService(_repos, diagnosticsTracker),
+    diagnostics: diagnosticsTracker,
   };
 
   // ─── Instance Identity ─────────────────────────────────────────────
