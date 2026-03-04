@@ -72,6 +72,23 @@ function fuzzyResolveAction(query: string): { action: string; dispatcher: "sessi
 // Rewrites tool_catalog entries so the agent sees `engram({action:"X"})` syntax
 // instead of `engram_memory(action:"X")` (which doesn't exist in universal mode).
 
+/**
+ * Pre-process raw params before dispatch to captured handlers.
+ * HandlerCapturer bypasses Zod z.preprocess() transforms, so string-encoded
+ * arrays (e.g. '[1,2]' or '["a","b"]') from MCP clients never get coerced.
+ * This walks top-level param values and JSON.parse any that look like arrays.
+ */
+function coerceParams(params: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string" && value.startsWith("[")) {
+      try { result[key] = JSON.parse(value); continue; } catch { /* not JSON — keep as-is */ }
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
 function universalizeResponse(text: string): string {
   return text
     .replace(/engram_memory\(action[=:"']+([^"')]+)["']\)/g, 'engram({action:"$1"})')
@@ -209,7 +226,9 @@ export function registerUniversalMode(server: McpServer): void {
       }
 
       // ── Dispatch to the captured handler ──────────────────────────────
-      const params = { action: resolvedAction, ...rest };
+      // Coerce string-encoded arrays before dispatch — HandlerCapturer
+      // bypasses Zod preprocess transforms (coerceStringArray/coerceNumberArray).
+      const params = coerceParams({ action: resolvedAction, ...rest });
       let result: unknown;
       switch (dispatcher) {
         case "session": result = await sessionHandler(params); break;

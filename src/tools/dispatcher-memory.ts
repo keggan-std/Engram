@@ -9,7 +9,7 @@ import {
   now, getCurrentSessionId, getRepos, getProjectRoot, getDb, getServices
 } from "../database.js";
 import {
-  normalizePath, coerceStringArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
+  normalizePath, coerceStringArray, coerceNumberArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
   safeJsonParse, detectLayer, isGitRepo, getGitLogSince, getGitFilesChanged, minutesSince,
 } from "../utils.js";
 import { success, error } from "../response.js";
@@ -233,13 +233,13 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         tags: coerceStringArray().optional(),
         status: z.string().optional(),
         supersedes: z.number().int().optional(),
-        depends_on: z.array(z.number().int()).optional(),
+        depends_on: coerceNumberArray().optional(),
         export_global: z.boolean().optional(),
         decisions: z.array(z.object({
           decision: z.string(),
           rationale: z.string().optional(),
-          tags: z.array(z.string()).optional(),
-          affected_files: z.array(z.string()).optional(),
+          tags: coerceStringArray().optional(),
+          affected_files: coerceStringArray().optional(),
         }).passthrough()).optional(),
         // Filters
         tag: z.string().optional(),
@@ -256,15 +256,15 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         title: z.string().optional(),
         priority: z.enum(["critical","high","medium","low"]).optional(),
         assigned_files: coerceStringArray().optional(),
-        blocked_by: z.array(z.number().int()).optional(),
+        blocked_by: coerceNumberArray().optional(),
         include_done: z.boolean().optional(),
-        add_blocks: z.array(z.number().int()).optional(),
-        add_blocked_by: z.array(z.number().int()).optional(),
+        add_blocks: coerceNumberArray().optional(),
+        add_blocked_by: coerceNumberArray().optional(),
         owner: z.string().optional(),
         // Checkpoint
         current_understanding: z.string().optional(),
         progress: z.string().optional(),
-        relevant_files: z.array(z.string()).optional(),
+        relevant_files: coerceStringArray().optional(),
         // Intelligence
         query: z.string().optional(),
         scope: z.string().optional(),
@@ -297,7 +297,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         target_agent: z.string().optional(),
         expires_in_minutes: z.number().int().optional(),
         timeout_minutes: z.number().int().optional(),
-        specializations: z.array(z.string()).optional(),
+        specializations: coerceStringArray().optional(),
         session_id: z.number().int().optional(),
         include_tool_log: z.boolean().optional(),
         // PM Knowledge

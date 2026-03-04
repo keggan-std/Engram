@@ -15,7 +15,7 @@ import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
 import path from "path";
 import fs from "fs";
 
-import { coerceStringArray } from "../utils.js";
+import { coerceStringArray, coerceNumberArray } from "../utils.js";
 
 const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
@@ -72,7 +72,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
         include_offline: z.boolean().optional().describe("Include permanently enrolled instances that are currently offline (default true)."),
         visible: z.union([z.boolean(), z.string()]).optional().describe("Visibility toggle for set_visibility: true = permanently enrolled in dashboard, false = heartbeat-only (default)."),
-        ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
+        ids: coerceNumberArray().optional().describe("Record IDs for selective import."),
         status: z.string().optional().describe("Filter by status."),
         reason: z.string().optional().describe("Reason for access request."),
         request_id: z.number().int().optional().describe("Access request ID for approve/deny."),
