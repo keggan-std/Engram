@@ -415,10 +415,12 @@ Actions:
           const changeCount = repos.changes.countBySession(sessionId);
           const decisionCount = repos.sessions.countBySession(sessionId, "decisions");
           const tasksDone = repos.tasks.countDoneInSession(sessionId);
-          logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} (dispatcher)`);
+          let observationCount = 0;
+          try { observationCount = repos.observations.countBySession(sessionId); } catch { /* table may not exist */ }
+          logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} observations=${observationCount} (dispatcher)`);
           repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
 
-          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone }, ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
+          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
         }
 
         case "get_history": {

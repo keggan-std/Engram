@@ -227,7 +227,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             server_version: SERVER_VERSION, schema_version: schemaVersion,
             total_sessions: count("sessions"), total_changes: count("changes"), total_decisions: count("decisions"),
             total_file_notes: count("file_notes"), total_conventions: count("conventions"), total_tasks: count("tasks"),
-            total_milestones: count("milestones"),
+            total_milestones: count("milestones"), total_observations: count("observations"),
             oldest_session: oldest?.started_at || null, database_size_kb: getDbSizeKb(),
             most_changed_files: mostChanged, tasks_by_status: tasksByStatus,
             update_status: updateAvailable ? { available: true, version: updateAvailable, releases_url: GITHUB_RELEASES_URL } : { available: false },
