@@ -202,6 +202,7 @@ export const CFG_SHARING_MODE = "sharing_mode";       // "none" | "read" | "full
 export const CFG_SHARING_TYPES = "sharing_types";     // JSON array of table names
 export const CFG_SENSITIVE_KEYS = "sensitive_keys";   // JSON array of decision/convention IDs marked sensitive
 export const CFG_HTTP_TOKEN = "http_token";           // Bearer token for dashboard API (file fallback: .engram/token)
+export const CFG_INSTANCE_VISIBLE = "instance_visible"; // "true" | "false" — controls permanent enrollment in registry
 
 // Instance registry
 export const INSTANCE_REGISTRY_DIR = ".engram";

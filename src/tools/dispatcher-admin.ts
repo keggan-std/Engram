@@ -29,7 +29,7 @@ const ADMIN_ACTIONS = [
   // Cross-instance actions
   "discover_instances", "get_instance_info", "set_sharing",
   "query_instance", "search_all_instances",
-  "import_from_instance", "set_instance_label",
+  "import_from_instance", "set_instance_label", "set_visibility",
   // Sensitive data actions
   "mark_sensitive", "unmark_sensitive", "list_sensitive",
   "request_access", "approve_access", "deny_access", "list_access_requests",
@@ -45,7 +45,7 @@ export function registerAdminDispatcher(server: McpServer): void {
       title: "Admin Operations",
       description: `Engram admin and maintenance operations. Use only when needed.
 
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
       inputSchema: {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
@@ -70,6 +70,8 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         types: coerceStringArray().optional().describe("Sharing types array: decisions, conventions, file_notes, tasks, etc."),
         label: z.string().optional().describe("Human-readable instance label."),
         include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
+        include_offline: z.boolean().optional().describe("Include permanently enrolled instances that are currently offline (default true)."),
+        visible: z.union([z.boolean(), z.string()]).optional().describe("Visibility toggle for set_visibility: true = permanently enrolled in dashboard, false = heartbeat-only (default)."),
         ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
         status: z.string().optional().describe("Filter by status."),
         reason: z.string().optional().describe("Reason for access request."),
@@ -349,23 +351,64 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── DISCOVER INSTANCES ──────────────────────────────────────────
         case "discover_instances": {
+          // include_offline=true (default): enrolled instances that are currently offline
+          // are included — they show as status="offline" with label/path/last_seen only.
+          // include_offline=false: only online/stale heartbeat instances returned.
+          const includeOffline = params.include_offline !== false; // default true
           const instances = services.crossInstance.discoverInstances(params.include_stale ?? true);
           const selfId = services.registry.getInstanceId();
+
+          // Online instances from heartbeat list
+          const heartbeatIds = new Set(instances.map(i => i.instance_id));
+          const result: Array<Record<string, unknown>> = instances.map(i => ({
+            instance_id: i.instance_id,
+            label: i.label,
+            project_root: i.project_root,
+            sharing_mode: i.sharing_mode,
+            sharing_types: i.sharing_types,
+            status: i.status,
+            stats: i.stats,
+            last_heartbeat: i.last_heartbeat,
+            is_self: i.instance_id === selfId,
+            online: i.status === "active",
+            enrolled: i.visible ?? false,
+          }));
+
+          // Enrolled offline instances (visible=true, not currently heartbeating)
+          if (includeOffline) {
+            const offlineEnrolled = services.registry.getEnrolledOffline();
+            for (const e of offlineEnrolled) {
+              if (!heartbeatIds.has(e.instance_id)) {
+                result.push({
+                  instance_id: e.instance_id,
+                  label: e.label,
+                  project_root: e.project_root,
+                  db_path: e.db_path,
+                  last_seen: e.last_seen,
+                  enrolled_at: e.enrolled_at,
+                  status: "offline",
+                  online: false,
+                  enrolled: true,
+                  is_self: e.instance_id === selfId,
+                  // Stats not surfaced for offline instances — privacy-safe
+                  stats: null,
+                  sharing_mode: null,
+                  sharing_types: null,
+                  last_heartbeat: e.last_seen,
+                });
+              }
+            }
+          }
+
+          const onlineCount = result.filter(i => i.online).length;
+          const offlineEnrolledCount = result.filter(i => !i.online && i.enrolled).length;
           return success({
             self_instance_id: selfId,
-            instances: instances.map(i => ({
-              instance_id: i.instance_id,
-              label: i.label,
-              project_root: i.project_root,
-              sharing_mode: i.sharing_mode,
-              sharing_types: i.sharing_types,
-              status: i.status,
-              stats: i.stats,
-              last_heartbeat: i.last_heartbeat,
-              is_self: i.instance_id === selfId,
-            })),
-            total: instances.length,
-            message: `Found ${instances.length} Engram instance(s) on this machine.`,
+            instances: result,
+            total: result.length,
+            online_count: onlineCount,
+            offline_enrolled_count: offlineEnrolledCount,
+            message: `Found ${result.length} Engram instance(s) on this machine (${onlineCount} online, ${offlineEnrolledCount} enrolled-offline).`,
           });
         }
 
@@ -532,7 +575,25 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             message: `Instance label updated to '${params.label}'.`,
           });
         }
-
+        // ─── SET VISIBILITY ───────────────────────────────────────────────
+        case "set_visibility": {
+          const rawVisible = params.visible;
+          if (rawVisible === undefined || rawVisible === null) {
+            return error("visible is required (true to enroll permanently, false to hide).");
+          }
+          const visible = rawVisible === true || rawVisible === "true";
+          services.registry.setVisibility(visible);
+          const self = services.registry.getSelf();
+          const statusMsg = visible
+            ? `Instance '${self.label}' is now visible. It will appear in dashboard discovery and persist as offline when not running. Enrollment entry will be written on the next heartbeat (~60s).`
+            : `Instance '${self.label}' is now hidden. It will only appear while this process is running, then disappear after ~5 minutes.`;
+          return success({
+            instance_id: self.instance_id,
+            label: self.label,
+            visible,
+            message: statusMsg,
+          });
+        }
         // ─── MARK SENSITIVE ──────────────────────────────────────────────
         case "mark_sensitive": {
           if (!params.type) return error("type is required (e.g. decisions, conventions, file_notes).");
