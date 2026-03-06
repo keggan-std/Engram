@@ -1,3 +1,147 @@
+# v1.11.0 — Developer Experience: Params Coercion, Observations & Session Efficiency
+
+**Released:** v1.11.0 — March 6, 2026
+
+## Overview
+
+v1.11.0 is a focused developer-experience release addressing the top pain points found during a systematic DX audit. It eliminates an entire class of MCP client serialization errors, adds a lightweight `record_observation` action as a semantic alternative to misusing `record_decision`, and cuts session-start token overhead by ~40%. Six bug fixes are included. Zero breaking changes.
+
+557 tests pass. Schema migrated to V24.
+
+---
+
+## What's New
+
+### Params Coercion — Full Coverage (WS3)
+
+All MCP clients (VS Code Copilot, Cursor, Claude Desktop, universal mode) can now pass arrays without errors. Previously 9 Zod fields were missing coercion, causing intermittent `"must be object"` or silent parse failures at ~20% failure rate on complex calls.
+
+**Fixed fields:**
+
+| Tool | Field | Type |
+|------|-------|------|
+| `record_decisions_batch` | `decisions[].tags` | `string[]` |
+| `record_decisions_batch` | `decisions[].affected_files` | `string[]` |
+| `checkpoint` | `relevant_files` | `string[]` |
+| `agent_sync` | `specializations` | `string[]` |
+| `create_task` / `update_task` | `depends_on` | `number[]` |
+| `update_task` | `blocked_by`, `add_blocks`, `add_blocked_by` | `number[]` |
+| `export` (admin) | `ids` | `number[]` |
+
+**New utility:** `coerceNumberArray()` in `src/utils.ts` — mirrors `coerceStringArray()` for integer array fields.
+
+**Universal mode fix (critical):** `HandlerCapturer` bypasses Zod `z.preprocess()` transforms entirely, so all per-field coercions were silently skipped in universal mode. A new `coerceParams()` function in `src/modes/universal.ts` now pre-processes params before dispatch, handling JSON-stringified arrays and nested object arrays.
+
+### New Action: `record_observation` (WS2)
+
+A semantically correct, lightweight action for factual observations — no `rationale` required.
+
+```js
+engram_memory({
+  action: "record_observation",
+  observation: "The FTS5 index is rebuilt on every migration run",
+  context: "src/migrations.ts",
+  category: "codebase",     // codebase | behavior | performance | dependency | general
+  tags: ["fts", "migrations"],
+  source: "agent"           // agent | user | automated
+})
+```
+
+Retrieve with:
+```js
+engram_memory({ action: "get_observations", session_id: 42, category: "codebase", limit: 20 })
+```
+
+Observations are included in `search` when `scope` is `"all"` or `"observations"`. Full-text search supported via FTS5 (`fts_observations` virtual table, schema V24).
+
+**Why this matters:** Agents were forced to misuse `record_decision` for factual notes (no rationale needed). `record_observation` is the correct semantic type: lighter than a decision, heavier than a file note.
+
+### Session Verbosity Overhaul (WS1)
+
+The `summary` verbosity tier has been restructured to reduce session-start output by ~40% (from ~800 to ~500 tokens) while making all content available on-demand.
+
+**Changes:**
+
+| Setting | Before | After |
+|---------|--------|-------|
+| Max decisions shown | 5 (120-char each) | 3 (80-char each) |
+| Max conventions shown | 10 | 6 |
+| Max changes shown | 5 (with timestamp) | 3 (no timestamp) |
+| `git_log` in response | Included | Removed (use `what_changed`) |
+| `counts` object | Absent | Added |
+
+New `counts` object in every `summary` response:
+```json
+{
+  "counts": {
+    "decisions": 18,
+    "conventions": 6,
+    "tasks": 4,
+    "changes": 47,
+    "files": 129
+  }
+}
+```
+
+`minimal` tier now includes `top_decision` and `top_task` so agents get actionable context even in the lowest-verbosity tier.
+
+All cap values extracted to named constants in `src/constants.ts` for easy tuning.
+
+### Bug Fixes (WS4)
+
+- **`dump` finding persistence**: The `dump` action's `finding` hint previously generated a fake ephemeral ID and stored nothing to the database. It now persists to the new `observations` table.
+- **Session end observation count**: `session end` stats now include `observations_recorded` alongside changes, decisions, and tasks.
+
+### Instance Visibility System
+
+Instance enrollment in the dashboard discovery service is now permanent across restarts. Previously, instances would lose their enrollment on server restart and require re-registration. The dashboard now reliably discovers all registered instances without polling gaps.
+
+---
+
+## Schema
+
+**V24** adds:
+
+```sql
+CREATE TABLE observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER,
+  timestamp TEXT NOT NULL,
+  observation TEXT NOT NULL,
+  context TEXT,
+  category TEXT DEFAULT 'general',
+  tags TEXT,
+  source TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE INDEX idx_observations_session ON observations(session_id);
+CREATE INDEX idx_observations_category ON observations(category);
+-- FTS5 virtual table
+CREATE VIRTUAL TABLE fts_observations USING fts5(observation, context, content='observations', content_rowid='id');
+```
+
+---
+
+## Agent Instructions Update
+
+The `.github/copilot-instructions.md` (and global `CLAUDE.md`) has been updated:
+
+- Documents `coerceNumberArray()` for integer array Zod fields
+- Documents the `record_observation` / `get_observations` actions in the tool catalog
+- Clarifies universal mode Zod preprocessing behaviour
+
+---
+
+## Upgrade
+
+No configuration changes required. The schema migration runs automatically on first start. All existing data is preserved.
+
+```bash
+npx -y engram-mcp-server install
+```
+
+---
+
 # v1.10.0 — Project Management Framework (PM-Lite + PM-Full)
 
 **Released:** v1.10.0 — March 4, 2026
