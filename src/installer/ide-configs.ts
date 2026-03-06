@@ -2,6 +2,7 @@
 // Engram MCP Server — IDE Configuration Definitions
 // ============================================================================
 
+import fs from "fs";
 import path from "path";
 import os from "os";
 
@@ -52,6 +53,19 @@ export interface IdeDefinition {
      * literal placeholder string would be passed to the server and silently ignored.
      */
     envVar?: string;
+    /**
+     * Dynamic global path resolver — used for IDEs with versioned config directories
+     * (e.g. Android Studio: AndroidStudio2025.3.2\mcp.json).
+     * When set, this function is called at install time to enumerate all matching paths
+     * on the current machine instead of using a hardcoded `scopes.global` array.
+     * Returns an array of absolute config file paths (may be empty if IDE not installed).
+     */
+    resolveGlobalPaths?: () => string[];
+    /**
+     * Extra fields to merge into each server entry written by the installer.
+     * Used for IDE-specific required fields (e.g. Android Studio requires `enabled: true`).
+     */
+    extraEntryFields?: Record<string, unknown>;
     scopes: {
         global?: string[];
         localDirs?: string[];
@@ -273,6 +287,46 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
             global: [
                 path.join(HOME, ".config", "github-copilot", "intellij", "mcp.json"),
             ],
+        },
+    },
+
+    // ─── Android Studio ─────────────────────────────────────────────
+    androidstudio: {
+        name: "Android Studio (Gemini)",
+        // Confirmed: uses "mcpServers" key (user-verified from actual mcp.json).
+        // Despite official docs only mentioning HTTP transport, Android Studio DOES
+        // read stdio configs (command/args) from this file — HTTP UI flow is separate.
+        // Source: user-verified on Windows — actual mcp.json entries use command/args.
+        configKey: "mcpServers",
+        requiresType: false,
+        requiresCmdWrapper: false,
+        // Android Studio requires `enabled: true` in each MCP server entry.
+        // Without it, the server may be ignored by Gemini Agent mode.
+        extraEntryFields: { enabled: true },
+        // Config path is versioned: %APPDATA%\Google\AndroidStudio<VERSION>\mcp.json
+        // Multiple versions can coexist. `resolveGlobalPaths` discovers all of them
+        // via directory listing at install time instead of hardcoding a single path.
+        resolveGlobalPaths: () => {
+            const baseDir = IS_WINDOWS
+                ? path.join(APPDATA, "Google")
+                : IS_MAC
+                    ? path.join(HOME, "Library", "Application Support", "Google")
+                    : path.join(HOME, ".config", "Google");
+            if (!fs.existsSync(baseDir)) return [];
+            try {
+                return fs
+                    .readdirSync(baseDir, { withFileTypes: true })
+                    .filter(d => d.isDirectory() && d.name.startsWith("AndroidStudio"))
+                    .map(d => path.join(baseDir, d.name, "mcp.json"));
+            } catch {
+                return [];
+            }
+        },
+        scopes: {
+            // scopes.global is intentionally empty — resolveGlobalPaths() handles discovery.
+            // localDirs is also empty — Android Studio reads only its own config dir,
+            // not project-level config files.
+            global: [],
         },
     },
 };

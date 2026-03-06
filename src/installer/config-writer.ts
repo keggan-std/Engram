@@ -97,6 +97,11 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
         entry._engram_mode = "universal";
     }
 
+    // IDE-specific extra fields (e.g. Android Studio requires "enabled": true)
+    if (ide.extraEntryFields) {
+        Object.assign(entry, ide.extraEntryFields);
+    }
+
     return entry;
 }
 
