@@ -1,3 +1,98 @@
+# v1.12.0 — Android Studio Support + Installer UX Redesign
+
+**Released:** v1.12.0 — March 6, 2026
+
+## Overview
+
+v1.12.0 adds Android Studio as the 14th supported IDE and completely redesigns the interactive installer experience. The installer now auto-detects the current IDE and shows a focused status panel instead of prompting to install across all IDEs. Project root detection, scope defaults, and multi-version config handling are all improved. Zero breaking changes. No schema migration.
+
+557 tests pass.
+
+---
+
+## What's New
+
+### Android Studio MCP Support (14th IDE)
+
+Android Studio now has full stdio-based MCP support via the installer. Despite official docs describing HTTP-only transport, real-world testing confirms stdio transport works identically to other JetBrains-family IDEs.
+
+**Key details:**
+
+- **Version-specific config discovery** — `resolveGlobalPaths()` globs `%APPDATA%\Google\AndroidStudio*\mcp.json` (Windows) / `~/Library/Application Support/Google/AndroidStudio*/mcp.json` (Mac), finding all installed versions automatically
+- **Install writes to ALL discovered versions** — e.g., AndroidStudio2024.1, 2024.2, 2024.3, 2025.1
+- **`enabled: true` required** — Android Studio requires this field in each MCP server entry; the installer adds it automatically via `extraEntryFields`
+- **Environment detection** — `STUDIO_VM_OPTIONS` env var identifies when the installer is running from within Android Studio
+- **Config key** — uses `"mcpServers"` (not `"servers"`)
+
+```bash
+npx -y engram-mcp-server install --ide androidstudio
+```
+
+### Installer UX Redesign
+
+The interactive installer has been completely rebuilt with a modern, focused experience:
+
+**Focused Status Panel** — When an IDE is detected from the terminal environment, the installer shows a compact status panel with all relevant information instead of asking "install for all IDEs?":
+
+```
+  ──────────────────────────────────────────────────────────────
+  🧠 Engram MCP Installer  v1.12.0
+  ──────────────────────────────────────────────────────────────
+  Detected IDE  : VS Code (GitHub Copilot)
+  Config file   : C:\Users\dev\.vscode\mcp.json
+  Database root : C:\Users\dev\my-project  (git repository)
+  Installed     : v1.11.0  ⬆  v1.12.0 available
+  ──────────────────────────────────────────────────────────────
+
+  What would you like to do?
+
+    1. Update Engram to v1.12.0 in VS Code (GitHub Copilot)
+    2. Enter a custom config directory...
+    3. Install to other IDEs on this system (3 found)...
+    4. Cancel
+```
+
+**Project Root Auto-Detection** — When installing to a local (project-level) config, the installer walks up from cwd looking for project markers (`.git`, `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `build.gradle`, `pom.xml`, `.engram`). If found with high confidence, it pre-fills the path and asks for confirmation. Users can accept, reject, or type a different path.
+
+**Scope Default Fixed** — The scope prompt now defaults to **local** (project-level), matching Decision #20. Previously it defaulted to global, contradicting the recommended configuration.
+
+**Improved `--check` Output** — `--check` now shows ALL version-specific global config paths for IDEs like Android Studio (previously only showed the first found path and stopped).
+
+**Improved `--list` Detection** — `--list` now uses the same robust engram detection logic as the rest of the installer (checks `command` and `args` fields for "engram", not just the exact key name).
+
+### Code Quality
+
+- Extracted shared helpers from the installer monolith: `makeColors()`, `semverCmp()`, `fetchNpmLatest()`, `detectProjectRootForDisplay()`, `resolveIdeInstallStatus()`
+- Centralized `resolveIdeGlobalPaths()` in `ide-detector.ts` — single source of truth for resolving global paths including `resolveGlobalPaths()` dynamic discovery
+- `IdeDefinition` interface extended with `resolveGlobalPaths?()` and `extraEntryFields?` for IDE-specific customization
+- `makeEngramEntry()` now spreads `ide.extraEntryFields` into the config entry
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/installer/ide-configs.ts` | Added `resolveGlobalPaths`, `extraEntryFields` to `IdeDefinition`; added `androidstudio` entry with glob discovery |
+| `src/installer/ide-detector.ts` | Added `resolveIdeGlobalPaths()` export; Android Studio detection via `STUDIO_VM_OPTIONS` |
+| `src/installer/config-writer.ts` | `makeEngramEntry()` spreads `ide.extraEntryFields` |
+| `src/installer/index.ts` | Full UX redesign: status panel, project root detection, scope fix, menu system, shared helpers |
+| `tests/installer/installer.test.ts` | Updated scope assertion for `resolveGlobalPaths` |
+| `README.md` | Added Android Studio to overview, `--ide` values, config key note; added manual config section |
+| `llms.txt` | Added Android Studio to compatible IDE list |
+
+---
+
+## Upgrade
+
+No configuration changes required. No schema migration.
+
+```bash
+npx -y engram-mcp-server install
+```
+
+---
+
 # v1.11.0 — Developer Experience: Params Coercion, Observations & Session Efficiency
 
 **Released:** v1.11.0 — March 6, 2026
