@@ -664,6 +664,117 @@ const migrations: Migration[] = [
       `);
     },
   },
+
+  // ─── V23: PM Convention Upgrade ──────────────────────────────────
+  {
+    version: 23,
+    description: "PM convention upgrade: add summary+tags columns, rebuild FTS, add PM config keys",
+    up: (db) => {
+      // 1. Add new columns to conventions table
+      db.exec(`
+        ALTER TABLE conventions ADD COLUMN summary TEXT;
+        ALTER TABLE conventions ADD COLUMN tags    TEXT;
+      `);
+
+      // 2. Backfill summary from first 80 chars of rule
+      db.exec(`
+        UPDATE conventions SET summary = SUBSTR(rule, 1, 80) WHERE summary IS NULL;
+      `);
+
+      // 3. Drop old conventions FTS triggers (they reference old column list)
+      db.exec(`
+        DROP TRIGGER IF EXISTS trg_conventions_ai;
+        DROP TRIGGER IF EXISTS trg_conventions_au;
+        DROP TRIGGER IF EXISTS trg_conventions_ad;
+      `);
+
+      // 4. Drop and recreate fts_conventions with expanded columns
+      db.exec(`
+        DROP TABLE IF EXISTS fts_conventions;
+        CREATE VIRTUAL TABLE fts_conventions USING fts5(
+          rule,
+          examples,
+          summary,
+          tags,
+          content='conventions',
+          content_rowid='id'
+        );
+      `);
+
+      // 5. Rebuild FTS index from conventions table
+      db.exec(`INSERT INTO fts_conventions(fts_conventions) VALUES ('rebuild')`);
+
+      // 6. Recreate triggers with new column list
+      db.exec(`
+        CREATE TRIGGER trg_conventions_ai AFTER INSERT ON conventions BEGIN
+          INSERT INTO fts_conventions(rowid, rule, examples, summary, tags)
+            VALUES (new.id, new.rule, new.examples, new.summary, new.tags);
+        END;
+        CREATE TRIGGER trg_conventions_au AFTER UPDATE ON conventions BEGIN
+          INSERT INTO fts_conventions(fts_conventions, rowid, rule, examples, summary, tags)
+            VALUES('delete', old.id, old.rule, old.examples, old.summary, old.tags);
+          INSERT INTO fts_conventions(rowid, rule, examples, summary, tags)
+            VALUES (new.id, new.rule, new.examples, new.summary, new.tags);
+        END;
+        CREATE TRIGGER trg_conventions_ad AFTER DELETE ON conventions BEGIN
+          INSERT INTO fts_conventions(fts_conventions, rowid, rule, examples, summary, tags)
+            VALUES('delete', old.id, old.rule, old.examples, old.summary, old.tags);
+        END;
+      `);
+
+      // 7. Insert PM framework config keys (defaults — PM-Lite auto-ON, PM-Full opt-in)
+      db.exec(`
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('pm_lite_enabled',   'true',  datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('pm_full_enabled',   'false', datetime('now'));
+        INSERT OR IGNORE INTO config (key, value, updated_at) VALUES ('pm_offer_declined', 'false', datetime('now'));
+      `);
+    },
+  },
+
+  // ─── V24: Observations Table ─────────────────────────────────────
+  {
+    version: 24,
+    description: "Create observations table + FTS5 — lightweight non-decision notes for agents",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observations (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id  INTEGER REFERENCES sessions(id),
+          timestamp   TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          category    TEXT NOT NULL DEFAULT 'other',
+          file_path   TEXT,
+          tags        TEXT,
+          agent_name  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_observations_session   ON observations(session_id);
+        CREATE INDEX IF NOT EXISTS idx_observations_category  ON observations(category);
+        CREATE INDEX IF NOT EXISTS idx_observations_file_path ON observations(file_path);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS fts_observations USING fts5(
+          content,
+          tags,
+          content='observations',
+          content_rowid='id'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO fts_observations(rowid, content, tags)
+            VALUES (new.id, new.content, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO fts_observations(fts_observations, rowid, content, tags)
+            VALUES('delete', old.id, old.content, old.tags);
+          INSERT INTO fts_observations(rowid, content, tags)
+            VALUES (new.id, new.content, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trg_observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO fts_observations(fts_observations, rowid, content, tags)
+            VALUES('delete', old.id, old.content, old.tags);
+        END;
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

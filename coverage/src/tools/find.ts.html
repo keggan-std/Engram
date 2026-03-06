@@ -1,0 +1,970 @@
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <title>Code coverage report for src/tools/find.ts</title>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../../prettify.css" />
+    <link rel="stylesheet" href="../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style type='text/css'>
+        .coverage-summary .sorter {
+            background-image: url(../../sort-arrow-sprite.png);
+        }
+    </style>
+</head>
+    
+<body>
+<div class='wrapper'>
+    <div class='pad1'>
+        <h1><a href="../../index.html">All files</a> / <a href="index.html">src/tools</a> find.ts</h1>
+        <div class='clearfix'>
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">12.16% </span>
+                <span class="quiet">Statements</span>
+                <span class='fraction'>9/74</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">8.51% </span>
+                <span class="quiet">Branches</span>
+                <span class='fraction'>4/47</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">20% </span>
+                <span class="quiet">Functions</span>
+                <span class='fraction'>3/15</span>
+            </div>
+        
+            
+            <div class='fl pad1y space-right2'>
+                <span class="strong">14.75% </span>
+                <span class="quiet">Lines</span>
+                <span class='fraction'>9/61</span>
+            </div>
+        
+            
+        </div>
+        <p class="quiet">
+            Press <em>n</em> or <em>j</em> to go to the next uncovered block, <em>b</em>, <em>p</em> or <em>k</em> for the previous block.
+        </p>
+        <template id="filterTemplate">
+            <div class="quiet">
+                Filter:
+                <input type="search" id="fileSearch">
+            </div>
+        </template>
+    </div>
+    <div class='status-line low'></div>
+    <pre><table class="coverage">
+<tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
+<a name='L2'></a><a href='#L2'>2</a>
+<a name='L3'></a><a href='#L3'>3</a>
+<a name='L4'></a><a href='#L4'>4</a>
+<a name='L5'></a><a href='#L5'>5</a>
+<a name='L6'></a><a href='#L6'>6</a>
+<a name='L7'></a><a href='#L7'>7</a>
+<a name='L8'></a><a href='#L8'>8</a>
+<a name='L9'></a><a href='#L9'>9</a>
+<a name='L10'></a><a href='#L10'>10</a>
+<a name='L11'></a><a href='#L11'>11</a>
+<a name='L12'></a><a href='#L12'>12</a>
+<a name='L13'></a><a href='#L13'>13</a>
+<a name='L14'></a><a href='#L14'>14</a>
+<a name='L15'></a><a href='#L15'>15</a>
+<a name='L16'></a><a href='#L16'>16</a>
+<a name='L17'></a><a href='#L17'>17</a>
+<a name='L18'></a><a href='#L18'>18</a>
+<a name='L19'></a><a href='#L19'>19</a>
+<a name='L20'></a><a href='#L20'>20</a>
+<a name='L21'></a><a href='#L21'>21</a>
+<a name='L22'></a><a href='#L22'>22</a>
+<a name='L23'></a><a href='#L23'>23</a>
+<a name='L24'></a><a href='#L24'>24</a>
+<a name='L25'></a><a href='#L25'>25</a>
+<a name='L26'></a><a href='#L26'>26</a>
+<a name='L27'></a><a href='#L27'>27</a>
+<a name='L28'></a><a href='#L28'>28</a>
+<a name='L29'></a><a href='#L29'>29</a>
+<a name='L30'></a><a href='#L30'>30</a>
+<a name='L31'></a><a href='#L31'>31</a>
+<a name='L32'></a><a href='#L32'>32</a>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a>
+<a name='L38'></a><a href='#L38'>38</a>
+<a name='L39'></a><a href='#L39'>39</a>
+<a name='L40'></a><a href='#L40'>40</a>
+<a name='L41'></a><a href='#L41'>41</a>
+<a name='L42'></a><a href='#L42'>42</a>
+<a name='L43'></a><a href='#L43'>43</a>
+<a name='L44'></a><a href='#L44'>44</a>
+<a name='L45'></a><a href='#L45'>45</a>
+<a name='L46'></a><a href='#L46'>46</a>
+<a name='L47'></a><a href='#L47'>47</a>
+<a name='L48'></a><a href='#L48'>48</a>
+<a name='L49'></a><a href='#L49'>49</a>
+<a name='L50'></a><a href='#L50'>50</a>
+<a name='L51'></a><a href='#L51'>51</a>
+<a name='L52'></a><a href='#L52'>52</a>
+<a name='L53'></a><a href='#L53'>53</a>
+<a name='L54'></a><a href='#L54'>54</a>
+<a name='L55'></a><a href='#L55'>55</a>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a>
+<a name='L70'></a><a href='#L70'>70</a>
+<a name='L71'></a><a href='#L71'>71</a>
+<a name='L72'></a><a href='#L72'>72</a>
+<a name='L73'></a><a href='#L73'>73</a>
+<a name='L74'></a><a href='#L74'>74</a>
+<a name='L75'></a><a href='#L75'>75</a>
+<a name='L76'></a><a href='#L76'>76</a>
+<a name='L77'></a><a href='#L77'>77</a>
+<a name='L78'></a><a href='#L78'>78</a>
+<a name='L79'></a><a href='#L79'>79</a>
+<a name='L80'></a><a href='#L80'>80</a>
+<a name='L81'></a><a href='#L81'>81</a>
+<a name='L82'></a><a href='#L82'>82</a>
+<a name='L83'></a><a href='#L83'>83</a>
+<a name='L84'></a><a href='#L84'>84</a>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a>
+<a name='L88'></a><a href='#L88'>88</a>
+<a name='L89'></a><a href='#L89'>89</a>
+<a name='L90'></a><a href='#L90'>90</a>
+<a name='L91'></a><a href='#L91'>91</a>
+<a name='L92'></a><a href='#L92'>92</a>
+<a name='L93'></a><a href='#L93'>93</a>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a>
+<a name='L102'></a><a href='#L102'>102</a>
+<a name='L103'></a><a href='#L103'>103</a>
+<a name='L104'></a><a href='#L104'>104</a>
+<a name='L105'></a><a href='#L105'>105</a>
+<a name='L106'></a><a href='#L106'>106</a>
+<a name='L107'></a><a href='#L107'>107</a>
+<a name='L108'></a><a href='#L108'>108</a>
+<a name='L109'></a><a href='#L109'>109</a>
+<a name='L110'></a><a href='#L110'>110</a>
+<a name='L111'></a><a href='#L111'>111</a>
+<a name='L112'></a><a href='#L112'>112</a>
+<a name='L113'></a><a href='#L113'>113</a>
+<a name='L114'></a><a href='#L114'>114</a>
+<a name='L115'></a><a href='#L115'>115</a>
+<a name='L116'></a><a href='#L116'>116</a>
+<a name='L117'></a><a href='#L117'>117</a>
+<a name='L118'></a><a href='#L118'>118</a>
+<a name='L119'></a><a href='#L119'>119</a>
+<a name='L120'></a><a href='#L120'>120</a>
+<a name='L121'></a><a href='#L121'>121</a>
+<a name='L122'></a><a href='#L122'>122</a>
+<a name='L123'></a><a href='#L123'>123</a>
+<a name='L124'></a><a href='#L124'>124</a>
+<a name='L125'></a><a href='#L125'>125</a>
+<a name='L126'></a><a href='#L126'>126</a>
+<a name='L127'></a><a href='#L127'>127</a>
+<a name='L128'></a><a href='#L128'>128</a>
+<a name='L129'></a><a href='#L129'>129</a>
+<a name='L130'></a><a href='#L130'>130</a>
+<a name='L131'></a><a href='#L131'>131</a>
+<a name='L132'></a><a href='#L132'>132</a>
+<a name='L133'></a><a href='#L133'>133</a>
+<a name='L134'></a><a href='#L134'>134</a>
+<a name='L135'></a><a href='#L135'>135</a>
+<a name='L136'></a><a href='#L136'>136</a>
+<a name='L137'></a><a href='#L137'>137</a>
+<a name='L138'></a><a href='#L138'>138</a>
+<a name='L139'></a><a href='#L139'>139</a>
+<a name='L140'></a><a href='#L140'>140</a>
+<a name='L141'></a><a href='#L141'>141</a>
+<a name='L142'></a><a href='#L142'>142</a>
+<a name='L143'></a><a href='#L143'>143</a>
+<a name='L144'></a><a href='#L144'>144</a>
+<a name='L145'></a><a href='#L145'>145</a>
+<a name='L146'></a><a href='#L146'>146</a>
+<a name='L147'></a><a href='#L147'>147</a>
+<a name='L148'></a><a href='#L148'>148</a>
+<a name='L149'></a><a href='#L149'>149</a>
+<a name='L150'></a><a href='#L150'>150</a>
+<a name='L151'></a><a href='#L151'>151</a>
+<a name='L152'></a><a href='#L152'>152</a>
+<a name='L153'></a><a href='#L153'>153</a>
+<a name='L154'></a><a href='#L154'>154</a>
+<a name='L155'></a><a href='#L155'>155</a>
+<a name='L156'></a><a href='#L156'>156</a>
+<a name='L157'></a><a href='#L157'>157</a>
+<a name='L158'></a><a href='#L158'>158</a>
+<a name='L159'></a><a href='#L159'>159</a>
+<a name='L160'></a><a href='#L160'>160</a>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a>
+<a name='L163'></a><a href='#L163'>163</a>
+<a name='L164'></a><a href='#L164'>164</a>
+<a name='L165'></a><a href='#L165'>165</a>
+<a name='L166'></a><a href='#L166'>166</a>
+<a name='L167'></a><a href='#L167'>167</a>
+<a name='L168'></a><a href='#L168'>168</a>
+<a name='L169'></a><a href='#L169'>169</a>
+<a name='L170'></a><a href='#L170'>170</a>
+<a name='L171'></a><a href='#L171'>171</a>
+<a name='L172'></a><a href='#L172'>172</a>
+<a name='L173'></a><a href='#L173'>173</a>
+<a name='L174'></a><a href='#L174'>174</a>
+<a name='L175'></a><a href='#L175'>175</a>
+<a name='L176'></a><a href='#L176'>176</a>
+<a name='L177'></a><a href='#L177'>177</a>
+<a name='L178'></a><a href='#L178'>178</a>
+<a name='L179'></a><a href='#L179'>179</a>
+<a name='L180'></a><a href='#L180'>180</a>
+<a name='L181'></a><a href='#L181'>181</a>
+<a name='L182'></a><a href='#L182'>182</a>
+<a name='L183'></a><a href='#L183'>183</a>
+<a name='L184'></a><a href='#L184'>184</a>
+<a name='L185'></a><a href='#L185'>185</a>
+<a name='L186'></a><a href='#L186'>186</a>
+<a name='L187'></a><a href='#L187'>187</a>
+<a name='L188'></a><a href='#L188'>188</a>
+<a name='L189'></a><a href='#L189'>189</a>
+<a name='L190'></a><a href='#L190'>190</a>
+<a name='L191'></a><a href='#L191'>191</a>
+<a name='L192'></a><a href='#L192'>192</a>
+<a name='L193'></a><a href='#L193'>193</a>
+<a name='L194'></a><a href='#L194'>194</a>
+<a name='L195'></a><a href='#L195'>195</a>
+<a name='L196'></a><a href='#L196'>196</a>
+<a name='L197'></a><a href='#L197'>197</a>
+<a name='L198'></a><a href='#L198'>198</a>
+<a name='L199'></a><a href='#L199'>199</a>
+<a name='L200'></a><a href='#L200'>200</a>
+<a name='L201'></a><a href='#L201'>201</a>
+<a name='L202'></a><a href='#L202'>202</a>
+<a name='L203'></a><a href='#L203'>203</a>
+<a name='L204'></a><a href='#L204'>204</a>
+<a name='L205'></a><a href='#L205'>205</a>
+<a name='L206'></a><a href='#L206'>206</a>
+<a name='L207'></a><a href='#L207'>207</a>
+<a name='L208'></a><a href='#L208'>208</a>
+<a name='L209'></a><a href='#L209'>209</a>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a>
+<a name='L226'></a><a href='#L226'>226</a>
+<a name='L227'></a><a href='#L227'>227</a>
+<a name='L228'></a><a href='#L228'>228</a>
+<a name='L229'></a><a href='#L229'>229</a>
+<a name='L230'></a><a href='#L230'>230</a>
+<a name='L231'></a><a href='#L231'>231</a>
+<a name='L232'></a><a href='#L232'>232</a>
+<a name='L233'></a><a href='#L233'>233</a>
+<a name='L234'></a><a href='#L234'>234</a>
+<a name='L235'></a><a href='#L235'>235</a>
+<a name='L236'></a><a href='#L236'>236</a>
+<a name='L237'></a><a href='#L237'>237</a>
+<a name='L238'></a><a href='#L238'>238</a>
+<a name='L239'></a><a href='#L239'>239</a>
+<a name='L240'></a><a href='#L240'>240</a>
+<a name='L241'></a><a href='#L241'>241</a>
+<a name='L242'></a><a href='#L242'>242</a>
+<a name='L243'></a><a href='#L243'>243</a>
+<a name='L244'></a><a href='#L244'>244</a>
+<a name='L245'></a><a href='#L245'>245</a>
+<a name='L246'></a><a href='#L246'>246</a>
+<a name='L247'></a><a href='#L247'>247</a>
+<a name='L248'></a><a href='#L248'>248</a>
+<a name='L249'></a><a href='#L249'>249</a>
+<a name='L250'></a><a href='#L250'>250</a>
+<a name='L251'></a><a href='#L251'>251</a>
+<a name='L252'></a><a href='#L252'>252</a>
+<a name='L253'></a><a href='#L253'>253</a>
+<a name='L254'></a><a href='#L254'>254</a>
+<a name='L255'></a><a href='#L255'>255</a>
+<a name='L256'></a><a href='#L256'>256</a>
+<a name='L257'></a><a href='#L257'>257</a>
+<a name='L258'></a><a href='#L258'>258</a>
+<a name='L259'></a><a href='#L259'>259</a>
+<a name='L260'></a><a href='#L260'>260</a>
+<a name='L261'></a><a href='#L261'>261</a>
+<a name='L262'></a><a href='#L262'>262</a>
+<a name='L263'></a><a href='#L263'>263</a>
+<a name='L264'></a><a href='#L264'>264</a>
+<a name='L265'></a><a href='#L265'>265</a>
+<a name='L266'></a><a href='#L266'>266</a>
+<a name='L267'></a><a href='#L267'>267</a>
+<a name='L268'></a><a href='#L268'>268</a>
+<a name='L269'></a><a href='#L269'>269</a>
+<a name='L270'></a><a href='#L270'>270</a>
+<a name='L271'></a><a href='#L271'>271</a>
+<a name='L272'></a><a href='#L272'>272</a>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">20x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">11x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">396x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">396x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// ============================================================================
+// Engram MCP Server — Find Tool (engram_find)
+// Lean surface: returns tool catalog and operation schemas as text.
+// ============================================================================
+&nbsp;
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { success } from "../response.js";
+import { getRepos } from "../database.js";
+&nbsp;
+// ─── Full Operation Catalog ───────────────────────────────────────────────────
+&nbsp;
+export const MEMORY_CATALOG: Record&lt;string, { desc: string; params: string }&gt; = {
+  // File Notes
+  get_file_notes:       { desc: "Read stored notes for a file. Includes staleness confidence.", params: "{ file_path: string, task_focus?: string }" },
+  set_file_notes:       { desc: "Store notes for a file. Call immediately after reading a file.", params: "{ file_path, purpose?, layer?, complexity?, dependencies?, dependents?, notes? }" },
+  set_file_notes_batch: { desc: "Store notes for multiple files at once.", params: "{ files: [{file_path, purpose?, layer?, complexity?, notes?}] }" },
+  // Changes
+  record_change:        { desc: "Log a file change. Call after EVERY edit.", params: "{ changes: [{file_path, change_type, description, diff_summary?, impact_scope?}] }" },
+  get_file_history:     { desc: "Get all changes + decisions for a specific file.", params: "{ file_path: string, limit?: number }" },
+  begin_work:           { desc: "Declare intent to edit files before starting. Enables abandoned-work detection.", params: "{ description: string, files: string[], agent_id?: string }" },
+  // Decisions
+  record_decision:      { desc: "Log an architectural decision. Always include rationale.", params: "{ decision, rationale?, tags?, affected_files?, status?, supersedes?, depends_on?, export_global? }" },
+  record_decisions_batch: { desc: "Log multiple decisions in one call.", params: "{ decisions: [{decision, rationale?, tags?, affected_files?}] }" },
+  get_decisions:        { desc: "Retrieve decisions, optionally filtered.", params: "{ status?, tag?, file_path?, limit? }" },
+  update_decision:      { desc: "Change decision status.", params: "{ id: number, status: 'active'|'superseded'|'deprecated'|'experimental' }" },
+  // Conventions
+  add_convention:       { desc: "Record a project coding convention.", params: "{ category, rule, examples? }" },
+  get_conventions:      { desc: "List all active conventions.", params: "{ category? }" },
+  toggle_convention:    { desc: "Enable or disable a convention.", params: "{ id: number, enforced: boolean }" },
+  // Tasks
+  create_task:          { desc: "Create a persistent cross-session task.", params: "{ title, description?, priority?, tags?, assigned_files?, blocked_by? }" },
+  update_task:          { desc: "Update task status, priority, or fields.", params: "{ id: number, status?, priority?, description?, owner?, add_blocks?, add_blocked_by? }" },
+  get_tasks:            { desc: "Retrieve tasks, optionally filtered.", params: "{ status?, priority?, tag?, limit?, include_done? }" },
+  // Checkpoint
+  checkpoint:           { desc: "Offload working memory before context exhausts.", params: "{ current_understanding: string, progress: string, relevant_files? }" },
+  get_checkpoint:       { desc: "Restore last checkpoint for current session.", params: "{}" },
+  // Intelligence
+  search:               { desc: "Full-text search across all memory types.", params: "{ query: string, scope?: 'all'|'sessions'|'changes'|'decisions'|'file_notes'|'conventions'|'tasks', limit? }" },
+  what_changed:         { desc: "Get diff report since a given time.", params: "{ since?: string, include_git?: boolean }" },
+  get_dependency_map:   { desc: "Get upstream/downstream dependency graph for a file.", params: "{ file_path: string, depth?: number }" },
+  // Milestones
+  record_milestone:     { desc: "Log a project milestone or achievement.", params: "{ title: string, description?, version?, tags? }" },
+  get_milestones:       { desc: "Retrieve milestones.", params: "{ limit? }" },
+  // Scheduler
+  schedule_event:       { desc: "Schedule a deferred action for a future session.", params: "{ title, trigger_type: 'next_session'|'datetime'|'task_complete'|'manual', description?, trigger_value?, priority? }" },
+  get_scheduled_events: { desc: "List scheduled events.", params: "{ status?, trigger_type?, include_done?, limit? }" },
+  update_scheduled_event: { desc: "Modify or cancel a scheduled event.", params: "{ id: number, status?, title?, description?, priority?, trigger_type?, trigger_value? }" },
+  acknowledge_event:    { desc: "Approve or cancel a triggered event.", params: "{ id: number, approved: boolean, note? }" },
+  check_events:         { desc: "Check for triggered events mid-session.", params: "{}" },
+  // Coordination
+  dump:                 { desc: "Smart dump: auto-classifies free-text into memory categories.", params: "{ content: string, hint?: string }" },
+  claim_task:           { desc: "Atomically claim a task for exclusive work.", params: "{ task_id: number, agent_id?: string }" },
+  release_task:         { desc: "Release a claimed task.", params: "{ task_id: number, agent_id?: string }" },
+  agent_sync:           { desc: "Register agent heartbeat and specializations.", params: "{ agent_id: string, specializations?: string[], agent_name?: string, status?: string, current_task_id?: number }" },
+  get_agents:           { desc: "List all registered agents.", params: "{}" },
+  route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
+  broadcast:            { desc: "Send a message to all agents, or to a specific agent only.", params: "{ from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }" },
+  // PM Knowledge (PM-Full required)
+  get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
+};
+&nbsp;
+export const ADMIN_CATALOG: Record&lt;string, { desc: string; params: string }&gt; = {
+  backup:             { desc: "Create a database backup.", params: "{ output_path? }" },
+  restore:            { desc: "Restore from a backup file.", params: "{ input_path: string, confirm: 'yes-restore' }" },
+  list_backups:       { desc: "List all available backup files.", params: "{}" },
+  export:             { desc: "Export all memory to JSON.", params: "{ output_path? }" },
+  import:             { desc: "Import from exported JSON.", params: "{ input_path: string, dry_run?: boolean }" },
+  compact:            { desc: "Compact old session data to save space.", params: "{ keep_sessions?, max_age_days?, dry_run? }" },
+  clear:              { desc: "Clear memory tables. DESTRUCTIVE.", params: "{ scope: 'all'|'sessions'|..., confirm: 'yes-delete-permanently' }" },
+  stats:              { desc: "Overview of all stored memory (counts, sizes).", params: "{}" },
+  health:             { desc: "Database health check.", params: "{}" },
+  config:             { desc: "Read or write Engram config values.", params: "{ key?: string, value?: string }" },
+  scan_project:       { desc: "Scan filesystem and cache project structure.", params: "{ force_refresh?, max_depth? }" },
+  install_hooks:      { desc: "Install Engram git post-commit hook into .git/hooks/.", params: "{}" },
+  remove_hooks:       { desc: "Remove Engram git hook from .git/hooks/post-commit.", params: "{}" },
+  generate_report:    { desc: "Generate a comprehensive project memory report.", params: "{}" },
+  get_global_knowledge: { desc: "Retrieve cross-project global KB entries.", params: "{}" },
+  // Cross-instance actions
+  discover_instances: { desc: "List all Engram instances on this machine with status, sharing, and stats.", params: "{ include_stale?: boolean }" },
+  get_instance_info:  { desc: "Get detailed info about this instance (identity, sharing config, stats).", params: "{}" },
+  set_sharing:        { desc: "Configure sharing mode for this instance.", params: "{ mode: 'none'|'read'|'full', types?: string[] }" },
+  query_instance:     { desc: "Query memory from another instance (decisions, conventions, file_notes, tasks, sessions, changes).", params: "{ instance_id: string, type?: string, query?: string, limit?: number, status?: string }" },
+  search_all_instances: { desc: "Search across all sharing instances at once.", params: "{ query: string, scope?: string, limit?: number }" },
+  import_from_instance: { desc: "Import records from another instance (requires full sharing).", params: "{ instance_id: string, type?: string, ids?: number[] }" },
+  set_instance_label: { desc: "Set a human-readable label for this instance.", params: "{ label: string }" },
+  // Sensitive data actions
+  mark_sensitive:     { desc: "Lock specific records as sensitive (hidden from cross-instance queries).", params: "{ type: string, ids: number[] }" },
+  unmark_sensitive:   { desc: "Remove sensitivity lock from specific records.", params: "{ type: string, ids: number[] }" },
+  list_sensitive:     { desc: "List all currently locked sensitive records by type.", params: "{}" },
+  request_access:     { desc: "Create a pending access request for sensitive data (requires human approval).", params: "{ requester_instance_id: string, type: string, ids: number[], requester_label?: string, reason?: string }" },
+  approve_access:     { desc: "Approve a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
+  deny_access:        { desc: "Deny a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
+  list_access_requests: { desc: "List access requests, optionally filtered by status.", params: "{ status?: 'pending'|'approved'|'denied' }" },
+  // PM Framework
+  enable_pm:            { desc: "Activate PM-Full mode (phase gates, checklists, workflow guidance).", params: "{}" },
+  disable_pm:           { desc: "Deactivate PM-Full mode.", params: "{}" },
+  enable_pm_lite:       { desc: "Enable PM-Lite workflow nudges.", params: "{}" },
+  disable_pm_lite:      { desc: "Disable PM-Lite workflow nudges.", params: "{}" },
+  decline_pm:           { desc: "Permanently decline the PM-Full offer for this project.", params: "{}" },
+  reset_pm_offer:       { desc: "Clear the PM-Full offer/declined flags so the offer can re-appear.", params: "{}" },
+  pm_status:            { desc: "Get full PM framework health status, advisor stats, and config.", params: "{}" },
+};
+&nbsp;
+// ─── BM25-style keyword search over catalog entries ──────────────────────────
+&nbsp;
+function <span class="fstat-no" title="function not covered" >searchCatalog(q</span>uery: string): Array&lt;{ tool: string; action: string; desc: string; params: string; score: number }&gt; {
+  const words = <span class="cstat-no" title="statement not covered" >query.toLowerCase().split(/\s+/).filter(<span class="fstat-no" title="function not covered" >w =&gt; <span class="cstat-no" title="statement not covered" >w</span>.length &gt; 1)</span>;</span>
+  const results: Array&lt;{ tool: string; action: string; desc: string; params: string; score: number }&gt; = <span class="cstat-no" title="statement not covered" >[];</span>
+&nbsp;
+  function <span class="fstat-no" title="function not covered" >scoreEntry(a</span>ction: string, entry: { desc: string; params: string }): number {
+    // Split action name on underscores so "record" matches "record_change", etc.
+    const expandedAction = <span class="cstat-no" title="statement not covered" >action.replace(/_/g, " ");</span>
+    let score = <span class="cstat-no" title="statement not covered" >0;</span>
+<span class="cstat-no" title="statement not covered" >    for (const w of words) {</span>
+<span class="cstat-no" title="statement not covered" >      if (action.includes(w)) <span class="cstat-no" title="statement not covered" >score += <span class="cstat-no" title="statement not covered" >3;</span></span></span>
+      else if (expandedAction.includes(w)) <span class="cstat-no" title="statement not covered" >score += 2;  // "record" in "record change"</span>
+<span class="cstat-no" title="statement not covered" >      if (entry.desc.toLowerCase().includes(w)) <span class="cstat-no" title="statement not covered" >score += 2;</span></span>
+<span class="cstat-no" title="statement not covered" >      if (entry.params.toLowerCase().includes(w)) <span class="cstat-no" title="statement not covered" >score += 1;</span></span>
+    }
+<span class="cstat-no" title="statement not covered" >    return score;</span>
+  }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  for (const [action, entry] of Object.entries(MEMORY_CATALOG)) {</span>
+    const score = <span class="cstat-no" title="statement not covered" >scoreEntry(action, entry);</span>
+<span class="cstat-no" title="statement not covered" >    if (score &gt; 0) <span class="cstat-no" title="statement not covered" >results.push({ tool: "engram_memory", action, desc: entry.desc, params: entry.params, score });</span></span>
+  }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  for (const [action, entry] of Object.entries(ADMIN_CATALOG)) {</span>
+    const score = <span class="cstat-no" title="statement not covered" >scoreEntry(action, entry);</span>
+<span class="cstat-no" title="statement not covered" >    if (score &gt; 0) <span class="cstat-no" title="statement not covered" >results.push({ tool: "engram_admin", action, desc: entry.desc, params: entry.params, score });</span></span>
+  }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return results.sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >b.score - a.score)</span>.slice(0, 8);</span>
+}
+&nbsp;
+// ─── Tool Registration ───────────────────────────────────────────────────────
+&nbsp;
+export function <span class="fstat-no" title="function not covered" >registerFindTool(s</span>erver: McpServer): void {
+<span class="cstat-no" title="statement not covered" >  server.registerTool(</span>
+    "engram_find",
+    {
+      title: "Find Tool",
+      description: `Search the Engram tool catalog or lint content against active conventions.
+&nbsp;
+Actions:
+  - search (or discover): Find matching engram_memory / engram_admin operations by keyword.
+  - lint: Check a snippet of code or text against all active conventions. Returns matched violations.`,
+      inputSchema: {
+        query: z.string().optional().describe("Keyword query for search action."),
+        action: z.enum(["search", "discover", "lint"]).optional().default("search").describe("'search'/'discover' = catalog lookup (default). 'lint' = check content against conventions."),
+        content: z.string().optional().describe("Code/text content to lint. For: lint."),
+        file_path: z.string().optional().describe("Optional file path for context. For: lint."),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+<span class="fstat-no" title="function not covered" >    async ({</span> query, action, content, file_path }) =&gt; {
+      const op = <span class="cstat-no" title="statement not covered" >action ?? "search";</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >      if (op === "lint") {</span>
+<span class="cstat-no" title="statement not covered" >        if (!content) <span class="cstat-no" title="statement not covered" >return success({ violations: [], message: "No content provided to lint." });</span></span>
+        const <span class="cstat-no" title="statement not covered" >repos = getRepos();</span>
+        const conventions = <span class="cstat-no" title="statement not covered" >repos.conventions.getActive();</span>
+        const violations: Array&lt;{ id: number; category: string; rule: string; severity: "warning" | "error" }&gt; = <span class="cstat-no" title="statement not covered" >[];</span>
+<span class="cstat-no" title="statement not covered" >        for (const conv of conventions) {</span>
+          const ruleText = <span class="cstat-no" title="statement not covered" >conv.rule;</span>
+          const ruleTextLower = <span class="cstat-no" title="statement not covered" >ruleText.toLowerCase();</span>
+          const contentText = <span class="cstat-no" title="statement not covered" >content;</span>
+          // Detect prohibition vs requirement
+          const isProhibition = <span class="cstat-no" title="statement not covered" >/\b(never|must not|do not|don'?t|avoid|forbidden)\b/i.test(ruleText);</span>
+          const isRequirement = <span class="cstat-no" title="statement not covered" >/\b(always|must|required|every|all)\b/i.test(ruleText);</span>
+          // Extract backtick-quoted identifiers as high-priority exact tokens
+          const backtickTokens = <span class="cstat-no" title="statement not covered" >Array.from(ruleText.matchAll(/`([^`]+)`/g)).map(<span class="fstat-no" title="function not covered" >m =&gt; <span class="cstat-no" title="statement not covered" >m</span>[1])</span>;</span>
+          // Fall back to whole-word keyword extraction (min 4 chars, excluding stop words)
+          const STOP = <span class="cstat-no" title="statement not covered" >new Set(["always","never","must","every","file","with","that","this","when","from","into","call","have","use","using","should","ensure","code","each"]);</span>
+          const fallbackKeywords = <span class="cstat-no" title="statement not covered" >ruleTextLower.match(/\b[a-z_.]{4,}\b/g)?.filter(<span class="fstat-no" title="function not covered" >w =&gt; <span class="cstat-no" title="statement not covered" >!</span>STOP.has(w))</span> ?? [];</span>
+          // Prefer backtick tokens; fall back to extracted keywords
+          const identifiers = <span class="cstat-no" title="statement not covered" >backtickTokens.length &gt; 0 ? backtickTokens : fallbackKeywords.slice(0, 2);</span>
+<span class="cstat-no" title="statement not covered" >          if (identifiers.length === 0) <span class="cstat-no" title="statement not covered" >continue;</span></span>
+          // Whole-token matching: check if the identifier appears as a word/call in the code
+          const matchesAny = <span class="cstat-no" title="statement not covered" >identifiers.some(<span class="fstat-no" title="function not covered" >id =&gt; {</span></span>
+            const escaped = <span class="cstat-no" title="statement not covered" >id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&amp;");</span>
+            // Match as a word boundary (handles dot-notation identifiers like console.log)
+<span class="cstat-no" title="statement not covered" >            return new RegExp(`\\b${escaped}\\b`, "i").test(contentText) ||</span>
+              // Also match call-site (identifier followed by ( or .)
+              new RegExp(`${escaped}\\s*[.(]`, "i").test(contentText);
+          });
+<span class="cstat-no" title="statement not covered" >          if (isProhibition &amp;&amp; matchesAny) {</span>
+<span class="cstat-no" title="statement not covered" >            violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });</span>
+<span class="cstat-no" title="statement not covered" >          } else if (isRequirement &amp;&amp; !matchesAny) {</span>
+<span class="cstat-no" title="statement not covered" >            violations.push({ id: conv.id, category: conv.category, rule: conv.rule, severity: "warning" });</span>
+          }
+        }
+<span class="cstat-no" title="statement not covered" >        return success({</span>
+          file_path: file_path ?? null,
+          violations,
+          conventions_checked: conventions.length,
+          message: violations.length === 0
+            ? `No convention violations detected (${conventions.length} conventions checked).`
+            : `${violations.length} potential violation(s) found against ${conventions.length} conventions.`,
+        });
+      }
+&nbsp;
+      // default: search
+<span class="cstat-no" title="statement not covered" >      if (!query) <span class="cstat-no" title="statement not covered" >return success({ matches: [], message: "Provide a query to search the tool catalog.", all_memory_actions: Object.keys(MEMORY_CATALOG), all_admin_actions: Object.keys(ADMIN_CATALOG) });</span></span>
+      const matches = <span class="cstat-no" title="statement not covered" >searchCatalog(query);</span>
+<span class="cstat-no" title="statement not covered" >      if (matches.length === 0) {</span>
+<span class="cstat-no" title="statement not covered" >        return success({</span>
+          query,
+          matches: [],
+          message: `No catalog entries matched "${query}". Try broader terms.`,
+          all_memory_actions: Object.keys(MEMORY_CATALOG),
+          all_admin_actions: Object.keys(ADMIN_CATALOG),
+        });
+      }
+<span class="cstat-no" title="statement not covered" >      return success({</span>
+        query,
+        matches: matches.map(<span class="fstat-no" title="function not covered" >m =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
+          call: `${m.tool}(action: "${m.action}", ...params)`,
+          description: m.desc,
+          params: m.params,
+        })),
+        message: `Found ${matches.length} matching operation(s) for "${query}".`,
+      });
+    }
+  );
+}
+&nbsp;
+// ─── Exported catalog for embedding in start_session response ─────────────────
+&nbsp;
+/**
+ * Build the tool catalog at one of three detail levels.
+ *
+ * Tier 0 (~80 tokens)  — Action names only. For repeat sessions; agent already knows the surface.
+ * Tier 1 (~400 tokens) — Names + one-line descriptions. After 30+ days since last delivery.
+ * Tier 2 (~1,200 tokens) — Full descriptions + param schemas. First session ever for this agent.
+ */
+export function buildToolCatalog(tier: 0 | 1 | 2 = 2): Record&lt;string, unknown&gt; {
+  if (tier === 0) {
+    return {
+      memory_actions: Object.keys(MEMORY_CATALOG),
+      admin_actions: Object.keys(ADMIN_CATALOG),
+      note: "Repeat session — action names only. Use engram_find({query}) to look up params for any action.",
+    };
+  }
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (tier === 1) {
+<span class="cstat-no" title="statement not covered" >    return {</span>
+      engram_memory: {
+        description: "All memory operations. Pass action + relevant params.",
+        operations: Object.fromEntries(
+          Object.entries(MEMORY_CATALOG).map(<span class="fstat-no" title="function not covered" >([</span>k, v]) =&gt; <span class="cstat-no" title="statement not covered" >[k, v.desc])</span>
+        ),
+      },
+      engram_admin: {
+        description: "Admin and maintenance operations.",
+        operations: Object.fromEntries(
+          Object.entries(ADMIN_CATALOG).map(<span class="fstat-no" title="function not covered" >([</span>k, v]) =&gt; <span class="cstat-no" title="statement not covered" >[k, v.desc])</span>
+        ),
+      },
+      engram_find: { description: "Search this catalog. params: { query: string }" },
+      note: "Use engram_find({query}) to retrieve full param schemas for any action.",
+    };
+  }
+  // tier === 2: full catalog (first session)
+  return {
+    engram_memory: {
+      description: "All memory operations. Pass action + relevant params.",
+      operations: Object.fromEntries(
+        Object.entries(MEMORY_CATALOG).map(([k, v]) =&gt; [k, `${v.desc} params: ${v.params}`])
+      ),
+    },
+    engram_admin: {
+      description: "Admin and maintenance operations. Use rarely.",
+      operations: Object.fromEntries(
+        Object.entries(ADMIN_CATALOG).map(([k, v]) =&gt; [k, `${v.desc} params: ${v.params}`])
+      ),
+    },
+    engram_find: {
+      description: "Search this catalog. params: { query: string }",
+    },
+  };
+}
+&nbsp;
+// ─── Agent Rules block ────────────────────────────────────────────────────────
+&nbsp;
+export const AGENT_RULES = [
+  { priority: "CRITICAL", id: "AR-01", rule: "Call engram_memory(action:'record_change') after every file edit. Include what changed and why." },
+  { priority: "CRITICAL", id: "AR-02", rule: "Call engram_memory(action:'get_file_notes') before opening any file. Open only if notes are absent or stale." },
+  { priority: "CRITICAL", id: "AR-03", rule: "Call engram_session(action:'end') before terminating. Include all incomplete work as tasks." },
+  { priority: "HIGH",     id: "AR-04", rule: "Call engram_memory(action:'get_decisions') before making any architectural choice." },
+  { priority: "HIGH",     id: "AR-05", rule: "Call engram_memory(action:'record_decision') for every new design or architecture decision made." },
+  { priority: "HIGH",     id: "AR-06", rule: "Call engram_memory(action:'set_file_notes') with executive_summary immediately after reading a file for the first time. Include 2-3 sentences in executive_summary for fast future reads." },
+  { priority: "MEDIUM",   id: "AR-07", rule: "Batch related record_change calls. Set impact_scope accurately: local|module|cross_module|global." },
+  { priority: "MEDIUM",   id: "AR-08", rule: "For large multi-step tasks, checkpoint progress with engram_memory(action:'checkpoint') before context exhausts." },
+];
+&nbsp;</pre></td></tr></table></pre>
+
+                <div class='push'></div><!-- for sticky footer -->
+            </div><!-- /wrapper -->
+            <div class='footer quiet pad2 space-top1 center small'>
+                Code coverage generated by
+                <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
+                at 2026-03-04T00:38:44.151Z
+            </div>
+        <script src="../../prettify.js"></script>
+        <script>
+            window.onload = function () {
+                prettyPrint();
+            };
+        </script>
+        <script src="../../sorter.js"></script>
+        <script src="../../block-navigation.js"></script>
+    </body>
+</html>
+    

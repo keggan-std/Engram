@@ -762,7 +762,19 @@ All capabilities route through **4 dispatcher tools** via an `action` parameter.
 
 ---
 
-### 💾 Your Data, Your Machine
+### � Built-in Project Management Framework
+
+Engram ships a two-tier project management framework that runs inside the agent — no external PM tool needed.
+
+**PM-Lite (always on):** Passive workflow nudges delivered at session start — reminders to record changes, check file notes before opening, log decisions, and end sessions cleanly. Zero configuration. Disable with `engram_admin({ action: "disable_pm_lite" })`.
+
+**PM-Full (opt-in):** A full 6-phase execution framework with phase-aware task tagging, automated phase gate checklists, a built-in knowledge base (principles, phase instructions, PERT estimation), and extended discipline nudges for scope control and risk management. Engram offers PM-Full automatically when it detects structured project patterns. Activate manually with `engram_admin({ action: "enable_pm" })`.
+
+PM errors are always isolated — they never block core Engram operations.
+
+---
+
+### �💾 Your Data, Your Machine
 
 No cloud. No telemetry. No authentication surface. Memory lives in a local SQLite WAL file at `.engram/memory.db`. `backup` creates a portable copy to any path. `export` serializes everything to JSON. You own it entirely.
 
@@ -913,6 +925,7 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 | `route_task`             | Find the best-matched agent for a task based on specialization scoring.                                             |
 | `broadcast`              | Send a message to all agents.                                                                                       |
 | `dump`                   | Auto-classify unstructured text into decisions, tasks, conventions, findings.                                       |
+| `get_knowledge`          | **v1.10** Query the PM knowledge base (PM-Full only). `knowledge_type`: `principles` \| `phase_info` \| `checklist` \| `estimation`. Pass `phase: N` for phase-specific content. |
 
 ### `engram_admin` — Maintenance & Git Hooks
 
@@ -931,6 +944,41 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 | `scan_project`  | Scan and cache project filesystem structure.               |
 | `install_hooks` | Write Engram post-commit git hook to `.git/hooks/`.        |
 | `remove_hooks`  | Remove Engram hook from `.git/hooks/post-commit`.          |
+| `enable_pm`     | Activate PM-Full mode (phase gates, checklists, knowledge). |
+| `disable_pm`    | Deactivate PM-Full mode.                                    |
+| `disable_pm_lite` | Disable PM-Lite workflow nudges.                          |
+| `decline_pm`    | Permanently dismiss the PM-Full offer for this project.    |
+| `reset_pm_offer` | Clear the PM-Full offer/declined flags.                   |
+| `pm_status`     | Get PM health, active mode, advisor stats, and diagnostics. |
+
+### Project Management Mode
+
+Engram includes a built-in Project Execution Framework with two levels:
+
+**PM-Lite (ON by default):** Provides smart workflow nudges — reminders to record changes,
+check file notes, and log decisions. Zero configuration needed. Disable with
+`engram_admin({ action: "disable_pm_lite" })`.
+
+**PM-Full (opt-in):** Activates the full 6-phase project management framework with:
+- Phase-aware task tagging (`tags: ["phase:planning"]`)
+- Phase gate checklists (auto-triggered when all tasks for a phase complete)
+- Built-in knowledge base: principles, phase instructions, estimation guidance
+- Extended workflow nudges for phase discipline, scope control, and risk management
+
+Activate with `engram_admin({ action: "enable_pm" })`. Engram also offers PM-Full
+automatically when it detects structured project work (3+ tasks, phase tags, or PM keywords).
+
+**Knowledge Base (PM-Full only):**
+
+| Query | Returns |
+|-------|---------|
+| `engram_memory({ action: "get_knowledge", knowledge_type: "principles" })` | 5 core PM principles |
+| `engram_memory({ action: "get_knowledge", knowledge_type: "phase_info", phase: 3 })` | Phase 3 entry/exit criteria + instruction summaries |
+| `engram_memory({ action: "get_knowledge", knowledge_type: "checklist", phase: 3 })` | Phase Gate 3→4 checklist |
+| `engram_memory({ action: "get_knowledge", knowledge_type: "estimation" })` | PERT formula and estimation guidance |
+
+**Diagnostics:** `engram_admin({ action: "pm_status" })` returns PM health, detected phase,
+advisor nudge state, and recent failures. PM errors are always isolated — they never block core Engram operations.
 
 ### `engram_find` — Discovery & Linting
 
@@ -955,7 +1003,7 @@ engram_session({ action: "start", agent_name: "claude", verbosity: "summary", fo
 ```
 - `project_root` (optional): Pass the absolute path to the workspace when the IDE may not set cwd to the project directory (e.g. Antigravity, Windsurf, Claude Desktop). Engram will re-initialize its database at the correct location. Omit if the IDE already provides `${workspaceFolder}` (VS Code, Cursor).
 
-Act on everything returned: `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `agent_rules`, `triggered_events`.  
+Act on everything returned: `active_decisions` (binding), `active_conventions` (enforce), `open_tasks`, `agent_rules` (binding), `pm_agent_rules` (binding when PM-Full active), `triggered_events`, `abandoned_work` (resume or discard).  
 Unknown action? → `engram_find({ query: "what I want to do" })`
 
 ### Before Opening Any File
@@ -1121,6 +1169,11 @@ engram_memory({
     {
         "priority": "MEDIUM",
         "rule": "Use verbosity:'nano' or 'minimal' for start_session when context is tight; use 'summary' (default) for normal sessions."
+    },
+    {
+        "priority": "MEDIUM",
+        "rule": "When PM-Full mode is active: tag tasks with phase:N, check phase gate checklists before advancing phases, use get_knowledge for PM guidance.",
+        "condition": "pm_full_enabled"
     }
 ]
 ```

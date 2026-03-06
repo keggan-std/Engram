@@ -13,11 +13,21 @@ export class ConventionsRepo {
         timestamp: string,
         category: string,
         rule: string,
-        examples?: string[] | null
+        examples?: string[] | null,
+        summary?: string | null,
+        tags?: string[] | null
     ): number {
         const result = this.db.prepare(
-            "INSERT INTO conventions (session_id, timestamp, category, rule, examples) VALUES (?, ?, ?, ?, ?)"
-        ).run(sessionId, timestamp, category, rule, examples ? JSON.stringify(examples) : null);
+            "INSERT INTO conventions (session_id, timestamp, category, rule, examples, summary, tags) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).run(
+            sessionId,
+            timestamp,
+            category,
+            rule,
+            examples ? JSON.stringify(examples) : null,
+            summary ?? null,
+            tags ? JSON.stringify(tags) : null
+        );
         return result.lastInsertRowid as number;
     }
 
@@ -30,6 +40,35 @@ export class ConventionsRepo {
         return this.db.prepare(
             "SELECT * FROM conventions WHERE enforced = 1 ORDER BY category, id"
         ).all() as ConventionRow[];
+    }
+
+    /**
+     * FTS5-ranked convention retrieval filtered by focus query.
+     * Falls back to `getActive(limit)` when FTS fails or when ftsQuery is blank.
+     *
+     * @param ftsQuery  The focus string from session start (e.g. "authentication refactoring").
+     * @param limit     Maximum number of conventions to return (default 10).
+     */
+    getActiveFocused(ftsQuery: string, limit: number = 10): ConventionRow[] {
+        if (!ftsQuery?.trim()) {
+            return this.getActive(limit);
+        }
+        try {
+            const rows = this.db.prepare(`
+                SELECT c.*
+                FROM conventions c
+                JOIN fts_conventions fts ON fts.rowid = c.id
+                WHERE c.enforced = 1
+                  AND fts_conventions MATCH ?
+                ORDER BY rank
+                LIMIT ?
+            `).all(ftsQuery.trim(), limit) as ConventionRow[];
+            // If FTS returned nothing, fall back to regular ordering for better UX
+            return rows.length > 0 ? rows : this.getActive(limit);
+        } catch {
+            // FTS not available (pre-V23 DB or corrupt index) — degrade gracefully
+            return this.getActive(limit);
+        }
     }
 
     getFiltered(filters: { category?: string; includeDisabled: boolean }): ConventionRow[] {

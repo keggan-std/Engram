@@ -11,10 +11,11 @@ import * as path from "path";
 import * as os from "os";
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { ConfigRepo } from "../repositories/config.repo.js";
-import type { InstanceEntry, InstanceRegistry, InstanceStats, SharingMode } from "../types.js";
+import type { EnrolledEntry, InstanceEntry, InstanceRegistry, InstanceStats, SharingMode } from "../types.js";
 import {
   CFG_INSTANCE_ID,
   CFG_INSTANCE_LABEL,
+  CFG_INSTANCE_VISIBLE,
   CFG_MACHINE_ID,
   CFG_SHARING_MODE,
   CFG_SHARING_TYPES,
@@ -185,7 +186,49 @@ export class InstanceRegistryService {
       status: "active",
       pid: process.pid,
       machine_id: this.config.get(CFG_MACHINE_ID) ?? "unknown",
+      visible: this.isVisible(),
     };
+  }
+
+  // ─── Visibility Helpers ───────────────────────────────────────────
+
+  /** Returns true if this instance has opted into permanent enrollment (visible=true). */
+  private isVisible(): boolean {
+    return this.config.get(CFG_INSTANCE_VISIBLE) === "true";
+  }
+
+  /** Build the minimal enrolled entry from current config (no stats, no PID). */
+  private buildEnrolledEntry(now: string): EnrolledEntry {
+    return {
+      instance_id: this.getInstanceId(),
+      label: this.config.get(CFG_INSTANCE_LABEL) ?? "unknown",
+      project_root: this.projectRoot,
+      db_path: path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName),
+      enrolled_at: now,
+      last_seen: now,
+    };
+  }
+
+  /** Upsert this instance's enrolled entry (preserves enrolled_at if already present). */
+  private upsertEnrolled(registry: InstanceRegistry): void {
+    if (!registry.enrolled) registry.enrolled = {};
+    const id = this.getInstanceId();
+    const now = new Date().toISOString();
+    const existing = registry.enrolled[id];
+    if (existing) {
+      existing.label = this.config.get(CFG_INSTANCE_LABEL) ?? "unknown";
+      existing.db_path = path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName);
+      existing.last_seen = now;
+    } else {
+      registry.enrolled[id] = this.buildEnrolledEntry(now);
+    }
+  }
+
+  /** Remove this instance from the enrolled map (called when visibility is set to false). */
+  private removeEnrolled(registry: InstanceRegistry): void {
+    if (registry.enrolled) {
+      delete registry.enrolled[this.getInstanceId()];
+    }
   }
 
   // ─── Public API ───────────────────────────────────────────────────
@@ -207,6 +250,7 @@ export class InstanceRegistryService {
 
   /**
    * Update heartbeat timestamp and stats for this instance.
+   * If visible=true, also upserts the permanent enrolled entry.
    */
   heartbeat(): void {
     try {
@@ -218,6 +262,7 @@ export class InstanceRegistryService {
         existing.status = "active";
         existing.pid = process.pid;
         existing.stats = this.collectStats();
+        existing.visible = this.isVisible();
         // Refresh sharing config in case it changed
         existing.sharing_mode = (this.config.get(CFG_SHARING_MODE) ?? DEFAULT_SHARING_MODE) as SharingMode;
         const sharingTypesRaw = this.config.get(CFG_SHARING_TYPES);
@@ -234,6 +279,12 @@ export class InstanceRegistryService {
         // Entry was pruned or registry was reset — re-register
         registry.instances[id] = this.buildEntry();
       }
+
+      // ── Permanent enrollment (visible=true only) ──────────────────
+      if (this.isVisible()) {
+        this.upsertEnrolled(registry);
+      }
+
       this.writeRegistry(registry);
     } catch (err) {
       log.warn(`Failed to heartbeat: ${err}`);
@@ -258,6 +309,8 @@ export class InstanceRegistryService {
 
   /**
    * Stop heartbeat and mark this instance as stopped in the registry.
+   * For visible=true instances, also updates last_seen in the enrolled entry
+   * so the offline card shows an accurate timestamp.
    * Called on process exit / graceful shutdown.
    */
   shutdown(): void {
@@ -271,11 +324,17 @@ export class InstanceRegistryService {
     try {
       const registry = this.readRegistry();
       const id = this.getInstanceId();
+      const now = new Date().toISOString();
       const entry = registry.instances[id];
       if (entry) {
         entry.status = "stopped";
         entry.pid = null;
-        entry.last_heartbeat = new Date().toISOString();
+        entry.last_heartbeat = now;
+      }
+      // Keep enrolled last_seen fresh for the offline dashboard card
+      if (this.isVisible() && registry.enrolled?.[id]) {
+        registry.enrolled[id].last_seen = now;
+        registry.enrolled[id].label = this.config.get(CFG_INSTANCE_LABEL) ?? "unknown";
       }
       this.writeRegistry(registry);
       log.info(`Instance shutdown: ${id}`);
@@ -362,6 +421,50 @@ export class InstanceRegistryService {
     }
 
     return pruned;
+  }
+
+  /**
+   * Return enrolled instances that are NOT currently in the heartbeat list.
+   * These are visible=true instances that have gone offline — suitable
+   * for displaying as offline cards in the dashboard.
+   */
+  getEnrolledOffline(): EnrolledEntry[] {
+    const registry = this.readRegistry();
+    const enrolled = registry.enrolled ?? {};
+    const onlineIds = new Set(Object.keys(registry.instances));
+    return Object.values(enrolled).filter(e => !onlineIds.has(e.instance_id));
+  }
+
+  /**
+   * Return ALL enrolled instances (online or offline).
+   * Used by dashboard to show the full visible fleet.
+   */
+  getEnrolledAll(): EnrolledEntry[] {
+    const registry = this.readRegistry();
+    return Object.values(registry.enrolled ?? {});
+  }
+
+  /**
+   * Set this instance's visibility (permanent enrollment opt-in).
+   * visible=true  → writes enrollment entry on next heartbeat (within 60s).
+   * visible=false → immediately removes enrollment entry; falls back to heartbeat-only.
+   */
+  setVisibility(visible: boolean): void {
+    const ts = new Date().toISOString();
+    this.config.set(CFG_INSTANCE_VISIBLE, visible ? "true" : "false", ts);
+    if (!visible) {
+      // Immediately remove enrolled entry so the instance disappears from the dashboard
+      try {
+        const registry = this.readRegistry();
+        this.removeEnrolled(registry);
+        this.writeRegistry(registry);
+        log.info(`Instance hidden: enrollment entry removed for ${this.getInstanceId()}`);
+      } catch (err) {
+        log.warn(`Failed to remove enrollment entry: ${err}`);
+      }
+    }
+    // For visible=true, the enrollment entry is written on the next heartbeat cycle (~60s max).
+    log.info(`Instance visibility set to ${visible}: ${this.getInstanceId()}`);
   }
 
   /**

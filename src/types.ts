@@ -70,6 +70,8 @@ export interface ConventionRow {
   rule: string;
   examples: string | null;       // JSON array
   enforced: boolean;
+  summary: string | null;        // compact 80-char summary for session delivery (V23+)
+  tags: string | null;           // JSON array of topic tags for FTS filtering (V23+)
 }
 
 export interface TaskRow {
@@ -143,6 +145,17 @@ export interface ScheduledEventRow {
   recurrence: EventRecurrence | null;
 }
 
+export interface ObservationRow {
+  id: number;
+  session_id: number | null;
+  timestamp: string;
+  content: string;
+  category: ObservationCategory;
+  file_path: string | null;
+  tags: string | null;             // JSON array
+  agent_name: string | null;
+}
+
 // ─── Enum Types ─────────────────────────────────────────────────────────────
 
 export type ChangeType =
@@ -197,6 +210,15 @@ export type ConventionCategory =
   | "error_handling"
   | "performance"
   | "security"
+  | "other";
+
+export type ObservationCategory =
+  | "finding"
+  | "pattern"
+  | "concern"
+  | "idea"
+  | "friction"
+  | "behavior"
   | "other";
 
 export type TaskStatus =
@@ -341,6 +363,22 @@ export interface InstanceEntry {
   status: "active" | "stale" | "stopped";
   pid: number | null;
   machine_id: string;
+  /** Whether this instance is permanently enrolled for dashboard discovery. Defaults to false. */
+  visible?: boolean;
+}
+
+/**
+ * Minimal permanent record for a visibility=true instance.
+ * Persists in `enrolled` map even when the instance is offline.
+ * Only label, project path, and last-seen are stored — no sensitive stats.
+ */
+export interface EnrolledEntry {
+  instance_id: string;
+  label: string;
+  project_root: string;
+  db_path: string;
+  enrolled_at: string;
+  last_seen: string;
 }
 
 export interface InstanceRegistry {
@@ -348,6 +386,8 @@ export interface InstanceRegistry {
   machine_id: string;
   last_updated: string;
   instances: Record<string, InstanceEntry>;
+  /** Permanent enrollment map — populated only for instances where visible=true. */
+  enrolled?: Record<string, EnrolledEntry>;
 }
 
 export interface SensitiveAccessRequest {

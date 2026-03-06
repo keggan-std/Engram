@@ -494,4 +494,130 @@ describe("InstanceRegistryService", () => {
       }
     });
   });
+
+  // ─── Visibility & Enrollment ──────────────────────────────────────
+
+  describe("setVisibility / getEnrolledOffline / getEnrolledAll", () => {
+    test("default visibility is false — no enrolled entry after heartbeat", () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        service.register();
+        service.heartbeat();
+
+        const raw = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        // enrolled map should be absent or empty for hidden instance
+        const enrolled = raw.enrolled ?? {};
+        expect(Object.keys(enrolled)).toHaveLength(0);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("setVisibility(true) causes heartbeat to write enrolled entry", () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        service.register();
+        service.setVisibility(true);
+        service.heartbeat(); // enrollment written on heartbeat
+
+        const raw = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        const enrolled = raw.enrolled ?? {};
+        const id = service.getInstanceId();
+        expect(enrolled[id]).toBeDefined();
+        expect(enrolled[id].instance_id).toBe(id);
+        expect(enrolled[id].enrolled_at).toBeTruthy();
+        expect(enrolled[id].last_seen).toBeTruthy();
+        expect(enrolled[id].project_root).toBeTruthy();
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("setVisibility(false) immediately removes enrolled entry", () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        service.register();
+        service.setVisibility(true);
+        service.heartbeat(); // write enrolled entry
+
+        // Confirm it's there
+        let raw = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        expect(raw.enrolled?.[service.getInstanceId()]).toBeDefined();
+
+        // Now hide it
+        service.setVisibility(false);
+
+        raw = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        const enrolled = raw.enrolled ?? {};
+        expect(enrolled[service.getInstanceId()]).toBeUndefined();
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("getEnrolledOffline returns enrolled entries not in heartbeat list", () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        // Manually insert an enrolled entry for a "foreign offline" instance
+        service.register(); // register self
+        const raw = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        raw.enrolled = raw.enrolled ?? {};
+        raw.enrolled["foreign-offline-id"] = {
+          instance_id: "foreign-offline-id",
+          label: "Other Project",
+          project_root: "/other/project",
+          db_path: "/other/project/.engram/memory.db",
+          enrolled_at: new Date().toISOString(),
+          last_seen: new Date().toISOString(),
+        };
+        (service as any).writeRegistry(raw);
+
+        const offline = service.getEnrolledOffline();
+        // foreign-offline-id is in enrolled but NOT in instances heartbeat
+        expect(offline.some(e => e.instance_id === "foreign-offline-id")).toBe(true);
+        // self is in instances, so should NOT appear in offline
+        expect(offline.some(e => e.instance_id === service.getInstanceId())).toBe(false);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("getEnrolledAll returns all enrolled entries including online ones", () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        service.register();
+        service.setVisibility(true);
+        service.heartbeat();
+
+        const all = service.getEnrolledAll();
+        expect(all.some(e => e.instance_id === service.getInstanceId())).toBe(true);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("shutdown updates enrolled last_seen for visible instances", async () => {
+      const { service, registryPath, cleanup } = createService(db, repos);
+      try {
+        service.register();
+        service.setVisibility(true);
+        service.heartbeat();
+
+        const before = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        const beforeLastSeen = before.enrolled?.[service.getInstanceId()]?.last_seen;
+
+        // Small wait to ensure timestamp differs
+        await new Promise(r => setTimeout(r, 5));
+        service.shutdown();
+
+        const after = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as InstanceRegistry;
+        const afterLastSeen = after.enrolled?.[service.getInstanceId()]?.last_seen;
+
+        expect(afterLastSeen).toBeTruthy();
+        expect(new Date(afterLastSeen!).getTime()).toBeGreaterThanOrEqual(new Date(beforeLastSeen!).getTime());
+      } finally {
+        cleanup(); // calls shutdown() again — safe, it's idempotent
+      }
+    });
+  });
 });

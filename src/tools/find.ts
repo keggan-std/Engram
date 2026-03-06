@@ -56,6 +56,11 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   get_agents:           { desc: "List all registered agents.", params: "{}" },
   route_task:           { desc: "Find best-matched agent for a task by specialization scoring.", params: "{ task_id: number }" },
   broadcast:            { desc: "Send a message to all agents, or to a specific agent only.", params: "{ from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }" },
+  // PM Knowledge (PM-Full required)
+  get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
+  // Observations
+  record_observation:   { desc: "Record a lightweight observation — findings, patterns, concerns, ideas, friction.", params: "{ content: string, observation_category?: 'finding'|'pattern'|'concern'|'idea'|'friction'|'behavior'|'other', file_path?: string, tags?: string[] }" },
+  get_observations:     { desc: "Retrieve stored observations, optionally filtered.", params: "{ query?: string, observation_category?: string, file_path?: string, session_id?: number, limit?: number }" },
 };
 
 export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
@@ -75,9 +80,10 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   generate_report:    { desc: "Generate a comprehensive project memory report.", params: "{}" },
   get_global_knowledge: { desc: "Retrieve cross-project global KB entries.", params: "{}" },
   // Cross-instance actions
-  discover_instances: { desc: "List all Engram instances on this machine with status, sharing, and stats.", params: "{ include_stale?: boolean }" },
+  discover_instances: { desc: "List all Engram instances on this machine. Online + enrolled-offline. Includes visibility status.", params: "{ include_stale?: boolean, include_offline?: boolean }" },
   get_instance_info:  { desc: "Get detailed info about this instance (identity, sharing config, stats).", params: "{}" },
   set_sharing:        { desc: "Configure sharing mode for this instance.", params: "{ mode: 'none'|'read'|'full', types?: string[] }" },
+  set_visibility:     { desc: "Toggle permanent enrollment for dashboard discovery. true = persist online/offline. false (default) = heartbeat-only, vanishes after ~5min offline.", params: "{ visible: boolean }" },
   query_instance:     { desc: "Query memory from another instance (decisions, conventions, file_notes, tasks, sessions, changes).", params: "{ instance_id: string, type?: string, query?: string, limit?: number, status?: string }" },
   search_all_instances: { desc: "Search across all sharing instances at once.", params: "{ query: string, scope?: string, limit?: number }" },
   import_from_instance: { desc: "Import records from another instance (requires full sharing).", params: "{ instance_id: string, type?: string, ids?: number[] }" },
@@ -90,6 +96,14 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   approve_access:     { desc: "Approve a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   deny_access:        { desc: "Deny a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   list_access_requests: { desc: "List access requests, optionally filtered by status.", params: "{ status?: 'pending'|'approved'|'denied' }" },
+  // PM Framework
+  enable_pm:            { desc: "Activate PM-Full mode (phase gates, checklists, workflow guidance).", params: "{}" },
+  disable_pm:           { desc: "Deactivate PM-Full mode.", params: "{}" },
+  enable_pm_lite:       { desc: "Enable PM-Lite workflow nudges.", params: "{}" },
+  disable_pm_lite:      { desc: "Disable PM-Lite workflow nudges.", params: "{}" },
+  decline_pm:           { desc: "Permanently decline the PM-Full offer for this project.", params: "{}" },
+  reset_pm_offer:       { desc: "Clear the PM-Full offer/declined flags so the offer can re-appear.", params: "{}" },
+  pm_status:            { desc: "Get full PM framework health status, advisor stats, and config.", params: "{}" },
 };
 
 // ─── BM25-style keyword search over catalog entries ──────────────────────────

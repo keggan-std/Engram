@@ -17,7 +17,38 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 22; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations
+export const DB_VERSION = 24; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade, V24 observations
+
+// PM Framework — Phase / Keyword / Nudge constants
+/** Maps canonical phase name strings (from task tags like `phase:planning`) to phase numbers 1-6. */
+export const PHASE_MAP: Record<string, number> = {
+  initiation:    1,
+  planning:      2,
+  execution:     3,
+  quality:       4,
+  finalization:  5,
+  handover:      6,
+  documentation: 6,
+};
+
+/** Keywords in task titles that indicate PM-heavy work and may trigger PM-Full offer. */
+export const PM_KEYWORDS: ReadonlyArray<string> = [
+  "milestone",
+  "phase gate",
+  "deliverable",
+  "wbs",
+  "risk register",
+  "sprint",
+  "iteration",
+  "kickoff",
+  "handover",
+];
+
+/** Maximum number of PM nudges that can be surfaced within a single session. */
+export const PM_MAX_NUDGES = 5;
+
+/** Semantic version of the bundled PM knowledge base (principles, phases, checklists). */
+export const KNOWLEDGE_BASE_VERSION = "1.0";
 
 // Limits
 export const MAX_FILE_TREE_DEPTH = 5;
@@ -171,6 +202,7 @@ export const CFG_SHARING_MODE = "sharing_mode";       // "none" | "read" | "full
 export const CFG_SHARING_TYPES = "sharing_types";     // JSON array of table names
 export const CFG_SENSITIVE_KEYS = "sensitive_keys";   // JSON array of decision/convention IDs marked sensitive
 export const CFG_HTTP_TOKEN = "http_token";           // Bearer token for dashboard API (file fallback: .engram/token)
+export const CFG_INSTANCE_VISIBLE = "instance_visible"; // "true" | "false" — controls permanent enrollment in registry
 
 // Instance registry
 export const INSTANCE_REGISTRY_DIR = ".engram";

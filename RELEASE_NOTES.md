@@ -1,3 +1,267 @@
+# v1.11.0 — Developer Experience: Params Coercion, Observations & Session Efficiency
+
+**Released:** v1.11.0 — March 6, 2026
+
+## Overview
+
+v1.11.0 is a focused developer-experience release addressing the top pain points found during a systematic DX audit. It eliminates an entire class of MCP client serialization errors, adds a lightweight `record_observation` action as a semantic alternative to misusing `record_decision`, and cuts session-start token overhead by ~40%. Six bug fixes are included. Zero breaking changes.
+
+557 tests pass. Schema migrated to V24.
+
+---
+
+## What's New
+
+### Params Coercion — Full Coverage (WS3)
+
+All MCP clients (VS Code Copilot, Cursor, Claude Desktop, universal mode) can now pass arrays without errors. Previously 9 Zod fields were missing coercion, causing intermittent `"must be object"` or silent parse failures at ~20% failure rate on complex calls.
+
+**Fixed fields:**
+
+| Tool | Field | Type |
+|------|-------|------|
+| `record_decisions_batch` | `decisions[].tags` | `string[]` |
+| `record_decisions_batch` | `decisions[].affected_files` | `string[]` |
+| `checkpoint` | `relevant_files` | `string[]` |
+| `agent_sync` | `specializations` | `string[]` |
+| `create_task` / `update_task` | `depends_on` | `number[]` |
+| `update_task` | `blocked_by`, `add_blocks`, `add_blocked_by` | `number[]` |
+| `export` (admin) | `ids` | `number[]` |
+
+**New utility:** `coerceNumberArray()` in `src/utils.ts` — mirrors `coerceStringArray()` for integer array fields.
+
+**Universal mode fix (critical):** `HandlerCapturer` bypasses Zod `z.preprocess()` transforms entirely, so all per-field coercions were silently skipped in universal mode. A new `coerceParams()` function in `src/modes/universal.ts` now pre-processes params before dispatch, handling JSON-stringified arrays and nested object arrays.
+
+### New Action: `record_observation` (WS2)
+
+A semantically correct, lightweight action for factual observations — no `rationale` required.
+
+```js
+engram_memory({
+  action: "record_observation",
+  observation: "The FTS5 index is rebuilt on every migration run",
+  context: "src/migrations.ts",
+  category: "codebase",     // codebase | behavior | performance | dependency | general
+  tags: ["fts", "migrations"],
+  source: "agent"           // agent | user | automated
+})
+```
+
+Retrieve with:
+```js
+engram_memory({ action: "get_observations", session_id: 42, category: "codebase", limit: 20 })
+```
+
+Observations are included in `search` when `scope` is `"all"` or `"observations"`. Full-text search supported via FTS5 (`fts_observations` virtual table, schema V24).
+
+**Why this matters:** Agents were forced to misuse `record_decision` for factual notes (no rationale needed). `record_observation` is the correct semantic type: lighter than a decision, heavier than a file note.
+
+### Session Verbosity Overhaul (WS1)
+
+The `summary` verbosity tier has been restructured to reduce session-start output by ~40% (from ~800 to ~500 tokens) while making all content available on-demand.
+
+**Changes:**
+
+| Setting | Before | After |
+|---------|--------|-------|
+| Max decisions shown | 5 (120-char each) | 3 (80-char each) |
+| Max conventions shown | 10 | 6 |
+| Max changes shown | 5 (with timestamp) | 3 (no timestamp) |
+| `git_log` in response | Included | Removed (use `what_changed`) |
+| `counts` object | Absent | Added |
+
+New `counts` object in every `summary` response:
+```json
+{
+  "counts": {
+    "decisions": 18,
+    "conventions": 6,
+    "tasks": 4,
+    "changes": 47,
+    "files": 129
+  }
+}
+```
+
+`minimal` tier now includes `top_decision` and `top_task` so agents get actionable context even in the lowest-verbosity tier.
+
+All cap values extracted to named constants in `src/constants.ts` for easy tuning.
+
+### Bug Fixes (WS4)
+
+- **`dump` finding persistence**: The `dump` action's `finding` hint previously generated a fake ephemeral ID and stored nothing to the database. It now persists to the new `observations` table.
+- **Session end observation count**: `session end` stats now include `observations_recorded` alongside changes, decisions, and tasks.
+
+### Instance Visibility System
+
+Instance enrollment in the dashboard discovery service is now permanent across restarts. Previously, instances would lose their enrollment on server restart and require re-registration. The dashboard now reliably discovers all registered instances without polling gaps.
+
+---
+
+## Schema
+
+**V24** adds:
+
+```sql
+CREATE TABLE observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER,
+  timestamp TEXT NOT NULL,
+  observation TEXT NOT NULL,
+  context TEXT,
+  category TEXT DEFAULT 'general',
+  tags TEXT,
+  source TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+CREATE INDEX idx_observations_session ON observations(session_id);
+CREATE INDEX idx_observations_category ON observations(category);
+-- FTS5 virtual table
+CREATE VIRTUAL TABLE fts_observations USING fts5(observation, context, content='observations', content_rowid='id');
+```
+
+---
+
+## Agent Instructions Update
+
+The `.github/copilot-instructions.md` (and global `CLAUDE.md`) has been updated:
+
+- Documents `coerceNumberArray()` for integer array Zod fields
+- Documents the `record_observation` / `get_observations` actions in the tool catalog
+- Clarifies universal mode Zod preprocessing behaviour
+
+---
+
+## Upgrade
+
+No configuration changes required. The schema migration runs automatically on first start. All existing data is preserved.
+
+```bash
+npx -y engram-mcp-server install
+```
+
+---
+
+# v1.10.0 — Project Management Framework (PM-Lite + PM-Full)
+
+**Released:** v1.10.0 — March 4, 2026
+
+## Overview
+
+v1.10.0 ships a full two-level Project Management framework that turns Engram into a structured PM co-pilot for AI coding agents. The system is entirely opt-in above the basic nudge layer: **PM-Lite** activates automatically for all users and provides lightweight workflow nudges, while **PM-Full** is explicitly enabled and provides phase-aware project management with a built-in knowledge base, phase gate automation, and scope verification.
+
+Eight new tool actions, a knowledge base module, a workflow advisor service, schema V23, and 81 new tests (551 total) are included. Zero breaking changes to existing Engram workflows.
+
+---
+
+## What's New
+
+### PM-Lite — Workflow Nudges (auto-ON)
+
+PM-Lite is enabled by default for all users. It observes action patterns within each session and surfaces contextual nudges (up to 5 per session, never repeated) when it detects workflow anti-patterns:
+
+| Nudge | Triggers when… |
+|-------|---------------|
+| `unrecorded_edits` | ≥3 `begin_work` calls without a `record_change` |
+| `missing_decision_lookup` | Tasks created without checking existing decisions |
+| `missing_file_notes` | Working on ≥3 files without calling `get_file_notes` |
+| `unrecorded_decisions` | ≥5 `get_file_notes` calls without `record_decision` |
+
+Nudges appear in `session_start` and `begin_work` responses via the new `pm_nudge` field. Disable with `engram_admin({ action: "disable_pm_lite" })`.
+
+### PM-Full — Structured Phase Management (opt-in)
+
+Enable with `engram_admin({ action: "enable_pm" })`. Adds:
+
+- **Phase-aware task tagging**: Tag tasks with `phase:N` (where N is a phase name or number 1–6: initiation, planning, execution, monitoring, closure, retrospective) to activate phase tracking.
+- **Phase gate auto-scheduling**: When the last task in a phase is completed, Engram automatically schedules a "Phase Gate N→N+1 — Review Required" event for the next session. No manual scheduling needed.
+- **4 additional PM-Full nudges**: `phase_gate_skip` (phase task done without checklist review), `phase_awareness` (detected phase tag without phase overview), `risk_register` (large task backlog without scheduled risk review), `pm_full_offer` (automatically offered when PM usage patterns are detected).
+- **Knowledge base access** via `get_knowledge` action.
+
+### New Action: `get_knowledge` (PM-Full only)
+
+Query the built-in PM knowledge base:
+
+```js
+engram_memory({ action: "get_knowledge", knowledge_type: "principles" })
+engram_memory({ action: "get_knowledge", knowledge_type: "phase_info", phase: 2 })
+engram_memory({ action: "get_knowledge", knowledge_type: "checklist", phase: 2 })
+engram_memory({ action: "get_knowledge", knowledge_type: "instructions", phase: 3 })
+engram_memory({ action: "get_knowledge", knowledge_type: "estimation" })
+engram_memory({ action: "get_knowledge", knowledge_type: "conventions" })
+engram_memory({ action: "get_knowledge", knowledge_type: "all", phase: 2 })
+```
+
+Returns compact knowledge entries by default. Pass `compact: false` for full prose content.
+
+### New Admin Actions (7)
+
+| Action | Description |
+|--------|-------------|
+| `enable_pm` | Enable PM-Full mode; clears any prior decline |
+| `disable_pm` | Disable PM-Full mode (PM-Lite remains active) |
+| `enable_pm_lite` | Re-enable PM-Lite if it was disabled |
+| `disable_pm_lite` | Disable PM-Lite workflow nudges |
+| `decline_pm` | Permanently decline PM-Full offer (suppresses re-offer) |
+| `reset_pm_offer` | Clear declined/offered flags to allow re-offer |
+| `pm_status` | Full PM diagnostic report: flags, advisor stats, diagnostics health, current phase |
+
+### Session Start Improvements
+
+- New `intent` parameter on `session_start` — describe your goal for the session; Engram uses it to filter and prioritise context delivery.
+- PM-Lite/Full nudges are now included in session start response when applicable.
+- PM-Full users receive a compact phase overview and relevant conventions at session start when a phase is detected.
+- Convention summaries are now included at session start (compact form, not full text).
+
+### Convention Schema V23
+
+Conventions now have `summary` (compact one-liner) and typed `tags` fields. FTS5 focus filtering uses these for faster, more relevant context assembly. Existing conventions are migrated automatically.
+
+### Error Isolation — `pmSafe()`
+
+All PM code paths are wrapped in the `pmSafe()` isolation boundary. Any PM subsystem failure:
+- Logs to `console.error` (never corrupts MCP stdout)
+- Increments the `PMDiagnosticsTracker` failure count
+- Returns a safe fallback — **PM failures never affect core Engram operations**
+
+Check PM subsystem health with `engram_admin({ action: "pm_status" })`.
+
+---
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `src/services/pm-diagnostics.ts` | New: `PMDiagnosticsTracker` + `pmSafe()` isolation boundary |
+| `src/services/workflow-advisor.service.ts` | New: session-scoped nudge engine (5 PM-Lite + 4 PM-Full checks) |
+| `src/services/event-trigger.service.ts` | Added `detectCurrentPhase()` + phase gate auto-scheduling |
+| `src/knowledge/index.ts` + 6 modules | New: PM knowledge base (principles, phases, checklists, instructions, estimation, conventions) |
+| `src/migrations.ts` | Schema V23: `summary` + `tags` on conventions table |
+| `src/repositories/conventions.repo.ts` | Updated for V23 schema |
+| `src/tools/dispatcher-memory.ts` | Added `get_knowledge` action |
+| `src/tools/dispatcher-admin.ts` | Added 7 PM admin actions |
+| `src/tools/find.ts` | Catalog entries for all new actions |
+| `src/constants.ts` | Added `PM_KEYWORDS`, `PM_MAX_NUDGES`, `PHASE_MAP`, `KNOWLEDGE_BASE_VERSION` |
+| `README.md` | New Project Management Mode section |
+| `.github/copilot-instructions.md` | PM Mode section added |
+| `tests/tools/pm-flow.test.ts` | New: 35 integration tests (PM flows end-to-end) |
+| `tests/services/advisor.test.ts` | New: 31 advisor service tests |
+| `tests/services/event-trigger-phase.test.ts` | New: 15 phase gate tests |
+| `tests/tools/pm-actions.test.ts` | New: 22 PM action tests |
+| `tests/repositories/coverage-boost.test.ts` | New: 46 tests — repo coverage → 87% |
+
+---
+
+## Upgrade
+
+```bash
+npx -y engram-mcp-server@latest install
+```
+
+No migration steps required — schema V23 runs automatically on first start. Existing data is fully preserved. PM-Lite activates immediately; PM-Full requires explicit `enable_pm`.
+
+---
+
 # v1.9.3 — IDE Config Paths, Correct Config Keys & Docs Refresh
 
 **Released:** v1.9.3 — March 3, 2026

@@ -9,10 +9,13 @@ import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDataba
 import { success, error } from "../response.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
+import { pmSafe } from "../services/index.js";
+import { detectCurrentPhase } from "../services/event-trigger.service.js";
+import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
 import path from "path";
 import fs from "fs";
 
-import { coerceStringArray } from "../utils.js";
+import { coerceStringArray, coerceNumberArray } from "../utils.js";
 
 const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
@@ -26,10 +29,13 @@ const ADMIN_ACTIONS = [
   // Cross-instance actions
   "discover_instances", "get_instance_info", "set_sharing",
   "query_instance", "search_all_instances",
-  "import_from_instance", "set_instance_label",
+  "import_from_instance", "set_instance_label", "set_visibility",
   // Sensitive data actions
   "mark_sensitive", "unmark_sensitive", "list_sensitive",
   "request_access", "approve_access", "deny_access", "list_access_requests",
+  // PM Framework actions
+  "enable_pm", "disable_pm", "enable_pm_lite", "disable_pm_lite",
+  "decline_pm", "reset_pm_offer", "pm_status",
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
@@ -39,7 +45,7 @@ export function registerAdminDispatcher(server: McpServer): void {
       title: "Admin Operations",
       description: `Engram admin and maintenance operations. Use only when needed.
 
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests.`,
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
       inputSchema: {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
@@ -64,7 +70,9 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         types: coerceStringArray().optional().describe("Sharing types array: decisions, conventions, file_notes, tasks, etc."),
         label: z.string().optional().describe("Human-readable instance label."),
         include_stale: z.boolean().optional().describe("Include stale/stopped instances in discovery."),
-        ids: z.array(z.number().int()).optional().describe("Record IDs for selective import."),
+        include_offline: z.boolean().optional().describe("Include permanently enrolled instances that are currently offline (default true)."),
+        visible: z.union([z.boolean(), z.string()]).optional().describe("Visibility toggle for set_visibility: true = permanently enrolled in dashboard, false = heartbeat-only (default)."),
+        ids: coerceNumberArray().optional().describe("Record IDs for selective import."),
         status: z.string().optional().describe("Filter by status."),
         reason: z.string().optional().describe("Reason for access request."),
         request_id: z.number().int().optional().describe("Access request ID for approve/deny."),
@@ -219,7 +227,7 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             server_version: SERVER_VERSION, schema_version: schemaVersion,
             total_sessions: count("sessions"), total_changes: count("changes"), total_decisions: count("decisions"),
             total_file_notes: count("file_notes"), total_conventions: count("conventions"), total_tasks: count("tasks"),
-            total_milestones: count("milestones"),
+            total_milestones: count("milestones"), total_observations: count("observations"),
             oldest_session: oldest?.started_at || null, database_size_kb: getDbSizeKb(),
             most_changed_files: mostChanged, tasks_by_status: tasksByStatus,
             update_status: updateAvailable ? { available: true, version: updateAvailable, releases_url: GITHUB_RELEASES_URL } : { available: false },
@@ -343,23 +351,64 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── DISCOVER INSTANCES ──────────────────────────────────────────
         case "discover_instances": {
+          // include_offline=true (default): enrolled instances that are currently offline
+          // are included — they show as status="offline" with label/path/last_seen only.
+          // include_offline=false: only online/stale heartbeat instances returned.
+          const includeOffline = params.include_offline !== false; // default true
           const instances = services.crossInstance.discoverInstances(params.include_stale ?? true);
           const selfId = services.registry.getInstanceId();
+
+          // Online instances from heartbeat list
+          const heartbeatIds = new Set(instances.map(i => i.instance_id));
+          const result: Array<Record<string, unknown>> = instances.map(i => ({
+            instance_id: i.instance_id,
+            label: i.label,
+            project_root: i.project_root,
+            sharing_mode: i.sharing_mode,
+            sharing_types: i.sharing_types,
+            status: i.status,
+            stats: i.stats,
+            last_heartbeat: i.last_heartbeat,
+            is_self: i.instance_id === selfId,
+            online: i.status === "active",
+            enrolled: i.visible ?? false,
+          }));
+
+          // Enrolled offline instances (visible=true, not currently heartbeating)
+          if (includeOffline) {
+            const offlineEnrolled = services.registry.getEnrolledOffline();
+            for (const e of offlineEnrolled) {
+              if (!heartbeatIds.has(e.instance_id)) {
+                result.push({
+                  instance_id: e.instance_id,
+                  label: e.label,
+                  project_root: e.project_root,
+                  db_path: e.db_path,
+                  last_seen: e.last_seen,
+                  enrolled_at: e.enrolled_at,
+                  status: "offline",
+                  online: false,
+                  enrolled: true,
+                  is_self: e.instance_id === selfId,
+                  // Stats not surfaced for offline instances — privacy-safe
+                  stats: null,
+                  sharing_mode: null,
+                  sharing_types: null,
+                  last_heartbeat: e.last_seen,
+                });
+              }
+            }
+          }
+
+          const onlineCount = result.filter(i => i.online).length;
+          const offlineEnrolledCount = result.filter(i => !i.online && i.enrolled).length;
           return success({
             self_instance_id: selfId,
-            instances: instances.map(i => ({
-              instance_id: i.instance_id,
-              label: i.label,
-              project_root: i.project_root,
-              sharing_mode: i.sharing_mode,
-              sharing_types: i.sharing_types,
-              status: i.status,
-              stats: i.stats,
-              last_heartbeat: i.last_heartbeat,
-              is_self: i.instance_id === selfId,
-            })),
-            total: instances.length,
-            message: `Found ${instances.length} Engram instance(s) on this machine.`,
+            instances: result,
+            total: result.length,
+            online_count: onlineCount,
+            offline_enrolled_count: offlineEnrolledCount,
+            message: `Found ${result.length} Engram instance(s) on this machine (${onlineCount} online, ${offlineEnrolledCount} enrolled-offline).`,
           });
         }
 
@@ -526,7 +575,25 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             message: `Instance label updated to '${params.label}'.`,
           });
         }
-
+        // ─── SET VISIBILITY ───────────────────────────────────────────────
+        case "set_visibility": {
+          const rawVisible = params.visible;
+          if (rawVisible === undefined || rawVisible === null) {
+            return error("visible is required (true to enroll permanently, false to hide).");
+          }
+          const visible = rawVisible === true || rawVisible === "true";
+          services.registry.setVisibility(visible);
+          const self = services.registry.getSelf();
+          const statusMsg = visible
+            ? `Instance '${self.label}' is now visible. It will appear in dashboard discovery and persist as offline when not running. Enrollment entry will be written on the next heartbeat (~60s).`
+            : `Instance '${self.label}' is now hidden. It will only appear while this process is running, then disappear after ~5 minutes.`;
+          return success({
+            instance_id: self.instance_id,
+            label: self.label,
+            visible,
+            message: statusMsg,
+          });
+        }
         // ─── MARK SENSITIVE ──────────────────────────────────────────────
         case "mark_sensitive": {
           if (!params.type) return error("type is required (e.g. decisions, conventions, file_notes).");
@@ -634,6 +701,67 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         default:
           return error(`Unknown admin action: ${(params as Record<string, unknown>).action}`);
+
+        // ── PM FRAMEWORK ACTIONS ───────────────────────────────────────────────────────
+
+        case "enable_pm": {
+          const ts = now();
+          repos.config.set('pm_full_enabled', 'true', ts);
+          repos.config.set('pm_full_declined', 'false', ts);
+          return success({ pm_full: true, message: 'PM-Full activated. Phase gates, checklists, and workflow guidance are now available.' });
+        }
+
+        case "disable_pm": {
+          repos.config.set('pm_full_enabled', 'false', now());
+          return success({ pm_full: false, message: 'PM-Full deactivated.' });
+        }
+
+        case "enable_pm_lite": {
+          repos.config.set('pm_lite_enabled', 'true', now());
+          return success({ pm_lite: true, message: 'PM-Lite workflow nudges enabled.' });
+        }
+
+        case "disable_pm_lite": {
+          repos.config.set('pm_lite_enabled', 'false', now());
+          return success({ pm_lite: false, message: 'PM-Lite workflow nudges disabled.' });
+        }
+
+        case "decline_pm": {
+          const ts = now();
+          repos.config.set('pm_full_declined', 'true', ts);
+          repos.config.set('pm_full_offered', 'true', ts);
+          return success({ pm_full_declined: true, message: 'PM-Full offer declined. No further offers will be made. Use enable_pm to activate manually.' });
+        }
+
+        case "reset_pm_offer": {
+          const ts = now();
+          repos.config.set('pm_full_offered', 'false', ts);
+          repos.config.set('pm_full_declined', 'false', ts);
+          return success({ reset: true, message: 'PM-Full offer and decline flags cleared. The offer may appear again when criteria are met.' });
+        }
+
+        case "pm_status": {
+          const pmLiteEnabled = repos.config.get('pm_lite_enabled') !== 'false';
+          const pmFullEnabled = repos.config.get('pm_full_enabled') === 'true';
+          const pmOffered = repos.config.get('pm_full_offered') === 'true';
+          const pmDeclined = repos.config.get('pm_full_declined') === 'true';
+          const advisorStats = pmSafe(() => services.advisor.stats, { delivered: 0, available: [] as string[] }, 'pm_status.advisor');
+          const diagStatus = pmSafe(() => services.diagnostics.getStatus(), { pm_lite_healthy: true, pm_full_healthy: true, failure_count: 0, recent_failures: [], uptime_ms: 0 }, 'pm_status.diagnostics');
+          const currentPhase = pmFullEnabled ? pmSafe(() => detectCurrentPhase(repos), null as number | null, 'pm_status.phase') : null;
+          const kbVersion = pmSafe(() => KNOWLEDGE_BASE_VERSION, '1.0', 'pm_status.kbVersion');
+          return success({
+            pm_lite: { enabled: pmLiteEnabled, healthy: true },
+            pm_full: { enabled: pmFullEnabled, offered: pmOffered, declined: pmDeclined },
+            current_phase: currentPhase,
+            advisor: {
+              nudges_delivered: advisorStats.delivered,
+              nudges_available: advisorStats.available,
+            },
+            diagnostics: diagStatus,
+            knowledge_base_version: kbVersion,
+          });
+        }
+
       }
     }
   );

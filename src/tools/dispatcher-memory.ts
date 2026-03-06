@@ -6,10 +6,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  now, getCurrentSessionId, getRepos, getProjectRoot, getDb
+  now, getCurrentSessionId, getRepos, getProjectRoot, getDb, getServices
 } from "../database.js";
 import {
-  normalizePath, coerceStringArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
+  normalizePath, coerceStringArray, coerceNumberArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
   safeJsonParse, detectLayer, isGitRepo, getGitLogSince, getGitFilesChanged, minutesSince,
 } from "../utils.js";
 import { success, error } from "../response.js";
@@ -18,6 +18,8 @@ import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
   MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
 } from "../constants.js";
+import { pmSafe } from "../services/index.js";
+import { getKnowledge } from "../knowledge/index.js";
 import type { FileNoteRow, FileNoteConfidence, FileNoteWithStaleness, ScheduledEventRow } from "../types.js";
 
 // ─── File Lock Helpers ─────────────────────────────────────────────────────
@@ -172,6 +174,8 @@ const MEMORY_ACTIONS = [
   "record_milestone", "get_milestones",
   "schedule_event", "get_scheduled_events", "update_scheduled_event", "acknowledge_event", "check_events",
   "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast", "route_task",
+  "record_observation", "get_observations",
+  "get_knowledge",
 ] as const;
 
 // ─── Dispatcher ────────────────────────────────────────────────────────────
@@ -188,7 +192,8 @@ begin_work, record_decision, record_decisions_batch, get_decisions, update_decis
 add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
 checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
 get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
-check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task.
+check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task,
+record_observation, get_observations.
 
 Use engram_find(query: "...") to look up exact param schemas.`,
       inputSchema: {
@@ -230,13 +235,13 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         tags: coerceStringArray().optional(),
         status: z.string().optional(),
         supersedes: z.number().int().optional(),
-        depends_on: z.array(z.number().int()).optional(),
+        depends_on: coerceNumberArray().optional(),
         export_global: z.boolean().optional(),
         decisions: z.array(z.object({
           decision: z.string(),
           rationale: z.string().optional(),
-          tags: z.array(z.string()).optional(),
-          affected_files: z.array(z.string()).optional(),
+          tags: coerceStringArray().optional(),
+          affected_files: coerceStringArray().optional(),
         }).passthrough()).optional(),
         // Filters
         tag: z.string().optional(),
@@ -253,15 +258,15 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         title: z.string().optional(),
         priority: z.enum(["critical","high","medium","low"]).optional(),
         assigned_files: coerceStringArray().optional(),
-        blocked_by: z.array(z.number().int()).optional(),
+        blocked_by: coerceNumberArray().optional(),
         include_done: z.boolean().optional(),
-        add_blocks: z.array(z.number().int()).optional(),
-        add_blocked_by: z.array(z.number().int()).optional(),
+        add_blocks: coerceNumberArray().optional(),
+        add_blocked_by: coerceNumberArray().optional(),
         owner: z.string().optional(),
         // Checkpoint
         current_understanding: z.string().optional(),
         progress: z.string().optional(),
-        relevant_files: z.array(z.string()).optional(),
+        relevant_files: coerceStringArray().optional(),
         // Intelligence
         query: z.string().optional(),
         scope: z.string().optional(),
@@ -294,13 +299,24 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         target_agent: z.string().optional(),
         expires_in_minutes: z.number().int().optional(),
         timeout_minutes: z.number().int().optional(),
-        specializations: z.array(z.string()).optional(),
+        specializations: coerceStringArray().optional(),
         session_id: z.number().int().optional(),
         include_tool_log: z.boolean().optional(),
+        // Observations
+        observation_category: z.enum(["finding", "pattern", "concern", "idea", "friction", "behavior", "other"]).optional().describe("Category for record_observation."),
+        // PM Knowledge
+        phase: z.number().int().optional().describe("Phase number 1-6 for phase_info, checklist, or instructions."),
+        knowledge_type: z.enum(["principles", "phase_info", "checklist", "instructions", "estimation", "conventions", "all"]).optional(),
+        compact: z.boolean().optional().describe("Return compact forms only (default: true)."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── PM Advisor: record this action (best-effort) ─────────────────────
+      pmSafe(() => getServices().advisor.recordAction(String(params.action), params as Record<string, unknown>), undefined, 'advisor.recordAction');
+
+      // Execute the action in an IIFE so we can intercept the result for nudge injection
+      const _result = await (async () => {
       const { action } = params;
       const repos = getRepos();
       const db = getDb();
@@ -691,6 +707,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               ["decisions",    "fts_decisions",    "d", "JOIN decisions d ON d.id = f.rowid"],
               ["conventions",  "fts_conventions",  "c", "JOIN conventions c ON c.id = f.rowid"],
               ["tasks",        "fts_tasks",        "t", "JOIN tasks t ON t.id = f.rowid"],
+              ["observations", "fts_observations", "o", "JOIN observations o ON o.id = f.rowid"],
             ];
             for (const [name, fts, alias, join] of ftsScopes) {
               if (scope !== "all" && scope !== name) continue;
@@ -724,6 +741,9 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             }
             if (scope === "all" || scope === "tasks") {
               db.prepare("SELECT * FROM tasks WHERE title LIKE ? OR description LIKE ? OR tags LIKE ? ORDER BY updated_at DESC LIMIT ?").all(term, term, term, oversample).forEach(r => pool.push({ table: "tasks", rank: 0, data: r }));
+            }
+            if (scope === "all" || scope === "observations") {
+              try { db.prepare("SELECT * FROM observations WHERE content LIKE ? OR tags LIKE ? ORDER BY timestamp DESC LIMIT ?").all(term, term, oversample).forEach(r => pool.push({ table: "observations", rank: 0, data: r })); } catch { /* table may not exist */ }
             }
           }
 
@@ -963,9 +983,10 @@ Use engram_find(query: "...") to look up exact param schemas.`,
                 break;
               }
               default: {
-                // "finding" dumps are stored as knowledge notes — NOT as file-change records —
-                // to prevent "dump" appearing as a fake file in change-stats (ISS-011).
-                const findingId = Date.now() % 1_000_000;
+                // "finding" dumps are stored as observations for persistence
+                const findingId = repos.observations.create(
+                  sessionId, timestamp, params.content, "finding", undefined, params.tags ?? null
+                );
                 extractedItems.push({ type: "finding", id: findingId, summary: truncate(params.content, 120) });
               }
             }
@@ -976,6 +997,37 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             classification: { type: classified, confidence: confidence >= 4 ? "high" : confidence >= 2 ? "medium" : "low", scores, hint_used: !!params.hint && params.hint !== "auto" },
             message: `Classified as "${classified}" and stored. Review extracted_items[] to verify.`,
           });
+        }
+
+        // ─── OBSERVATIONS ─────────────────────────────────────────────────
+        case "record_observation": {
+          if (!params.content) return error("content required for record_observation.");
+          const timestamp = now();
+          const sessionId = getCurrentSessionId();
+          const category = params.observation_category ?? "other";
+          const filePath = params.file_path ? normalizePath(params.file_path, projectRoot) : undefined;
+          const id = repos.observations.create(
+            sessionId, timestamp, params.content, category, filePath, params.tags ?? null, params.agent_name ?? null
+          );
+          return success({ id, category, message: `Observation #${id} recorded (${category}).` });
+        }
+
+        case "get_observations": {
+          const limit = params.limit ?? 20;
+          let observations;
+          if (params.query) {
+            try { observations = repos.observations.search(ftsEscape(params.query), limit); }
+            catch { observations = repos.observations.getRecent(limit); }
+          } else if (params.observation_category) {
+            observations = repos.observations.getByCategory(params.observation_category, limit);
+          } else if (params.file_path) {
+            observations = repos.observations.getByFile(normalizePath(params.file_path, projectRoot), limit);
+          } else if (params.session_id) {
+            observations = repos.observations.getBySession(params.session_id, limit);
+          } else {
+            observations = repos.observations.getRecent(limit);
+          }
+          return success({ observations, total: observations.length });
         }
 
         case "claim_task": {
@@ -1093,9 +1145,39 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           } catch { return error("Broadcast table not initialised. Ensure migrations have run."); }
         }
 
+        // ── PM KNOWLEDGE ─────────────────────────────────────────────────────
+
+        case "get_knowledge": {
+          const pmFull = repos.config.get('pm_full_enabled');
+          if (pmFull !== 'true') {
+            return error('get_knowledge requires PM-Full mode. Call engram_admin({ action: "enable_pm" }) to activate.');
+          }
+          const knowledgeType = (params.knowledge_type ?? 'phase_info') as
+            'principles' | 'phase_info' | 'checklist' | 'instructions' | 'estimation' | 'conventions' | 'all';
+          const isCompact = params.compact !== false;
+          const result = pmSafe(
+            () => getKnowledge(knowledgeType, params.phase, isCompact),
+            { error: 'Knowledge base unavailable' },
+            'get_knowledge'
+          );
+          return success(result as Record<string, unknown>);
+        }
+
         default:
           return error(`Unknown memory action: ${(params as Record<string, unknown>).action}`);
+
       }
+      })(); // end action IIFE
+
+      // ── PM Advisor: inject nudge if warranted (best-effort) ───────────────
+      const _nudge = pmSafe(() => getServices().advisor.checkNudge(), null as string | null, 'advisor.checkNudge');
+      if (_nudge) {
+        try {
+          const _parsed = JSON.parse(_result.content[0].text);
+          _result.content[0].text = JSON.stringify({ ..._parsed, _advisor: _nudge });
+        } catch { /* best effort */ }
+      }
+      return _result;
     }
   );
 }

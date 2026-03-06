@@ -64,7 +64,7 @@ src/database.ts       ← opens DB, runs migrations, creates repo/service single
 src/migrations.ts     ← versioned schema migrations, append-only
 src/types.ts          ← all DB row types and union-type enums (zero runtime code)
 src/response.ts       ← ALL MCP response construction (must use these helpers)
-src/utils.ts          ← coerceStringArray(), normalizePath(), findProjectRoot()
+src/utils.ts          ← coerceStringArray(), coerceNumberArray(), normalizePath(), findProjectRoot()
 src/errors.ts         ← EngramError hierarchy (NotFoundError, ValidationError, etc.)
 ```
 
@@ -89,10 +89,12 @@ return textResult('Done.');                // plain text
 
 ### 3. Zod schema params
 - String arrays: use `coerceStringArray()` (not `z.array(z.string())`) — MCP clients serialize arrays as JSON strings
+- Number arrays: use `coerceNumberArray()` (not `z.array(z.number().int())`) — same issue with integer arrays
 - Array-of-object params: add `.passthrough()` to avoid VS Code Copilot / Cursor validation crashes
 ```typescript
-import { coerceStringArray } from '../utils.js';
+import { coerceStringArray, coerceNumberArray } from '../utils.js';
 tags: coerceStringArray().optional(),
+depends_on: coerceNumberArray().optional(),
 files: z.array(z.object({ path: z.string() }).passthrough()).optional(),
 ```
 
@@ -134,6 +136,13 @@ node dist/index.js --install   # run installer interactively
 
 ## Common Gotchas
 
-- `HandlerCapturer` in universal mode **bypasses Zod `.transform()` preprocessing** — any array coercion must handle both `string[]` and raw JSON string inputs (see `parseDepsField()` in `file-notes.repo.ts`)
+- `HandlerCapturer` in universal mode **bypasses Zod `.transform()` preprocessing** — `coerceParams()` in `universal.ts` handles string-encoded array coercion before dispatch. Any new array coercion must handle both `string[]` and raw JSON string inputs (see `parseDepsField()` in `file-notes.repo.ts`)
 - The DB file is `.engram/memory.db` relative to `--project-root` (defaults to `process.cwd()`). Tests use in-memory `:memory:` via `test-db.ts`
 - `src/index.ts` also handles a `record-commit` subcommand invoked by the git post-commit hook — keep CLI arg parsing there, not in tools
+
+## Project Management Mode
+
+Engram ships a built-in PM framework. PM-Lite is ON by default (workflow nudges).
+PM-Full is opt-in (`engram_admin({ action: "enable_pm" })`) — provides phase gates,
+checklists, and a knowledge base. Use `get_knowledge` to query PM content.
+Check `pm_status` if PM features seem broken — PM failures never block core Engram.
