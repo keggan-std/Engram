@@ -210,7 +210,9 @@ describe("IDE Config Definitions", () => {
 
     it("all IDEs should have at least one scope", () => {
         for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-            const hasScope = (ide.scopes.global?.length ?? 0) > 0 || (ide.scopes.localDirs?.length ?? 0) > 0;
+            const hasScope = (ide.scopes.global?.length ?? 0) > 0
+                || (ide.scopes.localDirs?.length ?? 0) > 0
+                || typeof ide.resolveGlobalPaths === "function";
             expect(hasScope, `${id} should have at least one scope`).toBe(true);
         }
     });

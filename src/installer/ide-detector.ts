@@ -27,6 +27,16 @@ export function detectCurrentIde(): string | null {
     if (env.VSINSTALLDIR || env.VisualStudioVersion) return "visualstudio";
 
     // ─── JetBrains detection ─────────────────────────────────────────
+    // Android Studio is IntelliJ-based — check it BEFORE generic JetBrains.
+    // STUDIO_VM_OPTIONS is set by Android Studio's JVM launcher.
+    // Also catch running inside Android Studio terminal via JetBrains JediTerm
+    // combined with ANDROID_HOME/ANDROID_SDK_ROOT being set.
+    if (env.STUDIO_VM_OPTIONS) return "androidstudio";
+    if (
+        env.TERMINAL_EMULATOR?.includes("JetBrains") &&
+        (env.ANDROID_HOME || env.ANDROID_SDK_ROOT)
+    ) return "androidstudio";
+
     if (env.JETBRAINS_IDE || env.TERMINAL_EMULATOR?.includes("JetBrains")) return "jetbrains";
 
     // ─── VS Code family detection ────────────────────────────────────
@@ -69,6 +79,17 @@ export function detectCurrentIde(): string | null {
 }
 
 /**
+ * Resolve the effective list of global config file paths for an IDE.
+ * For most IDEs this is just `ide.scopes.global`.
+ * For IDEs with `resolveGlobalPaths` (e.g. Android Studio with versioned dirs)
+ * that function is called instead, returning all discovered install paths.
+ */
+export function resolveIdeGlobalPaths(ide: import("./ide-configs.js").IdeDefinition): string[] {
+    if (ide.resolveGlobalPaths) return ide.resolveGlobalPaths();
+    return ide.scopes.global ?? [];
+}
+
+/**
  * Scan all IDE_CONFIGS to find which IDEs appear to be installed on this machine.
  *
  * FLAW-9 FIX: The old code treated "parent dir exists" as a detection signal,
@@ -105,8 +126,9 @@ export function detectInstalledIdes(): string[] {
 
     const found: string[] = [];
     for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
-        if (!ide.scopes.global) continue;
-        const isPresent = ide.scopes.global.some(
+        const globalPaths = resolveIdeGlobalPaths(ide);
+        if (!globalPaths.length) continue;
+        const isPresent = globalPaths.some(
             p => fs.existsSync(p) || isReliableParent(p)
         );
         if (isPresent) found.push(id);

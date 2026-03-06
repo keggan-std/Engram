@@ -8,7 +8,7 @@ import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError } from "./config-writer.js";
-import { detectCurrentIde, detectInstalledIdes } from "./ide-detector.js";
+import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths } from "./ide-detector.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -33,6 +33,138 @@ async function askQuestion(query: string): Promise<string> {
         rl.close();
         resolve(ans);
     }));
+}
+
+// ─── ANSI color helpers (reusable) ───────────────────────────────────
+
+function makeColors() {
+    const usesColor = process.stdout.isTTY ?? false;
+    const clr = (code: string, t: string) => usesColor ? `\x1b[${code}m${t}\x1b[0m` : t;
+    return {
+        bold:   (t: string) => clr("1",   t),
+        dim:    (t: string) => clr("2",   t),
+        green:  (t: string) => clr("32",  t),
+        yellow: (t: string) => clr("33",  t),
+        cyan:   (t: string) => clr("36",  t),
+        gray:   (t: string) => clr("90",  t),
+    };
+}
+
+function semverCmp(a: string, b: string): number {
+    const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
+    for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d; }
+    return 0;
+}
+
+// ─── Project root detection (for display purposes) ──────────────────
+
+/**
+ * Walk up from startDir looking for project root markers.
+ * Returns the detected root and what signal was found.
+ */
+function detectProjectRootForDisplay(startDir: string): { root: string; evidence: string; confidence: "high" | "medium" | "low" } {
+    let dir = startDir;
+    for (let i = 0; i < 10; i++) {
+        if (fs.existsSync(path.join(dir, ".git")))
+            return { root: dir, evidence: "git repository", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "package.json")))
+            return { root: dir, evidence: "package.json", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "Cargo.toml")))
+            return { root: dir, evidence: "Cargo.toml", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "go.mod")))
+            return { root: dir, evidence: "go.mod", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "pyproject.toml")))
+            return { root: dir, evidence: "pyproject.toml", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "build.gradle")) || fs.existsSync(path.join(dir, "build.gradle.kts")))
+            return { root: dir, evidence: "Gradle project", confidence: "high" };
+        if (fs.existsSync(path.join(dir, "pom.xml")))
+            return { root: dir, evidence: "Maven project", confidence: "high" };
+        if (fs.existsSync(path.join(dir, ".engram")))
+            return { root: dir, evidence: "existing .engram directory", confidence: "high" };
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return { root: startDir, evidence: "current directory (no project markers found)", confidence: "low" };
+}
+
+// ─── Fetch npm latest version ────────────────────────────────────────
+
+async function fetchNpmLatest(): Promise<string | null> {
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5_000);
+        const res = await fetch("https://registry.npmjs.org/engram-mcp-server/latest", {
+            signal: controller.signal,
+            headers: { "User-Agent": "engram-mcp-server" },
+        });
+        clearTimeout(timer);
+        if (res.ok) {
+            return ((await res.json() as Record<string, unknown>)["version"] as string);
+        }
+    } catch { /* network error — best effort */ }
+    return null;
+}
+
+// ─── Resolve install status for a single IDE ─────────────────────────
+
+interface IdeInstallStatus {
+    state: "not-found" | "not-installed" | "installed" | "invalid-json";
+    configPath: string;
+    installedVersion?: string;
+}
+
+function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
+    const globalPaths = resolveIdeGlobalPaths(ide);
+    for (const configPath of globalPaths) {
+        if (!fs.existsSync(configPath)) continue;
+        let config: Record<string, unknown>;
+        try { config = readJson(configPath) as Record<string, unknown>; }
+        catch (e) {
+            if (e instanceof ConfigParseError) return { state: "invalid-json", configPath };
+            throw e;
+        }
+        const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
+        const instanceKey = Object.keys(serverMap).find(k => {
+            const en = serverMap[k];
+            return k === "engram"
+                || String(en?.command ?? "").includes("engram")
+                || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
+        });
+        if (instanceKey) {
+            const entry = serverMap[instanceKey];
+            return { state: "installed", configPath, installedVersion: String(entry?._engram_version ?? "?") };
+        }
+        return { state: "not-installed", configPath };
+    }
+    // Check local dirs
+    const cwd = process.cwd();
+    if (ide.scopes.localDirs?.length) {
+        for (const dir of ide.scopes.localDirs) {
+            const localFile = ide.scopes.localFile ?? (dir === "" ? ".mcp.json" : "mcp.json");
+            const lp = path.join(cwd, dir, localFile);
+            if (!fs.existsSync(lp)) continue;
+            let config: Record<string, unknown>;
+            try { config = readJson(lp) as Record<string, unknown>; }
+            catch (e) {
+                if (e instanceof ConfigParseError) return { state: "invalid-json", configPath: lp };
+                throw e;
+            }
+            const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
+            const instanceKey = Object.keys(serverMap).find(k => {
+                const en = serverMap[k];
+                return k === "engram"
+                    || String(en?.command ?? "").includes("engram")
+                    || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
+            });
+            if (instanceKey) {
+                const entry = serverMap[instanceKey];
+                return { state: "installed", configPath: lp, installedVersion: String(entry?._engram_version ?? "?") };
+            }
+            return { state: "not-installed", configPath: lp };
+        }
+    }
+    return { state: "not-found", configPath: globalPaths[0] ?? "(no config path)" };
 }
 
 // ─── Main Entry Point ────────────────────────────────────────────────
@@ -107,21 +239,32 @@ Examples:
         for (const [id, ide] of Object.entries(IDE_CONFIGS)) {
             let detected = false;
             let installed = false;
+            const globalPaths = resolveIdeGlobalPaths(ide);
 
-            if (ide.scopes.global) {
-                const foundPath = ide.scopes.global.find(p => fs.existsSync(p));
-                if (foundPath) {
+            if (globalPaths.length) {
+                for (const gp of globalPaths) {
+                    if (!fs.existsSync(gp)) {
+                        // Config file doesn't exist — check if its parent dir does (IDE present but unconfigured)
+                        if (!detected && fs.existsSync(path.dirname(gp))) detected = true;
+                        continue;
+                    }
                     detected = true;
+                    if (installed) break; // Already found an install, no need to keep scanning
                     try {
-                        const config = readJson(foundPath);
-                        if (config?.[ide.configKey]?.engram) installed = true;
+                        const config = readJson(gp) as Record<string, unknown>;
+                        const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
+                        const hasEngram = Object.keys(serverMap).some(k => {
+                            const en = serverMap[k];
+                            return k === "engram"
+                                || String(en?.command ?? "").includes("engram")
+                                || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
+                        });
+                        if (hasEngram) installed = true;
                     } catch (e) {
                         if (e instanceof ConfigParseError) {
-                            console.warn(`  ⚠️  ${foundPath} — invalid JSON (run 'engram install' to repair)`);
+                            console.warn(`  ⚠️  ${gp} — invalid JSON (run 'engram install' to repair)`);
                         }
                     }
-                } else if (ide.scopes.global.find(p => fs.existsSync(path.dirname(p)))) {
-                    detected = true;
                 }
             }
 
@@ -149,37 +292,12 @@ Examples:
         const cwd = process.cwd();
 
         // ── ANSI color helpers (TTY only) ──────────────────────────────────────
-        const usesColor = process.stdout.isTTY ?? false;
-        const clr = (code: string, t: string) => usesColor ? `\x1b[${code}m${t}\x1b[0m` : t;
-        const bold   = (t: string) => clr("1",   t);
-        const dim    = (t: string) => clr("2",   t);
-        const green  = (t: string) => clr("32",  t);
-        const yellow = (t: string) => clr("33",  t);
-        const cyan   = (t: string) => clr("36",  t);
-        const gray   = (t: string) => clr("90",  t);
+        const { bold, dim, green, yellow, cyan, gray } = makeColors();
         const hr = "─".repeat(66);
-
-        const semverCmp = (a: string, b: string): number => {
-            const pa = a.split(".").map(Number), pb = b.split(".").map(Number);
-            for (let i = 0; i < 3; i++) { const d = (pa[i] ?? 0) - (pb[i] ?? 0); if (d !== 0) return d; }
-            return 0;
-        };
 
         // ── Fetch npm latest ───────────────────────────────────────────────────
         process.stdout.write(`\n  ${bold("Engram Installation Check")}\n\n  Checking npm registry...`);
-        let npmLatest: string | null = null;
-        try {
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 5_000);
-            const res = await fetch("https://registry.npmjs.org/engram-mcp-server/latest", {
-                signal: controller.signal,
-                headers: { "User-Agent": "engram-mcp-server" },
-            });
-            clearTimeout(timer);
-            if (res.ok) {
-                npmLatest = ((await res.json() as Record<string, unknown>)["version"] as string);
-            }
-        } catch { /* network error — best effort */ }
+        const npmLatest = await fetchNpmLatest();
 
         const selfCmp    = npmLatest ? semverCmp(currentVersion, npmLatest) : 0;
         const selfStatus = !npmLatest    ? gray("(npm unreachable)")
@@ -235,15 +353,19 @@ Examples:
         for (const [, ide] of Object.entries(IDE_CONFIGS)) {
             const entries: EntryResult[] = [];
 
-            // Global: use first found path. If none found, keep a not-found placeholder so
-            // "detected config but no engram entry" stays distinct from "IDE not present at all".
-            if (ide.scopes.global?.length) {
-                let found = false;
-                for (const gp of ide.scopes.global) {
+            // Global: for IDEs with resolveGlobalPaths (e.g. Android Studio with
+            // multiple version-specific configs), show ALL found paths. For regular
+            // IDEs with a single global path, this naturally resolves to one entry.
+            if (ide.scopes.global?.length || ide.resolveGlobalPaths) {
+                const globalPaths = resolveIdeGlobalPaths(ide);
+                let anyFound = false;
+                for (const gp of globalPaths) {
                     const e = resolveEntry(gp, "global", ide);
-                    if (e.state !== "not-found") { entries.push(e); found = true; break; }
+                    if (e.state !== "not-found") { entries.push(e); anyFound = true; }
                 }
-                if (!found) entries.push({ state: "not-found", scope: "global", filePath: ide.scopes.global[0] });
+                if (!anyFound && globalPaths.length) {
+                    entries.push({ state: "not-found", scope: "global", filePath: globalPaths[0] });
+                }
             }
 
             // Local: scan each dir relative to CWD; add only files that actually exist.
@@ -384,13 +506,12 @@ Examples:
         const ide = IDE_CONFIGS[targetIde];
         let removed = false;
 
-        if (ide.scopes.global) {
-            for (const configPath of ide.scopes.global) {
-                if (fs.existsSync(configPath)) {
-                    if (removeFromConfig(configPath, ide)) {
-                        console.log(`✅ Removed Engram from ${configPath}`);
-                        removed = true;
-                    }
+        const globalPaths = resolveIdeGlobalPaths(ide);
+        for (const configPath of globalPaths) {
+            if (fs.existsSync(configPath)) {
+                if (removeFromConfig(configPath, ide)) {
+                    console.log(`✅ Removed Engram from ${configPath}`);
+                    removed = true;
                 }
             }
         }
@@ -414,48 +535,183 @@ Examples:
     }
 
     // ─── Auto-detect + interactive menu ──────────────────────────────
-    console.log("\n🧠 Engram MCP Installer\n");
+    const { bold, dim, green, yellow, cyan, gray } = makeColors();
+    const currentVersion = getInstallerVersion();
+    const hr = "─".repeat(60);
 
     const currentIde = detectCurrentIde();
-    // Filesystem scan — finds all IDEs installed on this machine regardless of
-    // which one launched the terminal.  Most devs run VS Code, Cursor, Claude Code
-    // and others side-by-side; we should install to all of them in one pass.
     const allDetected = detectInstalledIdes();
     const otherDetected = allDetected.filter(id => id !== currentIde);
 
     if (currentIde && IDE_CONFIGS[currentIde]) {
-        console.log(`🔍 Detected environment: ${IDE_CONFIGS[currentIde].name}`);
+        const ide = IDE_CONFIGS[currentIde];
+        const status = resolveIdeInstallStatus(ide);
+        const cwd = process.cwd();
+        const projectInfo = detectProjectRootForDisplay(cwd);
 
-        if (otherDetected.length > 0) {
-            console.log(`   Also found  : ${otherDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
+        // ── Fetch npm latest for version comparison ──────────────────────
+        process.stdout.write(`\n  ${gray("Checking npm registry...")}`);
+        const npmLatest = await fetchNpmLatest();
+        process.stdout.write(`\r${" ".repeat(40)}\r`); // Clear the checking line
+
+        // ── Status panel ─────────────────────────────────────────────────
+        console.log(`\n  ${gray(hr)}`);
+        console.log(`  ${bold("🧠 Engram MCP Installer")}  ${gray("v" + currentVersion)}`);
+        console.log(`  ${gray(hr)}`);
+        console.log(`  Detected IDE  : ${bold(ide.name)}`);
+        console.log(`  Config file   : ${gray(status.configPath)}`);
+        console.log(`  Database root : ${gray(projectInfo.root)}  ${dim("(" + projectInfo.evidence + ")")}`);
+
+        // Version status
+        if (status.state === "installed" && status.installedVersion) {
+            const ver = status.installedVersion === "?" ? gray("v? (pre-tracking)") : cyan("v" + status.installedVersion);
+            const ref = npmLatest ?? currentVersion;
+            const isOld = status.installedVersion === "?" || semverCmp(status.installedVersion, ref) < 0;
+            const versionStatus = isOld
+                ? npmLatest ? yellow(`⬆  v${npmLatest} available`) : yellow(`⬆  v${currentVersion} available`)
+                : green("✅ up to date");
+            console.log(`  Installed     : ${ver}  ${versionStatus}`);
+        } else if (status.state === "not-installed") {
+            console.log(`  Installed     : ${dim("not installed")}`);
+        } else if (status.state === "invalid-json") {
+            console.log(`  Installed     : ${yellow("⚠ config has invalid JSON")}`);
+        } else {
+            console.log(`  Installed     : ${dim("no config file found")}`);
         }
 
+        if (npmLatest && semverCmp(currentVersion, npmLatest) < 0) {
+            console.log(`  npm latest    : ${cyan("v" + npmLatest)}`);
+        }
+
+        console.log(`  ${gray(hr)}\n`);
+
         if (nonInteractive) {
-            // Install to current IDE first, then all other detected IDEs automatically.
-            await performInstallationForIde(currentIde, IDE_CONFIGS[currentIde], true, universalMode, forceGlobal);
+            // Install/update current IDE, then all other detected IDEs
+            await performInstallationForIde(currentIde, ide, true, universalMode, forceGlobal);
             for (const id of otherDetected) {
                 await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal);
             }
             return;
         }
 
-        const targetIds = [currentIde, ...otherDetected];
-        const targetNames = targetIds.map(id => IDE_CONFIGS[id].name).join(", ");
-        const prompt = otherDetected.length > 0
-            ? `   Install Engram for all ${targetIds.length} IDEs (${targetNames})? [Y/n]: `
-            : `   Install Engram for this IDE? [Y/n]: `;
+        // ── Build menu options ───────────────────────────────────────────
+        const menuOptions: Array<{ label: string; action: () => Promise<void> }> = [];
 
-        const ans = await askQuestion(prompt);
-        if (ans.trim().toLowerCase() !== 'n') {
-            for (const id of targetIds) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode, forceGlobal);
+        if (status.state === "installed") {
+            const ref = npmLatest ?? currentVersion;
+            const isOld = status.installedVersion === "?" || semverCmp(status.installedVersion!, ref) < 0;
+            if (isOld) {
+                menuOptions.push({
+                    label: `Update Engram to v${currentVersion} in ${ide.name}`,
+                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+                });
+            } else {
+                menuOptions.push({
+                    label: `Reinstall / repair Engram in ${ide.name}`,
+                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+                });
             }
-            return;
+        } else {
+            menuOptions.push({
+                label: `Install Engram in ${ide.name}`,
+                action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+            });
         }
-        console.log("");
-    } else if (nonInteractive) {
-        // No terminal env var match — fall back to filesystem scan.
+
+        menuOptions.push({
+            label: "Enter a custom config directory...",
+            action: async () => {
+                const customPath = await askQuestion("  Enter the path to the directory containing (or to create) the MCP config file:\n  > ");
+                if (!customPath.trim()) {
+                    console.log("  No path provided. Cancelled.");
+                    return;
+                }
+                const resolvedPath = path.resolve(customPath.trim());
+                // Check if the path already has an mcp config file
+                const hasConfig = fs.existsSync(path.join(resolvedPath, "mcp.json"))
+                    || fs.existsSync(path.join(resolvedPath, ".mcp.json"));
+                const configFileName = hasConfig
+                    ? (fs.existsSync(path.join(resolvedPath, "mcp.json")) ? "mcp.json" : ".mcp.json")
+                    : "mcp.json";
+                const configFilePath = path.join(resolvedPath, configFileName);
+                if (!hasConfig) {
+                    console.log(`\n  ℹ️  No existing MCP config found at ${resolvedPath}`);
+                    console.log(`     A new ${configFileName} will be created there.`);
+                }
+                const customIde: IdeDefinition = {
+                    name: "Custom Path",
+                    configKey: "mcpServers",
+                    requiresType: false,
+                    requiresCmdWrapper: false,
+                    scopes: {},
+                };
+                await installToPath(configFilePath, customIde, universalMode);
+            },
+        });
+
+        if (otherDetected.length > 0) {
+            menuOptions.push({
+                label: `Install to other IDEs on this system (${otherDetected.length} found)...`,
+                action: async () => {
+                    console.log("\n  Other detected IDEs:\n");
+                    otherDetected.forEach((id, i) => {
+                        const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[id]);
+                        const stLabel = oStatus.state === "installed"
+                            ? green("installed")
+                            : dim("not installed");
+                        console.log(`    ${i + 1}. ${IDE_CONFIGS[id].name}  ${stLabel}`);
+                    });
+                    const allIdx = otherDetected.length + 1;
+                    console.log(`    ${allIdx}. Install to ALL of the above`);
+                    console.log(`    0. Cancel`);
+                    const ans = await askQuestion(`\n  Select [0-${allIdx}]: `);
+                    const ch = parseInt(ans.trim(), 10);
+                    if (isNaN(ch) || ch === 0) return;
+                    if (ch === allIdx) {
+                        for (const id of otherDetected) {
+                            await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode, forceGlobal);
+                        }
+                    } else if (ch >= 1 && ch <= otherDetected.length) {
+                        const selId = otherDetected[ch - 1];
+                        await performInstallationForIde(selId, IDE_CONFIGS[selId], false, universalMode, forceGlobal);
+                    } else {
+                        console.log("  Invalid selection.");
+                    }
+                },
+            });
+        }
+
+        menuOptions.push({
+            label: "Cancel",
+            action: async () => { console.log("  Installation cancelled."); },
+        });
+
+        // ── Print menu ───────────────────────────────────────────────────
+        console.log("  What would you like to do?\n");
+        menuOptions.forEach((opt, i) => {
+            console.log(`    ${i + 1}. ${opt.label}`);
+        });
+
+        const ans = await askQuestion(`\n  Select [1-${menuOptions.length}]: `);
+        const choice = parseInt(ans.trim(), 10);
+        if (isNaN(choice) || choice < 1 || choice > menuOptions.length) {
+            // Default to first option (install/update) if user just presses Enter
+            if (ans.trim() === "") {
+                await menuOptions[0].action();
+            } else {
+                console.log("  Invalid selection. Exiting.");
+                process.exit(1);
+            }
+        } else {
+            await menuOptions[choice - 1].action();
+        }
+        return;
+    }
+
+    // ── No IDE detected from environment ─────────────────────────────
+    if (nonInteractive) {
         if (allDetected.length > 0) {
+            console.log(`\n🧠 Engram MCP Installer v${currentVersion}\n`);
             console.log(`🔍 Found ${allDetected.length} installed IDE(s): ${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
             for (const id of allDetected) {
                 await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal);
@@ -471,47 +727,44 @@ Examples:
         process.exit(1);
     }
 
-    // Interactive menu
-    console.log("Where would you like to configure the Engram MCP server?\n");
+    // ── Interactive fall-through: no IDE detected, show full list ─────
+    console.log(`\n  ${gray(hr)}`);
+    console.log(`  ${bold("🧠 Engram MCP Installer")}  ${gray("v" + currentVersion)}`);
+    console.log(`  ${gray(hr)}`);
+    console.log(`  ${dim("No IDE detected from terminal environment.")}`);
+    console.log(`  ${dim("Select an IDE to install Engram for:")}\n`);
 
     const ideKeys = Object.keys(IDE_CONFIGS);
     ideKeys.forEach((key, index) => {
-        console.log(`  ${index + 1}. ${IDE_CONFIGS[key].name}`);
+        const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[key]);
+        const stLabel = oStatus.state === "installed"
+            ? green("installed")
+            : oStatus.state === "not-installed"
+                ? dim("detected")
+                : "";
+        console.log(`    ${(index + 1).toString().padStart(2)}. ${IDE_CONFIGS[key].name}  ${stLabel}`);
     });
 
-    const allOpt = ideKeys.length + 1;
-    const customOpt = ideKeys.length + 2;
+    const customOpt = ideKeys.length + 1;
+    console.log(`    ${customOpt.toString().padStart(2)}. Custom config directory...`);
+    console.log(`     0. Cancel`);
 
-    // Show which IDEs were actually found on this machine so the user knows
-    // what "ALL detected" will cover before they pick that option.
-    const allOptLabel = allDetected.length > 0
-        ? `Install to ALL detected IDEs (${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")})`
-        : `Install to ALL IDEs (none detected — will attempt all)`;
-    console.log(`  ${allOpt}. ${allOptLabel}`);
-    console.log(`  ${customOpt}. Custom config path...`);
-    console.log(`  0. Cancel`);
-
-    const answer = await askQuestion(`\nSelect an option [0-${customOpt}]: `);
+    const answer = await askQuestion(`\n  Select [0-${customOpt}]: `);
     const choice = parseInt(answer.trim(), 10);
 
     if (isNaN(choice) || choice === 0) {
-        console.log("Installation cancelled.");
+        console.log("  Installation cancelled.");
         process.exit(0);
     }
 
-    if (choice === allOpt) {
-        // Prefer detected IDEs; fall back to all if none found.
-        const targets = allDetected.length > 0 ? allDetected : Object.keys(IDE_CONFIGS);
-        for (const id of targets) {
-            await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal);
-        }
-    } else if (choice === customOpt) {
-        const customPath = await askQuestion("Enter the absolute path to your MCP config JSON file: ");
+    if (choice === customOpt) {
+        const customPath = await askQuestion("  Enter the path to the directory containing (or to create) the MCP config file:\n  > ");
         if (!customPath.trim()) {
-            console.log("No path provided. Exiting.");
+            console.log("  No path provided. Exiting.");
             process.exit(1);
         }
-        // Custom: use mcpServers format as safe default
+        const resolvedPath = path.resolve(customPath.trim());
+        const configFilePath = path.join(resolvedPath, "mcp.json");
         const customIde: IdeDefinition = {
             name: "Custom Path",
             configKey: "mcpServers",
@@ -519,12 +772,12 @@ Examples:
             requiresCmdWrapper: false,
             scopes: {},
         };
-        await installToPath(customPath.trim(), customIde, universalMode);
+        await installToPath(configFilePath, customIde, universalMode);
     } else if (choice >= 1 && choice <= ideKeys.length) {
         const selectedKey = ideKeys[choice - 1];
         await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false, universalMode, forceGlobal);
     } else {
-        console.log("\nInvalid selection. Exiting.");
+        console.log("\n  Invalid selection. Exiting.");
         process.exit(1);
     }
 }
@@ -533,7 +786,7 @@ Examples:
 
 async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean, universal = false, forceGlobal = false) {
     const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
-    const supportsGlobal = ide.scopes?.global && ide.scopes.global.length > 0;
+    const supportsGlobal = (ide.scopes?.global && ide.scopes.global.length > 0) || !!ide.resolveGlobalPaths;
 
     // JetBrains: the global config path is community-sourced and not confirmed by official docs.
     // Official JetBrains MCP config is managed via Settings | Tools | AI Assistant | Model Context Protocol.
@@ -563,16 +816,16 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         // User explicitly requested global via --global flag
         targetScope = "global";
     } else if (supportsLocal && supportsGlobal && !nonInteractive) {
-        console.log(`\n${ide.name} supports two MCP config file locations:`);
-        console.log(`  1. Global  — writes to your user-level IDE config (all projects use this MCP)`);
-        console.log(`  2. Local   — writes to a config file inside a specific project folder`);
-        console.log(`\n  Note: This only controls WHERE the MCP is registered, not where Engram stores`);
-        console.log(`  its database. The database is always placed at your project root automatically.`);
-        const scopeAns = await askQuestion("Select scope [1-2] (default 1): ");
-        if (scopeAns.trim() === "2") {
-            targetScope = "local";
-        } else {
+        console.log(`\n  ${ide.name} supports two MCP config locations:\n`);
+        console.log(`    1. Global  — user-level IDE config (all projects share this MCP server)`);
+        console.log(`    2. Local   — project-specific config file (recommended)`);
+        console.log(`\n  Note: This controls WHERE the MCP entry is registered, not where Engram`);
+        console.log(`  stores its database. The database is always per-project automatically.\n`);
+        const scopeAns = await askQuestion("  Select scope [1-2] (default 2 — local): ");
+        if (scopeAns.trim() === "1") {
             targetScope = "global";
+        } else {
+            targetScope = "local";
         }
     }
 
@@ -580,8 +833,22 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         // Global installs on IDEs without workspaceVar get --ide=<id> so the server
         // opens a per-IDE DB shard (memory-{id}.db) instead of competing on memory.db.
         const globalIdeKey = ide.workspaceVar ? undefined : id;
-        const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
-        await installToPath(configPath, ide, universal, globalIdeKey);
+
+        // For IDEs with versioned config dirs (e.g. Android Studio), install to ALL
+        // found versions; for regular IDEs pick the first existing path or the default.
+        if (ide.resolveGlobalPaths) {
+            const allPaths = ide.resolveGlobalPaths();
+            if (allPaths.length === 0) {
+                console.log(`\n⚠️  ${ide.name} — no config directories found on this machine.`);
+            } else {
+                for (const configPath of allPaths) {
+                    await installToPath(configPath, ide, universal, globalIdeKey);
+                }
+            }
+        } else {
+            const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
+            await installToPath(configPath, ide, universal, globalIdeKey);
+        }
     } else if (targetScope === "local") {
         if (nonInteractive) {
             // Use cwd as the project root
@@ -591,12 +858,36 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             await installToPath(configPath, ide, universal);
         } else {
             const cwd = process.cwd();
-            const solutionDir = await askQuestion(`Enter the absolute path to your ${ide.name} project directory:\n  [${cwd}]: `);
-            const resolvedDir = solutionDir.trim() || cwd;
+            const projectInfo = detectProjectRootForDisplay(cwd);
             const localDirPrefix = ide.scopes.localDirs![0];
             const configFileName = ide.scopes.localFile ?? (localDirPrefix === "" ? ".mcp.json" : "mcp.json");
-            const configPath = path.join(resolvedDir, localDirPrefix, configFileName);
-            await installToPath(configPath, ide, universal);
+            const configPath = path.join(projectInfo.root, localDirPrefix, configFileName);
+
+            if (projectInfo.confidence === "high") {
+                console.log(`\n  Detected project root: ${projectInfo.root}  (${projectInfo.evidence})`);
+                console.log(`  Config will be written to: ${configPath}\n`);
+                const confirmAns = await askQuestion("  Is this correct? [Y/n / enter different path]: ");
+                const trimmed = confirmAns.trim();
+                if (trimmed.toLowerCase() === "n") {
+                    console.log("  Installation cancelled.");
+                    return;
+                } else if (trimmed && trimmed.toLowerCase() !== "y" && trimmed.toLowerCase() !== "yes") {
+                    // User typed a custom path
+                    const resolvedDir = path.resolve(trimmed);
+                    const customConfigPath = path.join(resolvedDir, localDirPrefix, configFileName);
+                    await installToPath(customConfigPath, ide, universal);
+                    return;
+                }
+                await installToPath(configPath, ide, universal);
+            } else {
+                // Low confidence — ask the user explicitly
+                console.log(`\n  ⚠️  Could not detect a project root from the current directory.`);
+                console.log(`     (no .git, package.json, or other project markers found)\n`);
+                const solutionDir = await askQuestion(`  Enter the path to your ${ide.name} project directory:\n  [${cwd}]: `);
+                const resolvedDir = solutionDir.trim() || cwd;
+                const customConfigPath = path.join(resolvedDir, localDirPrefix, configFileName);
+                await installToPath(customConfigPath, ide, universal);
+            }
         }
     } else if (!supportsGlobal && !supportsLocal) {
         console.log(`\n⚠️  ${ide.name} — No auto-install paths configured.`);
