@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "engram": {
+            "type": "stdio",
+            "command": "cmd",
+            "args": [
+                "/c",
+                "npx",
+                "-y",
+                "engram-mcp-server",
+                "--project-root",
+                "d:\\Projects\\Engram Production\\Engram"
+            ]
+        }
+    }
+}
