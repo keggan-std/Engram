@@ -22,6 +22,12 @@ Read in this order. This is the whole active set — eleven files.
 
 **Those five are "the design docs."** When a prompt says *"read the design docs,"* it means 3, 4 and 5 — with 1 and 2 as prerequisites.
 
+### How to work
+
+| Document | Read when |
+|---|---|
+| **[orchestration-guide.md](orchestration-guide.md)** | **Before delegating to sub-agents.** The prompt template, verification grades, the context tax, and the concurrency hazards — derived from running eight agents on this repo, including what went wrong |
+
 ### Supporting
 
 | Document | What it is |
