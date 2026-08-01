@@ -204,6 +204,80 @@ export const CFG_SENSITIVE_KEYS = "sensitive_keys";   // JSON array of decision/
 export const CFG_HTTP_TOKEN = "http_token";           // Bearer token for dashboard API (file fallback: .engram/token)
 export const CFG_INSTANCE_VISIBLE = "instance_visible"; // "true" | "false" — controls permanent enrollment in registry
 
+// ─── Config write policy (audit N2) ─────────────────────────────────────────
+//
+// `engram_admin(action:"config")` used to write ANY key, including http_token,
+// sharing_mode, sharing_types and sensitive_keys — so one ordinary tool call
+// could hand this project's memory to every Engram instance on the machine, or
+// overwrite the dashboard bearer token. A whitelist existed pre-v1.6 in
+// src/tools/stats.ts and was dropped in the dispatcher consolidation.
+//
+// Restored here rather than in either dispatcher, because the SAME gap exists
+// on the HTTP surface (PUT /api/v1/settings/:key). One list, both doors.
+//
+// The rule: the generic `config` setter writes user preferences only. Every
+// security- or identity-bearing key already has a dedicated action that owns
+// it and validates it — `set_sharing`, `set_visibility`, `set_instance_label`,
+// `mark_sensitive`/`unmark_sensitive`. `config` must not be a back door around
+// those, so they are rejected here with a pointer to the action that owns them.
+
+/** Keys a user or agent may freely set through the generic config surface. */
+export const TUNABLE_CONFIG_KEYS: ReadonlySet<string> = new Set([
+  "auto_compact",
+  "compact_threshold",
+  "retention_days",
+  "max_backups",
+  "pm_lite_enabled",
+  "pm_full_enabled",
+  CFG_AUTO_UPDATE_CHECK,
+  CFG_AUTO_UPDATE_SKIP_VERSION,
+  CFG_AUTO_UPDATE_REMIND_AFTER,
+  CFG_AUTO_UPDATE_NOTIFY_LEVEL,
+]);
+
+/**
+ * Keys the generic config setter must refuse, mapped to the action that owns
+ * them. A named action is a better answer than a confirm token: it keeps the
+ * validation in one place instead of duplicating it behind a prompt.
+ */
+export const PROTECTED_CONFIG_KEYS: ReadonlyMap<string, string> = new Map([
+  [CFG_SHARING_MODE, 'engram_admin({action:"set_sharing", mode})'],
+  [CFG_SHARING_TYPES, 'engram_admin({action:"set_sharing", mode, types})'],
+  [CFG_INSTANCE_VISIBLE, 'engram_admin({action:"set_visibility", visible})'],
+  [CFG_INSTANCE_LABEL, 'engram_admin({action:"set_instance_label", label})'],
+  [CFG_SENSITIVE_KEYS, 'engram_admin({action:"mark_sensitive"/"unmark_sensitive"})'],
+  [CFG_HTTP_TOKEN, "not writable — rotate it by deleting .engram/token and restarting"],
+  [CFG_INSTANCE_ID, "not writable — instance identity is seeded at database init"],
+  [CFG_MACHINE_ID, "not writable — machine identity is derived from the host"],
+  [CFG_INSTANCE_CREATED_AT, "not writable — set once at database init"],
+]);
+
+/**
+ * Keys whose VALUE must never be returned through a tool or API response.
+ * `config` with no key returned the whole table, dashboard bearer token and
+ * machine GUID included.
+ */
+export const SECRET_CONFIG_KEYS: ReadonlySet<string> = new Set([
+  CFG_HTTP_TOKEN,
+  CFG_MACHINE_ID,
+]);
+
+/** Placeholder substituted for a secret value on read. */
+export const REDACTED_VALUE = "[redacted]";
+
+/**
+ * Why a config write should be refused, or null if it is allowed.
+ * Shared by the MCP `config` action and the HTTP settings route.
+ */
+export function configWriteRejection(key: string): string | null {
+  const owner = PROTECTED_CONFIG_KEYS.get(key);
+  if (owner) return `Config key "${key}" is security- or identity-bearing and cannot be set through the generic config surface. Use ${owner}.`;
+  if (!TUNABLE_CONFIG_KEYS.has(key)) {
+    return `Unknown config key "${key}". Settable keys: ${[...TUNABLE_CONFIG_KEYS].sort().join(", ")}.`;
+  }
+  return null;
+}
+
 // Instance registry
 export const INSTANCE_REGISTRY_DIR = ".engram";
 export const INSTANCE_REGISTRY_FILE = "instances.json";

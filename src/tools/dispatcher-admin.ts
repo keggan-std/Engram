@@ -7,8 +7,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, getDbPath, now } from "../database.js";
 import { success, error } from "../response.js";
-import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL } from "../constants.js";
+import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
+import { log } from "../logger.js";
 import { pmSafe } from "../services/index.js";
 import { detectCurrentPhase } from "../services/event-trigger.service.js";
 import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
@@ -16,6 +17,30 @@ import path from "path";
 import fs from "fs";
 
 import { coerceStringArray, coerceNumberArray } from "../utils.js";
+
+/** Never return a secret's value through a tool response (audit N2). */
+function redactConfigValue(key: string, value: string | null): string | null {
+  if (value === null || value === "") return value;
+  return SECRET_CONFIG_KEYS.has(key) ? REDACTED_VALUE : value;
+}
+
+/**
+ * Write an audit_log row for a config mutation. The table has existed since
+ * migration V20 and this path never used it, so security-relevant config
+ * changes left no trace at all. Best-effort: an audit failure must not block
+ * the operation, but it is logged rather than swallowed silently.
+ */
+function recordConfigAudit(key: string, before: string | null, after: string): void {
+  try {
+    getDb().prepare(
+      "INSERT INTO audit_log (created_at, action, actor, table_name, record_id, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      Date.now(), "config.set", "agent", "config", null,
+      JSON.stringify({ key, value: redactConfigValue(key, before) }),
+      JSON.stringify({ key, value: redactConfigValue(key, after) })
+    );
+  } catch (e) { log.warn(`[Engram] audit_log write failed for config."${key}": ${e}`); }
+}
 
 const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
@@ -255,16 +280,24 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── CONFIG ─────────────────────────────────────────────────────
         case "config": {
+          // AUDIT N2: this used to write ANY key with no whitelist, no
+          // confirmation and no audit entry — so one tool call could set
+          // sharing_mode:"full" or overwrite http_token. See the policy and its
+          // rationale in constants.ts.
           if (params.key && params.value !== undefined) {
+            const rejection = configWriteRejection(params.key);
+            if (rejection) return error(rejection);
+            const before = repos.config.get(params.key);
             repos.config.set(params.key, params.value, now());
+            recordConfigAudit(params.key, before, params.value);
             return success({ message: `Config "${params.key}" set to "${params.value}".`, key: params.key, value: params.value });
           }
           // ISS-015: When key is provided without value, return just that key's value.
           if (params.key) {
             const val = repos.config.get(params.key);
-            return success({ key: params.key, value: val ?? null });
+            return success({ key: params.key, value: redactConfigValue(params.key, val) });
           }
-          const config = repos.config.getAll();
+          const config = repos.config.getAll().map(e => ({ ...e, value: redactConfigValue(e.key, e.value) ?? e.value }));
           return success({ config });
         }
 
