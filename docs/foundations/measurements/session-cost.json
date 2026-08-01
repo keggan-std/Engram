@@ -1,0 +1,189 @@
+{
+  "measured_at": "2026-08-01T20:27:54.721Z",
+  "database": "copy-of-real",
+  "note": "token figures estimated at ~4 chars/token; chars are exact",
+  "results": [
+    {
+      "config": "verbosity=nano intent=full_context",
+      "claimed_tokens": 10,
+      "first_session": {
+        "chars": 8082,
+        "est_tokens": 2021
+      },
+      "repeat_session": {
+        "chars": 2849,
+        "est_tokens": 712
+      },
+      "overstatement_first": 202.1,
+      "overstatement_repeat": 71.2
+    },
+    {
+      "config": "verbosity=nano intent=quick_op",
+      "claimed_tokens": 10,
+      "first_session": {
+        "chars": 2798,
+        "est_tokens": 700
+      },
+      "repeat_session": {
+        "chars": 2798,
+        "est_tokens": 700
+      },
+      "overstatement_first": 70,
+      "overstatement_repeat": 70
+    },
+    {
+      "config": "verbosity=nano intent=phase_work",
+      "claimed_tokens": 10,
+      "first_session": {
+        "chars": 2849,
+        "est_tokens": 712
+      },
+      "repeat_session": {
+        "chars": 2849,
+        "est_tokens": 712
+      },
+      "overstatement_first": 71.2,
+      "overstatement_repeat": 71.2
+    },
+    {
+      "config": "verbosity=minimal intent=full_context",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 15779,
+        "est_tokens": 3945
+      },
+      "repeat_session": {
+        "chars": 8010,
+        "est_tokens": 2003
+      },
+      "overstatement_first": 5.4,
+      "overstatement_repeat": 2.7
+    },
+    {
+      "config": "verbosity=minimal intent=quick_op",
+      "claimed_tokens": 200,
+      "first_session": {
+        "chars": 10572,
+        "est_tokens": 2643
+      },
+      "repeat_session": {
+        "chars": 2798,
+        "est_tokens": 700
+      },
+      "overstatement_first": 13.2,
+      "overstatement_repeat": 3.5
+    },
+    {
+      "config": "verbosity=minimal intent=phase_work",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 15802,
+        "est_tokens": 3951
+      },
+      "repeat_session": {
+        "chars": 8030,
+        "est_tokens": 2008
+      },
+      "overstatement_first": 5.4,
+      "overstatement_repeat": 2.8
+    },
+    {
+      "config": "verbosity=summary intent=full_context",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 16739,
+        "est_tokens": 4185
+      },
+      "repeat_session": {
+        "chars": 8967,
+        "est_tokens": 2242
+      },
+      "overstatement_first": 5.7,
+      "overstatement_repeat": 3.1
+    },
+    {
+      "config": "verbosity=summary intent=quick_op",
+      "claimed_tokens": 200,
+      "first_session": {
+        "chars": 10572,
+        "est_tokens": 2643
+      },
+      "repeat_session": {
+        "chars": 2798,
+        "est_tokens": 700
+      },
+      "overstatement_first": 13.2,
+      "overstatement_repeat": 3.5
+    },
+    {
+      "config": "verbosity=summary intent=phase_work",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 16759,
+        "est_tokens": 4190
+      },
+      "repeat_session": {
+        "chars": 8987,
+        "est_tokens": 2247
+      },
+      "overstatement_first": 5.7,
+      "overstatement_repeat": 3.1
+    },
+    {
+      "config": "verbosity=full intent=full_context",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 172748,
+        "est_tokens": 43187
+      },
+      "repeat_session": {
+        "chars": 164973,
+        "est_tokens": 41243
+      },
+      "overstatement_first": 59.2,
+      "overstatement_repeat": 56.5
+    },
+    {
+      "config": "verbosity=full intent=quick_op",
+      "claimed_tokens": 200,
+      "first_session": {
+        "chars": 10572,
+        "est_tokens": 2643
+      },
+      "repeat_session": {
+        "chars": 2798,
+        "est_tokens": 700
+      },
+      "overstatement_first": 13.2,
+      "overstatement_repeat": 3.5
+    },
+    {
+      "config": "verbosity=full intent=phase_work",
+      "claimed_tokens": 730,
+      "first_session": {
+        "chars": 172765,
+        "est_tokens": 43191
+      },
+      "repeat_session": {
+        "chars": 164993,
+        "est_tokens": 41248
+      },
+      "overstatement_first": 59.2,
+      "overstatement_repeat": 56.5
+    },
+    {
+      "config": "agent_role=sub",
+      "claimed_tokens": 400,
+      "first_session": {
+        "chars": 478,
+        "est_tokens": 120
+      },
+      "repeat_session": {
+        "chars": 478,
+        "est_tokens": 120
+      },
+      "overstatement_first": 0.3,
+      "overstatement_repeat": 0.3
+    }
+  ]
+}

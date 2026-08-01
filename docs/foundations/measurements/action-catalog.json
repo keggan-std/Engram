@@ -1,0 +1,381 @@
+[
+ {
+  "tool": "engram_memory",
+  "action": "get_file_notes",
+  "description": "Read stored notes for a file. Includes staleness confidence. params: { file_path: string, task_focus?: string }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "set_file_notes",
+  "description": "Store notes for a file. Call immediately after reading a file. params: { file_path, purpose?, layer?, complexity?, dependencies?, dependents?, notes? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "set_file_notes_batch",
+  "description": "Store notes for multiple files at once. params: { files: [{file_path, purpose?, layer?, complexity?, notes?}] }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "record_change",
+  "description": "Log a file change. Call after EVERY edit. params: { changes: [{file_path, change_type, description, diff_summary?, impact_scope?}] }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_file_history",
+  "description": "Get all changes + decisions for a specific file. params: { file_path: string, limit?: number }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "begin_work",
+  "description": "Declare intent to edit files before starting. Enables abandoned-work detection. params: { description: string, files: string[], agent_id?: string }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "record_decision",
+  "description": "Log an architectural decision. Always include rationale. params: { decision, rationale?, tags?, affected_files?, status?, supersedes?, depends_on?, export_global? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "record_decisions_batch",
+  "description": "Log multiple decisions in one call. params: { decisions: [{decision, rationale?, tags?, affected_files?}] }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_decisions",
+  "description": "Retrieve decisions, optionally filtered. params: { status?, tag?, file_path?, limit? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "update_decision",
+  "description": "Change decision status. params: { id: number, status: 'active'|'superseded'|'deprecated'|'experimental' }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "add_convention",
+  "description": "Record a project coding convention. params: { category, rule, examples? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_conventions",
+  "description": "List all active conventions. params: { category? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "toggle_convention",
+  "description": "Enable or disable a convention. params: { id: number, enforced: boolean }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "create_task",
+  "description": "Create a persistent cross-session task. params: { title, description?, priority?, tags?, assigned_files?, blocked_by? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "update_task",
+  "description": "Update task status, priority, or fields. params: { id: number, status?, priority?, description?, owner?, add_blocks?, add_blocked_by? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_tasks",
+  "description": "Retrieve tasks, optionally filtered. params: { status?, priority?, tag?, limit?, include_done? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "checkpoint",
+  "description": "Offload working memory before context exhausts. params: { current_understanding: string, progress: string, relevant_files? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_checkpoint",
+  "description": "Restore last checkpoint for current session. params: {}"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "search",
+  "description": "Full-text search across all memory types. params: { query: string, scope?: 'all'|'sessions'|'changes'|'decisions'|'file_notes'|'conventions'|'tasks', limit? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "what_changed",
+  "description": "Get diff report since a given time. params: { since?: string, include_git?: boolean }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_dependency_map",
+  "description": "Get upstream/downstream dependency graph for a file. params: { file_path: string, depth?: number }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "record_milestone",
+  "description": "Log a project milestone or achievement. params: { title: string, description?, version?, tags? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_milestones",
+  "description": "Retrieve milestones. params: { limit? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "schedule_event",
+  "description": "Schedule a deferred action for a future session. params: { title, trigger_type: 'next_session'|'datetime'|'task_complete'|'manual', description?, trigger_value?, priority? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_scheduled_events",
+  "description": "List scheduled events. params: { status?, trigger_type?, include_done?, limit? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "update_scheduled_event",
+  "description": "Modify or cancel a scheduled event. params: { id: number, status?, title?, description?, priority?, trigger_type?, trigger_value? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "acknowledge_event",
+  "description": "Approve or cancel a triggered event. params: { id: number, approved: boolean, note? }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "check_events",
+  "description": "Check for triggered events mid-session. params: {}"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "dump",
+  "description": "Smart dump: auto-classifies free-text into memory categories. params: { content: string, hint?: string }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "claim_task",
+  "description": "Atomically claim a task for exclusive work. params: { task_id: number, agent_id?: string }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "release_task",
+  "description": "Release a claimed task. params: { task_id: number, agent_id?: string }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "agent_sync",
+  "description": "Register agent heartbeat and specializations. params: { agent_id: string, specializations?: string[], agent_name?: string, status?: string, current_task_id?: number }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_agents",
+  "description": "List all registered agents. params: {}"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "route_task",
+  "description": "Find best-matched agent for a task by specialization scoring. params: { task_id: number }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "broadcast",
+  "description": "Send a message to all agents, or to a specific agent only. params: { from_agent: string, message: string, target_agent?: string, expires_in_minutes?: number }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_knowledge",
+  "description": "Query the PM framework knowledge base (PM-Full required). params: { knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "record_observation",
+  "description": "Record a lightweight observation — findings, patterns, concerns, ideas, friction. params: { content: string, observation_category?: 'finding'|'pattern'|'concern'|'idea'|'friction'|'behavior'|'other', file_path?: string, tags?: string[] }"
+ },
+ {
+  "tool": "engram_memory",
+  "action": "get_observations",
+  "description": "Retrieve stored observations, optionally filtered. params: { query?: string, observation_category?: string, file_path?: string, session_id?: number, limit?: number }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "backup",
+  "description": "Create a database backup. params: { output_path? }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "restore",
+  "description": "Restore from a backup file. params: { input_path: string, confirm: 'yes-restore' }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "list_backups",
+  "description": "List all available backup files. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "export",
+  "description": "Export all memory to JSON. params: { output_path? }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "import",
+  "description": "Import from exported JSON. params: { input_path: string, dry_run?: boolean }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "compact",
+  "description": "Compact old session data to save space. params: { keep_sessions?, max_age_days?, dry_run? }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "clear",
+  "description": "Clear memory tables. DESTRUCTIVE. params: { scope: 'all'|'sessions'|..., confirm: 'yes-delete-permanently' }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "stats",
+  "description": "Overview of all stored memory (counts, sizes). params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "health",
+  "description": "Database health check. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "config",
+  "description": "Read or write Engram config values. params: { key?: string, value?: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "scan_project",
+  "description": "Scan filesystem and cache project structure. params: { force_refresh?, max_depth? }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "install_hooks",
+  "description": "Install Engram git post-commit hook into .git/hooks/. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "remove_hooks",
+  "description": "Remove Engram git hook from .git/hooks/post-commit. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "generate_report",
+  "description": "Generate a comprehensive project memory report. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "get_global_knowledge",
+  "description": "Retrieve cross-project global KB entries. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "discover_instances",
+  "description": "List all Engram instances on this machine. Online + enrolled-offline. Includes visibility status. params: { include_stale?: boolean, include_offline?: boolean }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "get_instance_info",
+  "description": "Get detailed info about this instance (identity, sharing config, stats). params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "set_sharing",
+  "description": "Configure sharing mode for this instance. params: { mode: 'none'|'read'|'full', types?: string[] }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "set_visibility",
+  "description": "Toggle permanent enrollment for dashboard discovery. true = persist online/offline. false (default) = heartbeat-only, vanishes after ~5min offline. params: { visible: boolean }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "query_instance",
+  "description": "Query memory from another instance (decisions, conventions, file_notes, tasks, sessions, changes). params: { instance_id: string, type?: string, query?: string, limit?: number, status?: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "search_all_instances",
+  "description": "Search across all sharing instances at once. params: { query: string, scope?: string, limit?: number }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "import_from_instance",
+  "description": "Import records from another instance (requires full sharing). params: { instance_id: string, type?: string, ids?: number[] }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "set_instance_label",
+  "description": "Set a human-readable label for this instance. params: { label: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "mark_sensitive",
+  "description": "Lock specific records as sensitive (hidden from cross-instance queries). params: { type: string, ids: number[] }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "unmark_sensitive",
+  "description": "Remove sensitivity lock from specific records. params: { type: string, ids: number[] }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "list_sensitive",
+  "description": "List all currently locked sensitive records by type. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "request_access",
+  "description": "Create a pending access request for sensitive data (requires human approval). params: { requester_instance_id: string, type: string, ids: number[], requester_label?: string, reason?: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "approve_access",
+  "description": "Approve a pending access request (human action). params: { request_id: number, resolved_by?: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "deny_access",
+  "description": "Deny a pending access request (human action). params: { request_id: number, resolved_by?: string }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "list_access_requests",
+  "description": "List access requests, optionally filtered by status. params: { status?: 'pending'|'approved'|'denied' }"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "enable_pm",
+  "description": "Activate PM-Full mode (phase gates, checklists, workflow guidance). params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "disable_pm",
+  "description": "Deactivate PM-Full mode. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "enable_pm_lite",
+  "description": "Enable PM-Lite workflow nudges. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "disable_pm_lite",
+  "description": "Disable PM-Lite workflow nudges. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "decline_pm",
+  "description": "Permanently decline the PM-Full offer for this project. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "reset_pm_offer",
+  "description": "Clear the PM-Full offer/declined flags so the offer can re-appear. params: {}"
+ },
+ {
+  "tool": "engram_admin",
+  "action": "pm_status",
+  "description": "Get full PM framework health status, advisor stats, and config. params: {}"
+ },
+ {
+  "tool": "engram_find",
+  "note": "Search this catalog. params: { query: string }"
+ }
+]
