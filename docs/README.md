@@ -22,6 +22,16 @@ Read in this order. This is the whole active set — eleven files.
 
 **Those five are "the design docs."** When a prompt says *"read the design docs,"* it means 3, 4 and 5 — with 1 and 2 as prerequisites.
 
+### The Foundations Review — the current major workstream
+
+| Document | Read when |
+|---|---|
+| **[foundations/00-CHARTER.md](foundations/00-CHARTER.md)** | **Before touching anything in `foundations/`, and before writing the master plan.** Defines the ten domains, the mandatory six-part doc template, evidence grading, the delegation protocol, and the kill switches. It is the spec the whole exercise executes from |
+| [foundations/](foundations/) | The ten domain reviews. `01`–`10`, risk-ordered, durability first |
+
+**Status is not in these files.** It lives in the Engram task board — `FR-*` tasks.
+That is deliberate: a doc that tracks its own state is the artifact the charter §2 exists to prevent.
+
 ### How to work
 
 | Document | Read when |
