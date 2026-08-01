@@ -221,18 +221,80 @@ always omitted.
 The master plan's method note asks that new discoveries be recorded rather than fixed ad hoc.
 Four surfaced.
 
-### 5.1 `.mcp.json` dogfooded the published package *(Engram observation #48)*
+### 5.1 `.mcp.json` and `npx` — **this finding was wrong, and is corrected here**
 
-`.mcp.json` ran `npx -y engram-mcp-server` — the **published 1.11.0**, not the local build.
-The Engram server this repo develops against was never the code being changed.
+**Originally claimed:** `.mcp.json` ran `npx -y engram-mcp-server`, i.e. the *published*
+package, so the dogfooded server was never the code being changed — and that was how N3
+stayed observable across four incidents while a fix sat in `dist/`.
 
-**This is how N3 stayed observable across four unprompted incidents while a fix sat in
-`dist/`.** Proof it was the old server: this session's own `engram_session` tool schema
-exposed no `session_id` and no `parent_session_id`.
+**That claim is false.** It rested on one circumstantial observation — the `engram_session`
+schema showed no `session_id` — which had a much duller explanation: at that moment
+`session_id` had not been written yet. Circumstantial evidence was written down as if
+VERIFIED.
 
-Repointed at `./dist/index.js` in `783d902`, and verified by probing the local build's
-`tools/list` output. **Requires an MCP server reload to take effect.** Tracked as
-[D1](../DEFERRED-CHANGES.md).
+**What is actually true — PROVEN.** Spawning the exact command and reading `tools/list`:
+
+```
+$ npx -y engram-mcp-server --project-root <tmp>     # cwd = repo root
+serverInfo: {"name":"engram-mcp-server","version":"1.11.0"}
+HAS session_id: true | HAS parent_session_id: true      ← the local fix
+```
+
+Because this repo's `package.json` is *named* `engram-mcp-server`, npm resolves the bare
+name against the current project and caches it as a **`file:` install — a symlink back to
+the repo**:
+
+```
+_npx/73f929d9ee25ebc0/  spec={"engram-mcp-server":"file:d:/Projects/Engram Production/Engram"}
+  node_modules/engram-mcp-server -> /d/Projects/Engram Production/Engram   (symlink)
+```
+
+So `npx` had been running the local build all along.
+
+**`783d902` still stands, on a different rationale.** The npx form worked only by accident
+of the working directory — spawn it from anywhere else and it fetches the published package.
+`node ./dist/index.js` is deterministic. Keep the change; discard the reasoning.
+See [D1](../DEFERRED-CHANGES.md) for the corrected entry and the `@latest` trick needed to
+genuinely test against the registry.
+
+**Why this is left in the report rather than quietly edited out.** A wrong claim, graded as
+though verified, propagated into a commit message, this report, and Engram observation #48
+before anything checked it. That is the *"claims work that never happened"* half of
+[`project-state-tracking-design.md`](../project-state-tracking-design.md) §1 — reproduced
+inside the session documenting it. Engram observation #50 supersedes #48.
+
+### 5.1b The real reason the server reported 1.11.0 while npm published 1.12.0
+
+Not a stale install. **A version-label gap in this branch.**
+
+`review/engram-audit` was cut from `develop@804a8d7` — **one commit before `main`'s version
+bump.** `main` is ahead by exactly two commits (`91526f7` merge, `1afe18f` docs + bump),
+and the three-dot diff is:
+
+```
+README.md        | 29 +++++++++++++++--
+RELEASE_NOTES.md | 95 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+llms.txt         |  2 +-
+package.json     |  4 +--        -  "version": "1.11.0",
+                                 +  "version": "1.12.0",
+```
+
+**Zero difference under `src/` or `tests/`.** This branch already contains 100% of v1.12.0's
+code — Android Studio support, the installer UX redesign, all of it. Only the version string
+and the release documentation are missing, so `SERVER_VERSION` (read from `package.json` at
+import) reports 1.11.0.
+
+Two consequences that outlive this session:
+
+1. **The dogfooded server will nag about an update to 1.12.0 while running code that is
+   strictly newer than 1.12.0.** Cosmetic, but actively misleading during a security fix.
+2. **Whatever these P0 fixes are released as must be branched or rebased onto `main`**, or
+   the release will regress `package.json`, `README.md`, `llms.txt` and drop the v1.12.0
+   release notes. Tracked as [D11](../DEFERRED-CHANGES.md).
+
+**And the fact that matters most to users:** published **v1.12.0 is the vulnerable build.**
+Its release notes say *"557 tests pass"* and *"Zero breaking changes"* — written before N1,
+N2 and N3 were found. Every current installation has all four P0s live.
 
 ### 5.2 Nothing tests Engram over MCP stdio *(Engram observation #49)*
 

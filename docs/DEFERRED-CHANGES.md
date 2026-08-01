@@ -31,31 +31,65 @@ Entries are removed only when done, and the removal is noted in [`DONE`](#done).
 
 ---
 
-## D1 — `.mcp.json` points at the local build, not the published package
+## D1 — `.mcp.json` points at the local build explicitly, not via `npx`
 
 **Status:** ACTIVE · **Raised:** 2026-08-02 · **Commit:** `783d902`
+**Revised:** 2026-08-02 — **the original justification for this entry was wrong. See below.**
 
 **What.** `.mcp.json` runs `node ./dist/index.js` instead of
 `npx -y engram-mcp-server`.
 
-**Why.** It ran the *published* package, so the Engram server this repo develops
-against was never the code being changed. That is how audit N3 stayed
-observable across four unprompted incidents while a fix sat in `dist/`.
+**Why — corrected.** The original claim was that `npx` ran the *published*
+package, so the dogfooded server was never the code being changed. **That was
+wrong, and it was asserted on bad evidence** (a tool schema that lacked
+`session_id` — which at that moment simply had not been written yet).
+
+What actually happens, PROVEN by spawning the command and reading `tools/list`:
+
+```
+$ npx -y engram-mcp-server --project-root <tmp>     # cwd = repo root
+serverInfo: {"name":"engram-mcp-server","version":"1.11.0"}
+HAS session_id: true | HAS parent_session_id: true      ← local code
+```
+
+Because this repo's own `package.json` is *named* `engram-mcp-server`, npm
+resolves the bare name against the current project and caches it as a
+**`file:` install — a symlink back to the repo**:
+
+```
+_npx/73f929d9ee25ebc0/  spec={"engram-mcp-server":"file:d:/Projects/Engram Production/Engram"}
+  node_modules/engram-mcp-server -> /d/Projects/Engram Production/Engram   (symlink)
+```
+
+So `npx` *was* running the local build all along — but **only by accident of the
+working directory.** Spawn it from anywhere else and it fetches the published
+package instead. That fragility, not a wrong-server bug, is the real reason to
+keep this entry: `node ./dist/index.js` is deterministic; `npx <own-name>` is
+CWD-dependent.
 
 **Trigger.** Verifying a release, or anyone reporting "the fix isn't working"
 against a published version.
 
 **Action.** Temporarily switch `command`/`args` back to
-`cmd /c npx -y engram-mcp-server --project-root <path>` to reproduce against
-the shipped artifact, then switch back. **Do not leave it on `npx` while
-developing.** Longer term the master plan should decide whether this file
-belongs in the repo at all — it hardcodes an absolute Windows path
+`cmd /c npx -y engram-mcp-server@latest --project-root <path>` — note the
+explicit `@latest`, which defeats the local `file:` resolution and genuinely
+fetches from the registry. Switch back afterwards.
+
+Longer term the master plan should decide whether this file belongs in the repo
+at all — it hardcodes an absolute Windows path
 (`d:\Projects\Engram Production\Engram`) and is useless to any other
 contributor.
 
-**Would it be caught otherwise?** No. It fails silently and invisibly — the
-server works perfectly, it is just the wrong server. This is exactly the entry
-this file exists for.
+**Would it be caught otherwise?** Partly. A CWD change would silently swap the
+server, and nothing would report it. But the failure this entry originally
+claimed was never occurring.
+
+**Lesson worth keeping.** The bad claim survived into a commit message, a
+session report, and an Engram observation before anything checked it. It was
+graded as though verified when the underlying evidence was circumstantial. That
+is precisely the failure mode [`project-state-tracking-design.md`](project-state-tracking-design.md)
+§1 describes — a register that lies in the *"claims work that never happened"*
+direction — reproduced here inside the very session that was documenting it.
 
 **Also: `dist/` must be rebuilt (`npm run build`) after any `src/` change, and
 the MCP server reloaded, or the running server is stale.** There is no
@@ -304,6 +338,54 @@ becomes "so it must be fine."
 | `AGENT_RULES` imported and unused | `src/tools/sessions.ts` | Pre-existing dead import; removing it in a P0 commit would have muddied the diff | Task #6 |
 | 15 dead files in `src/tools/` (4,057 lines) | `src/tools/` | **They are the only record of validation the v1.6 consolidation silently dropped.** `stats.ts`'s `KNOWN_CONFIG_KEYS` was recovered from there for task #4 — the file paid for itself | Task #6, and **only after** porting the enums/bounds, fixing `import`, and resolving `lock_file` |
 | `dispatcher-smoke.test.ts` mocks `database.js` without `getServices` | `tests/tools/` | Every test in it throws inside `pmSafe` and passes anyway — it tests error isolation, not what it names | Any test-quality pass |
+
+---
+
+## D11 — This branch is one commit behind `main`'s version bump, and must be rebased before release
+
+**Status:** ACTIVE · **Raised:** 2026-08-02
+
+**What.** `review/engram-audit` was cut from `develop@804a8d7`, one commit before
+`main`'s v1.12.0 version bump. `package.json` here says **1.11.0**; `main` says
+**1.12.0**. `main` is ahead by exactly two commits (`91526f7`, `1afe18f`).
+
+**The delta is documentation and a version string — nothing else:**
+
+| File | Δ |
+|---|---|
+| `package.json` | `"version": "1.11.0"` → `"1.12.0"` |
+| `RELEASE_NOTES.md` | +95 lines — the entire v1.12.0 release notes |
+| `README.md` | +29 — Android Studio section |
+| `llms.txt` | 1 line — Android Studio in the IDE list |
+
+**`git diff review/engram-audit...main -- src/ tests/` is empty.** This branch
+already contains all of v1.12.0's code. Only the label is stale.
+
+**Two consequences.**
+
+1. **Cosmetic but misleading:** the dogfooded server reports 1.11.0 and offers an
+   "update" to 1.12.0 while running code strictly newer than 1.12.0. During a
+   security fix that reads as though the fix isn't installed.
+2. **Release-blocking:** merging or releasing this branch as-is would regress
+   `package.json` to 1.11.0, revert the README and `llms.txt`, and **delete the
+   v1.12.0 release notes.**
+
+**Trigger.** Before opening a PR, merging, or publishing. Also the moment anyone
+asks "why does it say 1.11.0?"
+
+**Action.** Rebase onto `main` (or merge `main` in) *before* release work.
+Then the next version must be a **major** — see [D2](#d2) and [D3](#d3), two
+breaking changes — so `2.0.0`, not `1.13.0`.
+
+**Related, and the more urgent half:** **published v1.12.0 is the vulnerable
+build.** Its notes claim *"557 tests pass"* and *"Zero breaking changes"* — written
+before N1, N2 and N3 existed as findings. Every installation on 1.12.0 currently
+has all four P0s live. The master plan needs to decide whether that warrants an
+advisory rather than a quiet patch release.
+
+**Would it be caught otherwise?** The version regression, yes — a diff review
+would show it. The *published build is vulnerable* half, no: nothing in the repo
+states it, and the release notes actively assert the opposite.
 
 ---
 
