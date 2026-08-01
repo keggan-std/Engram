@@ -4,7 +4,7 @@
 > Source: this project's own Engram store. Excludes `config` (machine identity/tokens),
 > `changes` (git already has it), and raw session rows (absolute paths).
 >
-> **Last generated:** 2026-08-01 · **Count:** 10
+> **Last generated:** 2026-08-01 · **Count:** 14
 >
 > See [`agent-accountability-design.md`](../agent-accountability-design.md) §13 for why the
 > SQLite database itself is not committed.
@@ -108,6 +108,46 @@
 **Affects:** `docs/agent-accountability-design.md`, `src/tools/sessions.ts`, `src/services/workflow-advisor.service.ts`
 
 <sub>active · architecture · orchestration · accountability · design-principle · trellis · 2026-08-01</sub>
+
+---
+
+## D11 — Do NOT build a hand-maintained ledger/register for project state. Build mechanical reconciliation instead: every tracked claim must have a cheap automatic check against reality, and claims that cannot be checked are not tracked.
+
+**Why:** Engram already had a register and it became the disinformation source - docs/cross-instance-sharing-bugs.md asserted 'not yet fixed' for 8 versions after the fix shipped. The user's own ghostwriter skill has the mirror failure: versions.md claims bug B7 was fixed by adding a prism chain to deviations.md, and that section was never written. So a hand-maintained register lies in BOTH directions and neither error is visible from inside it. Reinforced by arXiv 2604.09409 (agents ignore explicit logging instructions 67% of the time) and by the strongest counter-evidence found: 'a register you built carefully and then froze isn't neutral - it's worse than nothing, because it looks authoritative'.
+
+**Affects:** `docs/project-state-tracking-design.md`
+
+<sub>active · project-management · design-principle · ledger-rot · decisive · 2026-08-01</sub>
+
+---
+
+## D12 — Adopt the survival criterion: never ship a register whose accuracy depends on someone remembering. Either couple it to CI so staleness breaks a build or blocks a merge, or generate it from code.
+
+**Why:** Research across every project-tracking mechanism found exactly one shared trait among survivors. Survivors: Rust RFCs (status lives in an auto-created tracking ISSUE, not the proposal doc), Kubernetes KEPs (dedicated subteam verifies each release), CI-enforced feature-flag expiry (deploy blocked if a deprecated flag is referenced), api-extractor .api.md (generated golden file, PR review required on any diff), Keep a Changelog (no tooling, updated as a side effect of a release that was happening anyway). Rotters: ADRs, traceability matrices outside regulated industries, hand-maintained capability manifests. The differentiator is never discipline - it is coupling to something that fails loudly.
+
+**Affects:** `docs/project-state-tracking-design.md`
+
+<sub>active · project-management · design-principle · ci · research · 2026-08-01</sub>
+
+---
+
+## D13 — Root cause of silent feature drop in Engram is missing VERTICAL traceability. Fix with three nullable FK columns (tasks.milestone_id, changes.task_id, decisions.task_id) plus one reconcile action - not a new subsystem.
+
+**Why:** Schema check confirmed every table links to session_id and nothing else. Engram therefore has horizontal memory (what happened) but cannot answer the three questions that catch a drop: what did we promise and did it ship, which changes implemented task N, is decision D still reflected in code. Intent and outcome sit in the same database unconnected, which is exactly why a feature can vanish unnoticed. Note decisions already has supersedes/superseded_by/depends_on, so the decision level already HAS vertical linkage - it was simply never extended to milestone/task/change. Same pattern as parent_session_id and replay: designed, partially built, left disconnected.
+
+**Affects:** `src/migrations.ts`, `src/tools/dispatcher-admin.ts`, `docs/project-state-tracking-design.md`
+
+<sub>active · architecture · traceability · project-management · root-cause · 2026-08-01</sub>
+
+---
+
+## D14 — Highest-value fix is a GENERATED capability surface committed to the repo with a CI diff gate - and it is a build script, not an Engram feature.
+
+**Why:** Re-classifying the 10 silent-drop incidents against the correct detector shows no single tool catches them all: knip catches 2 (proven by running it - it found all 15 dead tool files with zero config), mutation testing catches the dropped Zod enums and the config whitelist, contract tests catch the import narrowing, orphaned-column detection catches parent_session_id. BUT one mechanism covers 6 of 10: emit docs/CAPABILITY-SURFACE.md from the dispatchers' Zod schemas (every action, param, type, enum, min/max), commit it, and fail CI if regenerating produces an uncommitted diff. Every removed action, dropped enum, loosened bound and narrowed contract then appears as a red line in code review. It satisfies the survival criterion completely - generated so it cannot rot, coupled to the PR so it blocks merge, and cheap. Keeping it outside Engram also respects the do-not-make-it-heavy constraint.
+
+**Affects:** `scripts/`, `docs/project-state-tracking-design.md`
+
+<sub>active · project-management · drift-detection · ci · highest-value · capability-surface · 2026-08-01</sub>
 
 ---
 
