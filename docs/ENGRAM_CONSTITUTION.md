@@ -93,7 +93,7 @@ packages/
 | `<project>/.engram/memory.db` | Per-project memory. WAL mode. | No — `.engram/.gitignore` is `*` |
 | `<project>/.engram/memory-<ide>.db` | Per-IDE shard (global installs without a workspace var) | No |
 | `<project>/.engram/token` | Dashboard bearer token, `0o600` (POSIX only — **weaker on Windows**) | No |
-| `<project>/.engram/agent_rules_cache.json` | Cached "binding" agent rules — **see §9, CRITICAL** | No |
+| `<project>/.engram/agent_rules_cache.json` | **Legacy. Never read** — detected and reported only (§12.3). Safe to delete after inspection | No |
 | `<project>/.engram/backups/*.db` | Timestamped backups | No |
 | `<project>/.engram/git-changes.log` | Git post-commit hook output | No |
 | `~/.engram/global.db` | Cross-project decisions/conventions. **No migration system** — additive `CREATE IF NOT EXISTS` only | — |
@@ -238,7 +238,7 @@ One class per table, constructed once by `createRepositories(db)` in `index.ts` 
 
 | File | L | What | External touchpoints |
 |---|---|---|---|
-| `agent-rules.service.ts` | 125 | Fetches "binding" rules from the GitHub README; caches 7d; falls back to hardcoded | **`https.get` → `raw.githubusercontent.com/keggan-std/Engram/main/README.md`** (mutable branch, no integrity check, undisclosed in SECURITY.md). Writes `.engram/agent_rules_cache.json` |
+| `agent-rules.service.ts` | 96 | Serves the `AGENT_RULES` that ship in the package. **No network, no cache** (§12.3) | **None.** One `fs.existsSync` to detect and report a legacy `agent_rules_cache.json`, which is never read |
 | `update.service.ts` | 190 | 24h-throttled version check | **`fetch` → `registry.npmjs.org`**, fallback **`fetch` → `api.github.com/.../releases/latest`**. Stores remote `releaseNotes` verbatim, unsanitized |
 | `instance-registry.service.ts` | 523 | Machine-wide instance discovery via heartbeat | **Reads/writes `~/.engram/instances.json`** (atomic temp+rename — good). `process.kill(pid, 0)` liveness probe |
 | `cross-instance.service.ts` | 560 | Read-only queries against *other* instances' DBs | **Opens arbitrary local `.db` paths** taken from the registry; `readdirSync` on foreign project dirs |
@@ -353,8 +353,20 @@ Every accepted mutation writes an `audit_log` row (the table has existed since V
 
 **The second door mattered as much as the first.** `PUT /api/v1/settings/:key` blocked only `http_token`, so `sharing_mode`, `sensitive_keys`, `instance_id` and `machine_id` were all writable over the API. Both now import the same `configWriteRejection()`.
 
-#### 12.3 Agent-rules cache is unvalidated attacker-reachable input *(CRITICAL, proven)*
-`agent-rules.service.ts:63` reads `.engram/agent_rules_cache.json`, `JSON.parse`s and **casts** — no schema, no size cap, no provenance, and a future `fetched_at` never expires. A repository that ships this file (`git add -f`) injects attacker-controlled CRITICAL-priority binding instructions on clone. **Structurally identical to CVE-2026-21852 ("MemoryTrap"), which Anthropic patched by removing memory from the system-prompt path entirely.**
+#### 12.3 Agent-rules cache is unvalidated attacker-reachable input *(CRITICAL — **FIXED**, was proven)*
+
+> **FIXED on `review/engram-audit` (task #3).** Regression suite:
+> `tests/services/agent-rules.test.ts` (10 tests), which replays all three PoC variants.
+
+**Was:** `agent-rules.service.ts` read `.engram/agent_rules_cache.json`, `JSON.parse`d and **cast** it — no schema, no size cap, no provenance, and a future `fetched_at` never expired. A repository that shipped that file (`git add -f` commits it, `git clone` checks it out) injected attacker-controlled CRITICAL-priority binding instructions on clone, offline and permanently. Rules were also fetched at session start from a mutable GitHub branch — an outbound call `SECURITY.md` denied existed.
+
+**Now:** the fetch, the cache write and the cache read are **deleted**. `getRules()` returns the `AGENT_RULES` that ship in the package; nothing on disk or on the network can influence them. Provenance has exactly one possible value, `source: "packaged"` — the old field could report `"cache"`, which read as *more* trustworthy than the legitimate `"fallback"`.
+
+**Why deletion rather than validation:** this is the fix Anthropic shipped for the structurally identical **CVE-2026-21852 ("MemoryTrap")** in Claude Code v2.1.50 — remove memory from the injection path entirely. Validating untrusted instructions harder still leaves you loading untrusted instructions; deleting the mechanism deletes the attack class.
+
+A leftover cache file is **detected and reported**, not silently ignored and not deleted: `getRules()` returns a `security_notice`, surfaced on session start, and a warning goes to stderr. Silently removing files from a user's tree is the same class of surprise as §12.9's destructive corruption recovery.
+
+**Side effect worth knowing:** with the fetch gone, `SECURITY.md`'s claim that the update check is the only outbound call became true. It was false when written.
 
 #### 12.4 Negative `limit` bypasses every cap *(HIGH, proven)*
 `limit: z.number().int().optional()` has no `.min()`; SQLite treats `LIMIT -1` as unlimited. Affects `get_tasks`, `get_decisions`, `get_milestones`, `get_scheduled_events`, `get_observations`, `search`, and — cross-instance — `query_instance`, `search_all_instances`.

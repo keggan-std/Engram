@@ -134,13 +134,40 @@ provided by the agent — not raw file content.
 
 ### Network Access
 
-The only outbound network call is an **update check** (`update.service.ts`),
-which fetches the latest published version number from the npm registry
-(`registry.npmjs.org`). This is:
+The only outbound network calls come from the **update check**
+(`update.service.ts`): the latest published version number from the npm
+registry (`registry.npmjs.org`), falling back to the GitHub releases API
+(`api.github.com`) when npm is unreachable. These are:
 
 - Fire-and-forget (async, non-blocking)
 - Version number only, no identifying information sent
 - Disabled by setting `auto_update_check: false` in Engram config
+
+Nothing else leaves the machine. In particular there is **no telemetry**, and
+agent rules are **not fetched at runtime** — see below.
+
+### Agent Rules Are Packaged, Never Loaded From Disk
+
+The `agent_rules` returned by `engram_session(action:"start")` ship inside the
+npm package. They are versioned with the release, and **no file on disk and no
+network response can influence them.**
+
+Up to and including v1.11.0 this was not true. Engram fetched rules from the
+GitHub README at session start — an undisclosed outbound call this section
+previously denied — and cached them at `.engram/agent_rules_cache.json`, which
+was read back with a cast rather than a validation. Because `.gitignore` does
+not stop a repository from *shipping* a file, any repository could commit that
+cache and hand every agent that opened the project a set of attacker-authored
+instructions labelled CRITICAL and binding, permanently and offline.
+
+That entire mechanism has been removed rather than hardened, which is the fix
+Anthropic shipped for the structurally identical CVE-2026-21852 ("MemoryTrap")
+in Claude Code v2.1.50. Validating untrusted instructions harder still leaves
+you loading untrusted instructions.
+
+If a leftover `agent_rules_cache.json` is found, Engram ignores it, logs a
+warning, and returns a `security_notice` on session start. It does **not**
+delete the file — inspect it before you do.
 
 ### `npx` Execution Model
 
