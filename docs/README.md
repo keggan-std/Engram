@@ -14,8 +14,8 @@ Read in this order. This is the whole active set — eleven files.
 
 | # | Document | What it is | Read when |
 |---|---|---|---|
-| 1 | **[ENGRAM_CONSTITUTION.md](ENGRAM_CONSTITUTION.md)** | The map. All 90 `src/` files: what, why, holds, touches, gotchas. §12 is the danger index. | **Always first.** Before opening any source file |
-| 2 | **[engram-deep-audit-2026-08-02.md](engram-deep-audit-2026-08-02.md)** | 8 findings, 3 CRITICAL, each with an executable PoC. Three composed attack chains. | Before changing anything in `src/` |
+| 1 | **[ENGRAM_CONSTITUTION.md](ENGRAM_CONSTITUTION.md)** | The map. All 90 `src/` files: what, why, holds, touches, gotchas. §12 is the danger index — **§12.1, 12.1b, 12.2 and 12.3 now read FIXED**, with the residual gaps stated. | **Always first.** Before opening any source file |
+| 2 | **[engram-deep-audit-2026-08-02.md](engram-deep-audit-2026-08-02.md)** | 8 findings, 3 CRITICAL, each with an executable PoC. Three composed attack chains. **All four P0s are now fixed** (2026-08-02) — the finding text is preserved unedited as the dated record, so read §12 of the constitution for current state. | Before changing anything in `src/` |
 | 3 | **[project-state-tracking-design.md](project-state-tracking-design.md)** | Why features get silently dropped and what actually catches it | Planning work, or wondering what's left |
 | 4 | **[agent-accountability-design.md](agent-accountability-design.md)** | Sub-agent traceability and handoff | Spawning sub-agents, or designing handoff |
 | 5 | **[trellis-engram-integration-analysis.md](trellis-engram-integration-analysis.md)** | Direction. Adopt 6 / adapt 2 / reject 3. Contains the 75-action shadowing argument | Deciding what Engram should become |
@@ -27,6 +27,8 @@ Read in this order. This is the whole active set — eleven files.
 | Document | Read when |
 |---|---|
 | **[orchestration-guide.md](orchestration-guide.md)** | **Before delegating to sub-agents.** The prompt template, verification grades, the context tax, and the concurrency hazards — derived from running eight agents on this repo, including what went wrong |
+| **[DEFERRED-CHANGES.md](DEFERRED-CHANGES.md)** | **Before every release, and before assuming any config is permanent.** Everything switched off, narrowed, or left half-done *on purpose*, each with the trigger that should switch it back on. Includes two breaking changes awaiting release handling |
+| [reports/](reports/) | Dated session reports. What was done, what was proven versus assumed, and what turned up along the way. Chat is ephemeral; these are not |
 
 ### Supporting
 

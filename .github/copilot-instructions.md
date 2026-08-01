@@ -43,13 +43,16 @@ Multi-step plans, analyses, proposals → write to `docs/<name>.md`. Chat gets s
 1. Record unrecorded changes
 2. Mark done tasks: `engram_memory({ action: "update_task", id: N, status: "done" })`
 3. Create tasks for incomplete work
-4. `engram_session({ action: "end", summary: "files touched, pending work, blockers" })`
+4. `engram_session({ action: "end", session_id: <from start>, summary: "files touched, pending work, blockers" })`
 
 ### Sub-Agent Sessions (v1.7+)
 ```js
-engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42 })
+engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42,
+                 parent_session_id: <orchestrator's session_id> })
 ```
 Returns only the assigned task, its file notes, matching decisions, and up to 5 conventions (~300–500 tokens).
+
+**`agent_name` is required and must be unique per agent** — it is what stops concurrent agents from closing each other's sessions. `start` returns a `session_id`; pass it back on `end`, `handoff` and `acknowledge_handoff` whenever other agents may be running.
 
 ---
 
