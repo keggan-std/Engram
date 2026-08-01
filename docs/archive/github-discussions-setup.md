@@ -47,7 +47,7 @@ a local SQLite database next to your project.
 ## Quick links
 
 - 📦 [npm package](https://www.npmjs.com/package/engram-mcp-server)
-- 📖 [README](../README.md)
+- 📖 [README](../../README.md)
 - 🐛 [Report a bug](../../issues/new?template=bug_report.md)
 - 💡 [Suggest a feature](../../discussions/new?category=ideas)
 
@@ -88,7 +88,7 @@ multi-agent workflow, this is the place to ask.
 
 ## Before posting
 
-1. Check the [README](../README.md) — install, quickstart, and tool reference are there.
+1. Check the [README](../../README.md) — install, quickstart, and tool reference are there.
 2. Search existing Q&A — your question may already be answered.
 
 ## Good questions to ask here

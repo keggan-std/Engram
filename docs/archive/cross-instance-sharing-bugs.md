@@ -1,3 +1,18 @@
+> ## ⚠️ RESOLVED — ARCHIVED
+> **Status below is STALE and was wrong for 8 versions.** Bugs #26–#29 were fixed by
+> commit `cb707d0` ("hotfix: fix cross-instance sharing bugs #26-#29"), shipped in
+> **v1.9.2**, merged into both `develop` and `main`. This document nevertheless read
+> "Status: Documented, not yet fixed" until 2026-08-02 — roughly 8 versions.
+>
+> This is finding **F5** of [the deep audit](../engram-deep-audit-2026-08-02.md) and the
+> motivating case study in [project-state-tracking-design.md](../project-state-tracking-design.md) —
+> a hand-maintained register that lied with confidence. Kept, banner and all, as evidence.
+>
+> One residual gap from this area is still open: `searchAll()` skips `checkPermission()`
+> (audit finding F4 / task #6). Everything else described below is done.
+
+---
+
 # Cross-Instance Sharing — Bug Report & Fix Suggestions
 
 **Discovered:** 2026-03-03 · Session #66  

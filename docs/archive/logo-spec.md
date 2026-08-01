@@ -313,4 +313,4 @@ Deliver all files in a single `.zip` archive. Include the **source file**
 ---
 
 _Questions? Contact the maintainer via the GitHub repository._  
-_See [README.md](README.md) for full project context._
+_See [README.md](../README.md) for full project context._
