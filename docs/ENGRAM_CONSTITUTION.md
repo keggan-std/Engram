@@ -287,7 +287,7 @@ Express 5 + `ws`, started only with `--mode=http`. Binds `127.0.0.1` exclusively
 - **`search.routes.ts` ignores FTS5 entirely** — pulls up to 1000 rows per scope and does in-process `.includes()`.
 - `api-helpers.serverError` returns raw `Error.message` to clients.
 - Token comparisons (`http-auth.ts:50`, `index.ts:217`) are non-constant-time.
-- `PUT /settings/:key` writes **any** config key — same gap as §12.2, different door.
+- `PUT /settings/:key` **now shares the §12.2 write policy** and redacts secrets on read. It previously wrote any config key — the same gap as §12.2 through a different door.
 
 ---
 
@@ -331,8 +331,27 @@ Full analysis in [`engram-deep-audit-2026-08-02.md`](engram-deep-audit-2026-08-0
 
 **Deliberately not restricted:** a *later* session of the same agent may still acknowledge — a handoff is addressed to whoever comes next, and there is no `to_agent` column to address it more precisely.
 
-#### 12.2 `engram_admin(config)` has no key whitelist *(CRITICAL, verified)*
-`dispatcher-admin.ts:257` writes **any** key, including `http_token`, `sharing_mode`, `sharing_types`, `sensitive_keys`. A single tool call disables cross-instance access control. The whitelist existed in `stats.ts:22-31` and was dropped in the v1.6 consolidation.
+#### 12.2 `engram_admin(config)` has no key whitelist *(CRITICAL — **FIXED**, was verified)*
+
+> **FIXED on `review/engram-audit` (task #4).** Regression suite:
+> `tests/tools/config-policy.test.ts` (12 tests).
+
+**Was:** `dispatcher-admin.ts` wrote **any** key — `http_token`, `sharing_mode`, `sharing_types`, `sensitive_keys` included — with no confirmation and no audit entry, so one tool call disabled cross-instance access control. The whitelist existed in `stats.ts:22-31` and was dropped in the v1.6 consolidation. `config` with no key also returned the **whole table**, dashboard bearer token and machine GUID included.
+
+**Now** — one policy in `constants.ts`, applied at both doors:
+
+| Set | Contents | Behaviour |
+|---|---|---|
+| `TUNABLE_CONFIG_KEYS` | `auto_compact`, `compact_threshold`, `retention_days`, `max_backups`, `pm_lite_enabled`, `pm_full_enabled`, the four `auto_update_*` | Writable |
+| `PROTECTED_CONFIG_KEYS` | `sharing_mode`, `sharing_types`, `instance_visible`, `instance_label`, `sensitive_keys`, `http_token`, `instance_id`, `machine_id`, `instance_created_at` | Rejected, **naming the action that owns the key** (`set_sharing`, `set_visibility`, `mark_sensitive`, …) |
+| `SECRET_CONFIG_KEYS` | `http_token`, `machine_id` | Value replaced with `[redacted]` on every read |
+| anything else | — | Rejected as unknown, listing what is settable |
+
+Every accepted mutation writes an `audit_log` row (the table has existed since V20 and this path never used it). A refused write logs nothing.
+
+**Design note:** a named owning action was chosen over a confirm token because it keeps validation in one place instead of duplicating it behind a prompt. Nothing legitimate broke — every protected key is already written by its own service or action straight through `ConfigRepo`, bypassing the tool surface entirely.
+
+**The second door mattered as much as the first.** `PUT /api/v1/settings/:key` blocked only `http_token`, so `sharing_mode`, `sensitive_keys`, `instance_id` and `machine_id` were all writable over the API. Both now import the same `configWriteRejection()`.
 
 #### 12.3 Agent-rules cache is unvalidated attacker-reachable input *(CRITICAL, proven)*
 `agent-rules.service.ts:63` reads `.engram/agent_rules_cache.json`, `JSON.parse`s and **casts** — no schema, no size cap, no provenance, and a future `fetched_at` never expires. A repository that ships this file (`git add -f`) injects attacker-controlled CRITICAL-priority binding instructions on clone. **Structurally identical to CVE-2026-21852 ("MemoryTrap"), which Anthropic patched by removing memory from the system-prompt path entirely.**
