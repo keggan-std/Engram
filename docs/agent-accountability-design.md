@@ -37,9 +37,17 @@ Three parts of your framing I'd keep unchanged, because they're load-bearing:
 
 ### Trap 1 — "A note on every file read" produces slop, not memory
 
-A mandatory per-file note is a compliance target, and agents satisfy compliance targets cheaply. You get 40 notes saying *"this file handles sessions."* That removes no work from the next agent, and it actively costs: every low-value note is retrieval noise competing with the high-value ones.
+A mandatory per-file note is a compliance target, and agents satisfy compliance targets cheaply. You get 40 notes saying *"this file handles sessions."* That removes no work from the next agent, and it actively costs.
 
-I have direct evidence from this very audit. My subagents produced genuinely useful file mapping — but not because a rule required it. They produced it because they were given a **deliverable** (build the constitution) with a specified shape. Under a rule instead of a deliverable, the same models would have written 90 one-liners.
+**Two pieces of published evidence make this concrete rather than a matter of taste:**
+
+1. **Agents don't comply anyway.** *"Do AI Coding Agents Log Like Humans?"* (arXiv 2604.09409) studied 4,550 agentic PRs across 81 repos: agents **fail to follow explicit logging instructions 67% of the time**, and even where instructions were detailed, compliance was only **27%**. Humans performed 72.5% of the post-hoc repairs. The paper's own conclusion is that *"deterministic guardrails might be necessary."* A mandate is not a mechanism.
+
+2. **Low-value notes actively degrade retrieval — they don't just take up space.** Chroma's *Context Rot* study (18 frontier models incl. Claude 4, GPT-4.1, Gemini 2.5) found that **even a single distractor reduces performance below baseline, and four distractors compound it** — and that topically-related-but-wrong items are the ones most often confused with the correct answer. In their LongMemEval test a focused 300-token prompt massively outperformed a 113K-token prompt *containing the same answer*.
+
+Forty notes saying "this file handles sessions" are exactly the topically-related-but-wrong distractors that finding describes. They would make the two genuinely good notes **harder** to retrieve.
+
+I also have direct evidence from this very audit. My subagents produced genuinely useful file mapping — but not because a rule required it. They produced it because they were given a **deliverable** (build the constitution) with a specified shape. Under a rule instead of a deliverable, the same models would have written 90 one-liners.
 
 This is Trellis's Principle 1 applied: *structure earns its place by removing work, not describing it.*
 
@@ -119,7 +127,31 @@ Two correctness fixes this depends on, both already in the audit:
 
 The hard constraint: **Engram cannot see the agent's `Read`/`Edit`/`Bash` calls.** It only sees calls made to *itself*. So "automate it based on what tools the subagent interacted with" is not implementable inside Engram. It requires a **harness hook**.
 
-That means the honest shape is: **Engram ships the hook script; the wiring is per-harness.** Engram already ships a git `post-commit` hook, so the pattern and the installer surface exist — this is the same idea applied to tool events. *(Exact hook names and payloads per harness, and critically whether hooks fire for sub-agent tool calls, are under verification; that determines how much of this is automatic vs. prompt-driven.)*
+That means the honest shape is: **Engram ships the hook script; the wiring is per-harness.** Engram already ships a git `post-commit` hook, so the pattern and the installer surface exist — this is the same idea applied to tool events.
+
+### 6.1 Verified: the mechanism exists, and for Claude Code it is better than needed
+
+Claude Code documents **31 hook events**. Three facts settle the design:
+
+- **`PostToolUse` payload carries the file path.** For `Read`/`Edit`/`Write`/`MultiEdit`, `tool_input` contains `file_path`. Coverage capture requires **zero agent effort**.
+- **Hooks fire *inside* subagents, and the payload identifies which.** When a subagent calls a tool, the payload includes **`agent_id` and `agent_type`**. This is the single fact the whole design depended on, and it is explicitly documented rather than inferred.
+- **`SubagentStart` / `SubagentStop` exist.** `SubagentStart` carries `agent_type`, `agent_id`, `prompt`; `SubagentStop` carries `last_assistant_message` and can even *block* the subagent from stopping.
+
+`SubagentStop` is a better flush point than session end — it fires exactly once per subagent, at the boundary, with the agent's own final message in hand. A hook can shell out, POST, or **call an MCP tool directly** — so it can invoke Engram itself.
+
+### 6.2 Harness coverage — plan for degradation
+
+| Harness | Tool hooks | Session start/end | Sees file paths | **Fires for subagents?** |
+|---|---|---|---|---|
+| **Claude Code** | `PreToolUse`/`PostToolUse`/`PostToolBatch` | `SessionStart`/`SessionEnd` | ✅ `tool_input.file_path` | ✅ **documented**, with `agent_id`/`agent_type` |
+| **GitHub Copilot** | `preToolUse`/`postToolUse` | `sessionStart`/`sessionEnd` | presumed via `toolArgs` | ✅ documented — **but the built-in `general-purpose` agent emits no `subagentStart`/`Stop`** |
+| **OpenAI Codex CLI** | `PreToolUse`/`PostToolUse` | `SessionStart`/`SessionEnd` | presumed | ⚠️ partial — subagent hooks use the parent session id, but `SessionEnd` explicitly does not run for subagents |
+| **Cursor** | `beforeReadFile`, `afterFileEdit`, … | `stop` | ✅ per-file | ⚠️ `subagentStart`/`Stop` reported, primary docs unreachable |
+| **Windsurf** | `pre/post_read_code`, … | ❌ turn-level only | ✅ `file_path` | ❓ undocumented |
+| **Cline** | `beforeTool`/`afterTool` | `beforeRun`/`afterRun` | presumed | ❓ undocumented · **macOS/Linux only — no Windows support** |
+| **Gemini CLI** | `BeforeTool`/`AfterTool` | `SessionStart`/`SessionEnd` | unconfirmed | ❓ undocumented |
+
+**Design consequence:** build for Claude Code first, where the capability is complete and confirmed. Everywhere else the same field is filled by the `files_examined` param, so the feature degrades to prompt-driven rather than breaking. Cline's lack of Windows support is worth noting given this project's own dev platform.
 
 **The wiring detail that matters most — and the one that would sink a naive implementation:**
 
@@ -143,7 +175,15 @@ One DB write per subagent session instead of one per file. Append-only files are
 
 ## 7. Making absence visible — the safety net
 
-This is where your "even if forgot, still hope to figure out what was left" idea becomes the strongest part of the design.
+This is where your "even if forgot, still hope to figure out what was left" idea becomes the strongest part of the design — and the research promotes it from *safety net* to **primary mechanism.**
+
+The 67% non-compliance figure (§3) is decisive. If roughly two thirds of instructed self-reports never happen, then a design whose main path is "the agent writes a close-out" has a main path that fails most of the time. So the ordering inverts:
+
+| | Mechanism | Reliability |
+|---|---|---|
+| **Primary** | Hook-captured coverage + `SubagentStop` (§6) | Mechanical — no agent cooperation required |
+| **Secondary** | Absence detection (below) | Cannot be skipped, because it detects *not doing* |
+| **Tertiary** | Agent-authored `outcome` / `summary` | ~33% expected compliance; treat as a bonus, never a dependency |
 
 Every self-reported field can be gamed or skipped. **The absence of a record cannot be** — an agent that died mid-task leaves exactly the same hole whether it meant to or not. So put the integrity there:
 
@@ -235,12 +275,81 @@ You were explicit that Engram must not get heavy. Holding the design to a stated
 ## 12. Open risks
 
 1. **This is only as good as N3's fix.** Everything here assumes a session belongs to exactly one agent and links to exactly one parent. That is not true today.
-2. **Hook coverage of *sub-agent* tool calls is the crux of §6** and is not yet confirmed for any harness. If hooks don't fire for subagents, automatic coverage capture only works for the main agent and phase 5 shrinks to a prompt convention.
-3. **Investing in multi-agent tracing can encourage more multi-agent use than is warranted.** There is a serious practitioner position that multi-agent systems fail specifically on context-sharing and conflicting decisions, and that single-threaded agents are more reliable. Good tracing shouldn't be read as a reason to fan out more.
-4. **Anthropic's documented multi-agent system moved *away* from subagents returning findings through the conversation channel, toward writing to storage and returning a pointer.** This design is that pattern — which is reassuring, but it means the value depends on the orchestrator actually reading the pointer rather than re-asking.
+
+2. **The strongest counter-argument: a note is the wrong unit of handoff.** Cognition's *Don't Build Multi-Agents* argues that summarized handoffs are the failure mode, not the fix — two subagents given the "same" stated task make silent conflicting assumptions because a note cannot carry the tool-call history and interim decisions that actually caused the divergence. Their prescription is the opposite of structured notes: *"share context, and share full agent traces, not just individual messages."*
+
+   **Response, and it strengthens the design rather than undermining it:** this is precisely why §4 specifies **two levels of resolution**. The close-out is for routine "what did X do." The **replay** — reconstructed from `tool_call_log` once `agent_id` is populated — *is* the full trace, available on demand when reconciliation is actually needed. Cognition's critique lands hard against a note-only design; it does not land against note-plus-trace. It does, though, mean **wiring `agent_id` into `logToolCall` is not a nice-to-have** — it is what makes the answer to their objection real. That moves it up the priority list.
+
+3. **Investing in multi-agent tracing can encourage more multi-agent use than is warranted.** Anthropic's own multi-agent post concedes ~**15x** the tokens of a single chat interaction, with token usage explaining ~80% of eval variance; independent 2026 estimates put orchestrator-pattern overhead at up to ~285% plus ~4.8s added latency. Good tracing must not be read as a reason to fan out more. It also sets the bar for this design's own budget: tracing overhead has to be rounding-error against a 15x baseline, which the §9 budget (≤120 tokens, one write per subagent) satisfies.
+
+4. **`files_examined` must not become a retrievable memory.** Per the Chroma distractor finding (§3), the danger is not storage but *competition at retrieval time*. Coverage data is therefore specified as a **session-scoped column, deliberately excluded from FTS5 and from `search`** — it is answerable by "what did session #12 look at," never surfaced as a search hit competing with an actual conclusion. If it ever gets indexed, it becomes the exact distractor class the research warns about.
+
+5. **No surveyed system has "files touched" as a first-class handoff field** — not LangGraph, CrewAI, AutoGen/AG2, the OpenAI Agents SDK, nor Anthropic's own multi-agent system. That is either a genuine gap worth filling or a sign nobody needs it. Kill switch #2 in §9 is the test.
+
+6. **Align field names to OpenTelemetry GenAI semconv rather than inventing a vocabulary.** The standard already defines `gen_ai.agent.id`, `gen_ai.agent.name`, `gen_ai.conversation.id` (→ session id), `gen_ai.operation.name`, and `gen_ai.tool.name`/`tool.input`, and its native **parent-span relationship already expresses orchestrator→subagent nesting** — which is exactly what `parent_session_id` does. It defines **no** `trust_tier` or `confidence` attribute, so those remain legitimately domain-specific inventions. Borrowing the names costs nothing now and buys interoperability later.
 
 ---
 
-*Sections 6 and 12 will be revised once harness hook capabilities and prior-art field sets are verified.*
+## 13. Should Engram memory be committed and pushed?
+
+**Yes to sharing the value. No to committing the database.** The distinction is the whole answer.
+
+### 13.1 The case for is real
+
+90 file notes, 13 observations and 10 decisions are genuine work. If they stay on one machine, the next contributor — human or agent — re-reads and re-derives, which is the exact amnesia Engram exists to prevent. Trellis §21.1 states it bluntly: *"uncommitted memory is amnesia."*
+
+### 13.2 Three reasons not to commit `.engram/memory.db`
+
+**1. It is a binary, and version control cannot help you with it.** No reviewable diff, so nobody can see *what* a commit changed about the agent's beliefs. **No merge**: two contributors who both worked with Engram produce two `.db` files that cannot be reconciled — `.gitattributes merge=union` works on append-only text, not SQLite pages. And it churns constantly: 584 KB today, rewritten on every session start, growing unbounded.
+
+**2. It re-opens audit finding N1.** Committed agent memory that is auto-loaded into agent context **is** the MemoryTrap vector (CVE-2026-21852). Commit the DB and anyone who can open a pull request can write to the agent's authoritative memory, and every clone carries it. Engram's `.engram/.gitignore = *` is a deliberate security control, not an oversight. This is also the flaw I identified in Trellis §21.1 — it mandates committing state while its own §13 threat model forbids exactly that trust relationship.
+
+**3. Secrets and machine identity.** The `config` table holds `machine_id` (on Windows, the registry `MachineGuid`), `instance_id`, and `http_token`. Committing the raw DB publishes your machine's GUID and the dashboard bearer token.
+
+That third problem is already solved for the *export* path: **`engram_admin(action:"export")` dumps eight tables — `sessions, changes, decisions, file_notes, conventions, tasks, milestones, scheduled_events` — and `config` is not among them.** Verified in source. The export is safe where the database is not.
+
+### 13.3 What to share, and in what form
+
+Ranked by value per unit of risk and churn:
+
+| Content | Share? | Form |
+|---|---|---|
+| **File notes** | ✅ highest value | **Already done** — see below |
+| **Decisions** | ✅ high value, low churn | Text export, reviewed as a diff |
+| **Conventions** | ✅ | Text export |
+| **Observations** | ⚠️ selectively | Free text = injection surface (audit N1). Export, but import non-binding |
+| **Tasks** | ⚠️ open ones only | Closed tasks are noise |
+| **Sessions** | ⚠️ summaries only | Rows carry `project_root` absolute paths — strip |
+| **Changes** | ❌ | High volume, and **git already has this** |
+| **Config** | ❌❌ **never** | `machine_id`, `http_token`, `instance_id` |
+| **The `.db` itself** | ❌ | §13.2 |
+
+**The most useful realisation: the highest-value memory is already shared.** [`ENGRAM_CONSTITUTION.md`](ENGRAM_CONSTITUTION.md) contains essentially all 90 file notes as reviewable markdown, and it is committed. That is a *better* artifact than a JSON export — diffable, human-readable, reviewable in a PR, and useful to someone who has never installed Engram. Markdown export > JSON export > binary DB, and the markdown one is done.
+
+So the remaining gap is small: decisions and conventions, which the constitution does not carry.
+
+### 13.4 The rule
+
+> **The repository is canonical for the *export*. The database is a local working copy, and is regenerable from the export.**
+
+Which is the same rule already applied to skills packaging, and the correct resolution of Trellis §21.1.
+
+Two constraints on the import side, both non-negotiable, and both already specified by the audit's provenance recommendation:
+
+1. **Import is never automatic.** A cloned or pulled export must not load itself. Explicit action only.
+2. **Imported records are provenance-tagged and non-binding** — `source: "imported"`, lower trust tier, never auto-marked `active`, excluded from auto-loaded session context until a human or agent promotes them. This is what stops a hostile PR from doing via the export what N1 does via the cache.
+
+With those two, sharing memory is safe. Without them, committing memory *is* the vulnerability — which is why the sequencing matters: **provenance columns (audit rec #12) ship before, or with, any committed export.**
+
+### 13.5 Concretely
+
+1. Keep `.engram/` gitignored. No change.
+2. Commit a regenerated `docs/engram-memory/decisions.md` + `conventions.md` — deliberate, reviewed, text.
+3. Add provenance columns before wiring any import path.
+4. Treat regeneration as a release step, not a per-session write, so churn stays low.
+
+---
+
+*Sections 3, 6, 7, 12 revised and §13 added 2026-08-02 against verified harness documentation and published evidence.*
 
 <!-- AGENT_ACCOUNTABILITY_DESIGN:DRAFT -->
