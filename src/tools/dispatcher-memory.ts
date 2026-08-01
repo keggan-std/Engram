@@ -420,10 +420,17 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             file_path: normalizePath(String(c["file_path"] ?? "")),
           }));
           repos.changes.recordBulk(normalized as Parameters<typeof repos.changes.recordBulk>[0], sessionId, timestamp);
-          // Auto-close pending_work
+          // Auto-close pending_work.
+          // AUDIT N3c (same family): this used to sweep EVERY agent's pending
+          // rows, so agent B recording a change marked agent A's declared work
+          // "completed" on nothing more than a file-path overlap. Scope it to
+          // the session's own agent.
           const changedPaths = normalized.map(c => c["file_path"]);
           try {
-            const pending = db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending'").all() as { id: number; files: string }[];
+            const changeAgent = sessionId ? repos.sessions.getById(sessionId)?.agent_name ?? null : null;
+            const pending = (changeAgent
+              ? db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending' AND agent_id = ?").all(changeAgent)
+              : db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending'").all()) as { id: number; files: string }[];
             for (const pw of pending) {
               const pwFiles: string[] = JSON.parse(pw.files);
               if (pwFiles.some(f => changedPaths.includes(normalizePath(f)))) {
@@ -449,9 +456,16 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const sessionId = getCurrentSessionId();
           const normalizedFiles = (params.files as unknown as string[]).map(f => normalizePath(String(f)));
           try {
+            // AUDIT N3c: agent_id used to fall back to the literal "unknown", so
+            // every agent that omitted it shared one bucket and the abandonment
+            // scoping in sessions.ts could not tell whose work was whose. Fall
+            // back to the owning session's agent_name instead.
+            const owningAgent = params.agent_id
+              ?? (sessionId ? repos.sessions.getById(sessionId)?.agent_name : undefined)
+              ?? "unknown";
             const result = db.prepare(
               `INSERT INTO pending_work (agent_id, session_id, description, files, started_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`
-            ).run(params.agent_id ?? "unknown", sessionId ?? null, params.description, JSON.stringify(normalizedFiles), Date.now());
+            ).run(owningAgent, sessionId ?? null, params.description, JSON.stringify(normalizedFiles), Date.now());
             return success({ work_id: result.lastInsertRowid, message: `Pending work #${result.lastInsertRowid} recorded.`, files: normalizedFiles });
           } catch (e) { return success({ message: `Failed to record pending work: ${e}` }); }
         }

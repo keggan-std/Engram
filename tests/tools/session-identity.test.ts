@@ -129,7 +129,26 @@ beforeEach(() => {
     // means what the test says it means.
     db.prepare("DELETE FROM sessions").run();
     db.prepare("DELETE FROM handoffs").run();
+    db.prepare("DELETE FROM pending_work").run();
 });
+
+function addPendingWork(agentId: string, sessionId: number | null, description: string): number {
+    const r = db.prepare(
+        "INSERT INTO pending_work (agent_id, session_id, description, files, started_at, status) VALUES (?, ?, ?, '[]', ?, 'pending')"
+    ).run(agentId, sessionId, description, Date.now());
+    return r.lastInsertRowid as number;
+}
+
+function workStatus(id: number): string {
+    return (db.prepare("SELECT status FROM pending_work WHERE id = ?").get(id) as { status: string }).status;
+}
+
+function makeHandoff(fromSessionId: number, fromAgent: string, reason: string): number {
+    const r = db.prepare(
+        "INSERT INTO handoffs (from_session_id, from_agent, created_at, reason) VALUES (?, ?, ?, ?)"
+    ).run(fromSessionId, fromAgent, Date.now(), reason);
+    return r.lastInsertRowid as number;
+}
 
 // ─── N3a — no agent may close another agent's session ─────────────────────────
 
@@ -281,6 +300,133 @@ describe("N3b — agent_name is required", () => {
         const res = await callSession("start", { agent_name: "   ", verbosity: "nano" });
         expect(String(JSON.stringify(res))).toMatch(/agent_name/i);
         expect(res.session_id).toBeUndefined();
+    });
+});
+
+// ─── N3c — pending_work abandonment must not sweep other agents ───────────────
+
+describe("N3c — pending_work abandonment is scoped to the calling agent", () => {
+    it("agent C starting a session does NOT abandon agent A's in-flight work", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const aWork = addPendingWork("agent-a", a.session_id as number, "agent A is mid-refactor");
+
+        await callSession("start", { agent_name: "agent-c", verbosity: "nano" });
+
+        expect(workStatus(aWork)).toBe("pending");
+    });
+
+    it("a session start does NOT abandon unrelated orphaned (session_id IS NULL) rows", async () => {
+        const orphan = addPendingWork("agent-b", null, "declared with no active session");
+
+        await callSession("start", { agent_name: "agent-c", verbosity: "nano" });
+
+        expect(workStatus(orphan)).toBe("pending");
+    });
+
+    it("an agent DOES abandon its own work left over from a closed earlier session", async () => {
+        const first = await callSession("start", { agent_name: "solo", verbosity: "nano" });
+        const stale = addPendingWork("solo", first.session_id as number, "never finished this");
+        await callSession("end", { session_id: first.session_id, summary: "stopped early" });
+
+        await callSession("start", { agent_name: "solo", verbosity: "nano" });
+
+        expect(workStatus(stale)).toBe("abandoned");
+    });
+
+    it("an agent does NOT abandon work belonging to its own still-open session", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const live = addPendingWork("agent-a", a.session_id as number, "still working on it");
+
+        // A sub-agent of the same name is not how this happens, but another
+        // agent starting must not trip the sweep either.
+        await callSession("start", { agent_name: "agent-b", verbosity: "nano" });
+
+        expect(workStatus(live)).toBe("pending");
+    });
+
+    it("abandoned_work in the response only contains the calling agent's rows", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        addPendingWork("agent-a", a.session_id as number, "agent A leftover");
+        await callSession("end", { session_id: a.session_id, summary: "done" });
+        const b = await callSession("start", { agent_name: "agent-b", verbosity: "summary" });
+        addPendingWork("agent-b", b.session_id as number, "agent B leftover");
+        await callSession("end", { session_id: b.session_id, summary: "done" });
+
+        const again = await callSession("start", { agent_name: "agent-b", verbosity: "summary" });
+        const abandoned = (again.abandoned_work ?? []) as Array<{ agent_id: string }>;
+        expect(abandoned.every(w => w.agent_id === "agent-b")).toBe(true);
+    });
+});
+
+// ─── N3d — handoffs must not be silently dropped or stolen ────────────────────
+
+describe("N3d — handoff surfacing and acknowledgement", () => {
+    it("a second outstanding handoff is not silently invisible", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const b = await callSession("start", { agent_name: "agent-b", verbosity: "nano" });
+        makeHandoff(a.session_id as number, "agent-a", "handoff one");
+        makeHandoff(b.session_id as number, "agent-b", "handoff two");
+
+        const c = await callSession("start", { agent_name: "agent-c", verbosity: "summary" });
+
+        const primary = c.handoff_pending as { id: number } | undefined;
+        const others = (c.other_handoffs_pending ?? []) as Array<{ id: number }>;
+        expect(primary).toBeDefined();
+        expect(others.length).toBe(1);
+        expect(others[0].id).not.toBe(primary?.id);
+    });
+
+    it("start prefers a handoff authored by a different agent", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const b = await callSession("start", { agent_name: "agent-b", verbosity: "nano" });
+        makeHandoff(b.session_id as number, "agent-b", "from someone else");
+        // agent-a's own handoff is newer, so a naive ORDER BY would pick it
+        makeHandoff(a.session_id as number, "agent-a", "my own handoff");
+
+        const again = await callSession("start", { agent_name: "agent-a", verbosity: "summary" });
+        expect((again.handoff_pending as { from_agent: string }).from_agent).toBe("agent-b");
+    });
+
+    it("acknowledging without an active session is refused", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const hid = makeHandoff(a.session_id as number, "agent-a", "needs reading");
+        await callSession("end", { session_id: a.session_id, summary: "done" });
+
+        const res = await callSession("acknowledge_handoff", { id: hid });
+        expect(String(JSON.stringify(res))).toMatch(/no active session/i);
+        expect(db.prepare("SELECT acknowledged_at FROM handoffs WHERE id = ?").get(hid)).toMatchObject({ acknowledged_at: null });
+    });
+
+    it("a session cannot acknowledge a handoff it just created itself", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const created = await callSession("handoff", { session_id: a.session_id, reason: "passing this on" });
+
+        const res = await callSession("acknowledge_handoff", { id: created.handoff_id, session_id: a.session_id });
+
+        expect(String(JSON.stringify(res))).toMatch(/same session/i);
+        expect(db.prepare("SELECT acknowledged_at FROM handoffs WHERE id = ?").get(created.handoff_id)).toMatchObject({ acknowledged_at: null });
+    });
+
+    it("acknowledged_by records the real agent, never the literal 'unknown'", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const hid = makeHandoff(a.session_id as number, "agent-a", "for the next agent");
+        const b = await callSession("start", { agent_name: "agent-b", verbosity: "nano" });
+
+        const res = await callSession("acknowledge_handoff", { id: hid, session_id: b.session_id });
+
+        expect(res.acknowledged_by).toBe("agent-b");
+        expect((db.prepare("SELECT acknowledged_by FROM handoffs WHERE id = ?").get(hid) as { acknowledged_by: string }).acknowledged_by).toBe("agent-b");
+    });
+
+    it("double-acknowledging reports who got there first", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const hid = makeHandoff(a.session_id as number, "agent-a", "for the next agent");
+        const b = await callSession("start", { agent_name: "agent-b", verbosity: "nano" });
+        await callSession("acknowledge_handoff", { id: hid, session_id: b.session_id });
+
+        const res = await callSession("acknowledge_handoff", { id: hid, session_id: b.session_id });
+        // error() returns plain text, so the message arrives as `raw`, not JSON.
+        expect(String(res.raw)).toMatch(/already acknowledged by "agent-b"/i);
     });
 });
 

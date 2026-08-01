@@ -316,8 +316,20 @@ Full analysis in [`engram-deep-audit-2026-08-02.md`](engram-deep-audit-2026-08-0
 
 **Consequence for the rest of the codebase:** more than one session can now be open at a time. The ~40 unscoped `getCurrentSessionId()` call sites in `dispatcher-memory.ts` still stamp records with the *newest open* session, so record attribution under concurrency is narrowed but not closed — that needs a caller-supplied handle on the memory surface and is tracked separately, not silently absorbed here.
 
-#### 12.1b `pending_work` and handoffs are still unscoped *(CRITICAL, proven — OPEN, task #5)*
-`sessions.ts:280` still flags *other agents'* in-flight `pending_work` as abandoned on every session start, and handoffs are still surfaced `LIMIT 1` with no ownership check on `acknowledge_handoff`. These were N3c/N3d; 12.1's fix is their prerequisite, not their remedy.
+#### 12.1b `pending_work` and handoffs were unscoped *(CRITICAL — **FIXED**, was proven)*
+
+> **FIXED on `review/engram-audit` (task #5).** These were N3c/N3d; 12.1's fix was their
+> prerequisite. Covered by the same regression suite.
+
+| Was | Now |
+|---|---|
+| Every session start ran `UPDATE pending_work SET status='abandoned' WHERE status='pending' AND (session_id IS NULL OR session_id < ?)` — any agent starting flagged *every* other agent's in-flight work abandoned, plus every orphaned row. The `if (lastSession?.id)` guard was dead | Scoped to `agent_id = <caller>` **and** the owning session must be closed. Another agent's work is never touched; neither is the caller's own still-open work. `abandoned_work` in the response is filtered to the caller |
+| `begin_work` wrote `agent_id` as the literal `"unknown"` when the param was omitted — one bucket, so scoping could not work | Falls back to the owning session's `agent_name` |
+| `record_change` auto-close swept **every** agent's pending rows on a file-path overlap, so B recording a change completed A's declared work | Scoped to the session's own agent |
+| Handoffs surfaced `ORDER BY created_at DESC LIMIT 1`, so with two outstanding one was silently invisible | All pending surfaced: `handoff_pending` prefers one authored by *another* agent, `other_handoffs_pending[]` carries the rest (capped 4) |
+| `acknowledge_handoff` required no session, fell back to `acknowledged_by: "unknown"`, and let any agent clear any handoff | Requires an active session; records the real agent; refuses a handoff created by the *same* session; reports who acknowledged first on a double-ack |
+
+**Deliberately not restricted:** a *later* session of the same agent may still acknowledge — a handoff is addressed to whoever comes next, and there is no `to_agent` column to address it more precisely.
 
 #### 12.2 `engram_admin(config)` has no key whitelist *(CRITICAL, verified)*
 `dispatcher-admin.ts:257` writes **any** key, including `http_token`, `sharing_mode`, `sharing_types`, `sensitive_keys`. A single tool call disables cross-instance access control. The whitelist existed in `stats.ts:22-31` and was dropped in the v1.6 consolidation.

@@ -357,13 +357,50 @@ Actions:
           interface PendingWorkRow { id: number; agent_id: string; description: string; files: string; started_at: number; session_id: number | null; }
           let abandonedWork: PendingWorkRow[] = [];
           try {
-            if (lastSession?.id) { db.prepare(`UPDATE pending_work SET status = 'abandoned' WHERE status = 'pending' AND (session_id IS NULL OR session_id < ?)`).run(sessionId); }
-            abandonedWork = db.prepare("SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' ORDER BY started_at DESC LIMIT 5").all() as PendingWorkRow[];
+            // AUDIT N3c: this UPDATE used to be unscoped — "status='pending' AND
+            // (session_id IS NULL OR session_id < ?)" — so ANY agent starting a
+            // session flagged EVERY other agent's in-flight work as abandoned,
+            // plus every orphaned row. Nothing about C starting implies A stopped.
+            // (The old `if (lastSession?.id)` guard was dead: lastSession never
+            // appeared in the query.)
+            //
+            // Abandonment is now what it always meant: work THIS agent declared
+            // in an EARLIER session and never completed. Another agent's work is
+            // never touched, and rows belonging to a still-open session are left
+            // alone even when they are this agent's own.
+            db.prepare(`
+              UPDATE pending_work SET status = 'abandoned'
+              WHERE status = 'pending'
+                AND agent_id = ?
+                AND (session_id IS NULL OR session_id IN (
+                      SELECT id FROM sessions WHERE ended_at IS NOT NULL
+                    ))
+                AND (session_id IS NULL OR session_id != ?)
+            `).run(agent_name, sessionId);
+            abandonedWork = db.prepare(
+              "SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' AND agent_id = ? ORDER BY started_at DESC LIMIT 5"
+            ).all(agent_name) as PendingWorkRow[];
           } catch { /* best effort */ }
 
           interface HandoffRow { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null; open_task_ids: string | null; last_file_touched: string | null; created_at: number; }
+          // AUDIT N3d: this used to be `ORDER BY created_at DESC LIMIT 1` with no
+          // agent filter, so with two outstanding handoffs one was silently
+          // invisible — and an unrelated agent could acknowledge it out from
+          // under the agent it was meant for. Surface all of them; prefer one
+          // authored by somebody else, since that is what "handed off to you"
+          // actually means.
           let handoffPending: HandoffRow | null = null;
-          try { handoffPending = db.prepare("SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 1").get() as HandoffRow | null; } catch { /* best effort */ }
+          let otherHandoffs: Array<{ id: number; from_agent: string | null; reason: string }> = [];
+          try {
+            const allPending = db.prepare(
+              "SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 10"
+            ).all() as HandoffRow[];
+            handoffPending = allPending.find(h => h.from_agent !== agent_name) ?? allPending[0] ?? null;
+            otherHandoffs = allPending
+              .filter(h => h.id !== handoffPending?.id)
+              .slice(0, 4)
+              .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100) }));
+          } catch { /* best effort */ }
 
           let suggestedFocus: string | undefined;
           if (!focus) {
@@ -431,6 +468,7 @@ Actions:
             suggested_focus: suggestedFocus,
             abandoned_work: abandoned,
             handoff_pending: handoff,
+            other_handoffs_pending: otherHandoffs.length > 0 ? otherHandoffs : undefined,
             update_available: updateNotification ?? undefined,
             agent_rules: rulesResult.rules,
             agent_rules_source: rulesResult.source,
@@ -533,12 +571,29 @@ Actions:
           if (params.id === undefined) return error("id required for acknowledge_handoff");
           const ackResolution = resolveSession(params, repos);
           const sessionId = ackResolution.id;
-          // NOTE: ownership of the handoff itself is still unchecked — any agent
-          // can acknowledge any handoff. That is audit N3d, tracked as task #5.
-          const fromAgent = sessionId ? (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown" : "unknown";
-          const result = db.prepare(`UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL`).run(Date.now(), fromAgent, params.id);
+          // AUDIT N3d: acknowledging used to be anonymous — no active session was
+          // required, `acknowledged_by` fell back to the literal "unknown", and
+          // any agent could clear any handoff. Acknowledging is a claim that YOU
+          // read it, so it needs a real identity behind it.
+          if (!sessionId) return error("No active session. Start one with engram_session(action:'start') before acknowledging a handoff — acknowledging records who read it.");
+          const ackAgent = (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? null;
+          if (!ackAgent) return error(`Session #${sessionId} not found.`);
+
+          const target = db.prepare("SELECT id, from_session_id, from_agent, reason, acknowledged_at, acknowledged_by FROM handoffs WHERE id = ?")
+            .get(params.id) as { id: number; from_session_id: number; from_agent: string | null; reason: string; acknowledged_at: number | null; acknowledged_by: string | null } | undefined;
+          if (!target) return error(`Handoff #${params.id} not found.`);
+          if (target.acknowledged_at) return error(`Handoff #${params.id} was already acknowledged by "${target.acknowledged_by ?? "unknown"}".`);
+          // A handoff is addressed to whoever comes next, so a later session of
+          // the SAME agent may legitimately acknowledge it. Acknowledging one
+          // your own still-open session just created is the nonsensical case —
+          // it would clear the handoff before anyone could act on it.
+          if (target.from_session_id === sessionId) {
+            return error(`Handoff #${params.id} was created by this same session (#${sessionId}). Acknowledging it now would hide it from the agent it was written for.`);
+          }
+
+          const result = db.prepare(`UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL`).run(Date.now(), ackAgent, params.id);
           if ((result.changes as number) === 0) return error(`Handoff #${params.id} not found or already acknowledged.`);
-          return success({ message: `Handoff #${params.id} acknowledged.` });
+          return success({ message: `Handoff #${params.id} acknowledged.`, handoff_id: params.id, from_agent: target.from_agent, acknowledged_by: ackAgent });
         }
 
         default:
