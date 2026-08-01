@@ -4,7 +4,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
+// getCurrentSessionId is deliberately NOT imported here: session identity in this
+// file is resolved through resolveSession() below, which is agent-scoped. The
+// global helper remains for legacy call sites that have no identity available.
+import { now, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
 import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -46,6 +49,51 @@ function storeCatalogDelivery(agent_name: string, tier: 0 | 1 | 2): void {
   }
 }
 
+// ─── Session identity (audit N3a/N3b) ────────────────────────────────────────
+//
+// A session belongs to exactly one agent. Nothing else in this file may assume
+// there is only one open session, because there no longer is: `start` retires
+// only the CALLING agent's previous session, so an orchestrator and its
+// sub-agents are open concurrently by design.
+//
+// Every non-start action therefore has to say which session it means. The
+// resolution order below is strict-to-loose, and the loosest rung reports that
+// it guessed rather than guessing silently.
+
+type SessionResolution =
+  | { id: number; scope: "explicit" | "agent" | "global"; ambiguous: boolean }
+  | { id: null; scope: "none"; ambiguous: false };
+
+/**
+ * Decide which session a non-start action operates on.
+ *   1. `session_id` — the handle returned by `start`. Exact, always preferred.
+ *   2. `agent_name` — the caller's own newest open session.
+ *   3. newest open session of any agent — legacy fallback, flagged `ambiguous`
+ *      when more than one session is open so the caller learns it was a guess.
+ */
+function resolveSession(
+  params: { session_id?: number; agent_name?: string },
+  repos: ReturnType<typeof getRepos>
+): SessionResolution {
+  if (params.session_id !== undefined) {
+    return { id: params.session_id, scope: "explicit", ambiguous: false };
+  }
+  const agentName = params.agent_name?.trim();
+  if (agentName) {
+    const own = repos.sessions.getOpenSessionId(agentName);
+    if (own !== null) return { id: own, scope: "agent", ambiguous: false };
+  }
+  const open = repos.sessions.getOpenSessions();
+  if (open.length === 0) return { id: null, scope: "none", ambiguous: false };
+  return { id: open[0].id, scope: "global", ambiguous: open.length > 1 };
+}
+
+/** Advisory note attached to responses that had to guess which session was meant. */
+function ambiguityNote(resolution: SessionResolution, action: string): string | undefined {
+  if (resolution.scope !== "global" || !resolution.ambiguous) return undefined;
+  return `More than one session is open and no session_id or agent_name was supplied, so the newest was used. Pass session_id (returned by engram_session(action:'start')) or agent_name to make '${action}' unambiguous.`;
+}
+
 export function registerSessionDispatcher(server: McpServer): void {
   server.registerTool(
     "engram_session",
@@ -62,7 +110,9 @@ Actions:
       inputSchema: {
         action: z.enum(["start", "end", "get_history", "handoff", "acknowledge_handoff"]).describe("Session operation to perform."),
         // start params
-        agent_name: z.string().optional().describe("Your agent identifier. For: start."),
+        agent_name: z.string().optional().describe("Your agent identifier. REQUIRED for: start — sessions are owned by an agent and an unnamed session cannot be told apart from anyone else's. Pass the same name on 'end'/'handoff' to operate on your own session."),
+        session_id: z.number().int().optional().describe("The session handle returned by start. For: end, handoff, acknowledge_handoff. Pass it when other agents may also have sessions open — without it the newest open session is used."),
+        parent_session_id: z.number().int().optional().describe("The orchestrator's session_id. For: start with agent_role='sub'. Omit to infer the most recent open session belonging to another agent."),
         project_root: z.string().optional().describe("Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location."),
         resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
         verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. nano=counts+rules only (~10 tokens), minimal=counts+agent_rules, summary=default, full=everything."),
@@ -93,7 +143,13 @@ Actions:
       switch (params.action) {
 
         case "start": {
-          const agent_name = params.agent_name ?? "unknown";
+          // AUDIT N3b: agent_name used to default to the literal "unknown", so
+          // every agent that omitted it landed in one bucket and per-agent
+          // scoping bought nothing. It is required, and the error says so.
+          const agent_name = params.agent_name?.trim();
+          if (!agent_name) {
+            return error("agent_name is required for engram_session(action:'start'). Sessions are owned by an agent — without a name yours cannot be told apart from another agent's, and concurrent agents would corrupt each other's records. Pass a stable identifier you reuse across sessions, e.g. agent_name:'claude-backend'.");
+          }
           const verbosity = params.verbosity ?? "summary";
           const focus = params.focus;
           const resume_task = params.resume_task;
@@ -144,9 +200,29 @@ Actions:
           // ── Sub-agent path: task-scoped context (~300-500 tokens) ─────────
           if (params.agent_role === "sub") {
             if (params.task_id === undefined) return error("task_id required when agent_role='sub'. Pass the task ID assigned by the orchestrator.");
-            const openSession = getCurrentSessionId();
-            if (openSession) { repos.sessions.autoClose(openSession, timestamp); }
-            const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
+
+            // AUDIT N3a: this used to auto-close the newest open session of ANY
+            // agent — i.e. the orchestrator that just spawned this sub-agent.
+            // Only this agent's own stale session may be retired.
+            const ownStale = repos.sessions.getOpenSessionId(agent_name);
+            if (ownStale !== null) { repos.sessions.autoClose(ownStale, timestamp); }
+
+            // AUDIT N3b: link sub -> orchestrator. The column has existed since
+            // the V1 baseline migration and was never written, which is why a
+            // delegated session's lineage was unrecoverable. An explicit
+            // parent_session_id wins; otherwise infer the most recent open
+            // session belonging to a different agent.
+            let parentSessionId: number | null = null;
+            if (params.parent_session_id !== undefined) {
+              const declared = repos.sessions.getById(params.parent_session_id);
+              if (!declared) return error(`parent_session_id #${params.parent_session_id} does not exist.`);
+              parentSessionId = declared.id;
+            } else {
+              const candidate = repos.sessions.getOpenSessions().find(s => s.agent_name !== agent_name);
+              parentSessionId = candidate?.id ?? null;
+            }
+
+            const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp, parentSessionId);
             const task = repos.tasks.getById(params.task_id) as Record<string, unknown> | null;
             if (!task) return error(`Task #${params.task_id} not found.`);
             const assignedFiles: string[] = task.assigned_files ? (typeof task.assigned_files === "string" ? JSON.parse(task.assigned_files) : task.assigned_files as string[]) : [];
@@ -174,6 +250,7 @@ Actions:
             return success({
               session_id: sessionId,
               agent_role: "sub",
+              parent_session_id: parentSessionId ?? undefined,
               task: { id: task.id, title: task.title, description: task.description, priority: task.priority, tags: taskTags },
               relevant_files: relevantFiles,
               relevant_decisions: relevantDecisions,
@@ -183,9 +260,12 @@ Actions:
           }
           // ── End sub-agent path ─────────────────────────────────────────────
 
-          // Check for already-open session and close it
-          const openSession = getCurrentSessionId();
-          if (openSession) { repos.sessions.autoClose(openSession, timestamp); }
+          // AUDIT N3a: retire only THIS agent's previous session. Sessions
+          // belonging to other agents — including sub-agents this orchestrator
+          // spawned — stay open. Restarting yourself is a legitimate reason to
+          // close your own session; it is never a reason to close someone else's.
+          const ownStale = repos.sessions.getOpenSessionId(agent_name);
+          if (ownStale !== null) { repos.sessions.autoClose(ownStale, timestamp); }
 
           const lastSession = getLastCompletedSession();
           const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
@@ -398,11 +478,16 @@ Actions:
           if (!endSummary) return error("summary required for end action. Pass summary:'...' or, in universal mode, query:'...'.");
           // Reassign for the rest of the handler
           (params as Record<string, unknown>).summary = endSummary;
-          const sessionId = getCurrentSessionId();
+          // AUDIT N3a: this used to re-derive "the current session" from a
+          // global query, so agent B's summary landed on agent A's record.
+          const resolution = resolveSession(params, repos);
+          const sessionId = resolution.id;
           if (!sessionId) return error("No active session. Start one first with engram_session(action:'start').");
           const timestamp = now();
 
-          const sessionRow = repos.sessions.getById(sessionId) as { agent_name?: string } | null;
+          const sessionRow = repos.sessions.getById(sessionId) as { agent_name?: string; ended_at?: string | null } | null;
+          if (!sessionRow) return error(`Session #${sessionId} not found.`);
+          if (sessionRow.ended_at) return error(`Session #${sessionId} is already closed. Its summary was left untouched — start a new session rather than re-ending a closed one.`);
           const agentName = sessionRow?.agent_name ?? null;
           let claimedTasksWarning: Array<{ id: number; title: string; status: string }> | undefined;
           if (agentName) {
@@ -418,9 +503,10 @@ Actions:
           let observationCount = 0;
           try { observationCount = repos.observations.countBySession(sessionId); } catch { /* table may not exist */ }
           logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} observations=${observationCount} (dispatcher)`);
-          repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
+          const didClose = repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
+          if (!didClose) return error(`Session #${sessionId} is already closed. Its summary was left untouched.`);
 
-          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
+          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, agent_name: agentName ?? undefined, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, session_resolution: ambiguityNote(resolution, "end"), ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
         }
 
         case "get_history": {
@@ -431,7 +517,8 @@ Actions:
 
         case "handoff": {
           if (!params.reason) return error("reason required for handoff");
-          const sessionId = getCurrentSessionId();
+          const handoffResolution = resolveSession(params, repos);
+          const sessionId = handoffResolution.id;
           if (!sessionId) return error("No active session.");
           const gitBranch = services.git.getBranch();
           const openTasks = repos.tasks.getOpen(20);
@@ -439,12 +526,15 @@ Actions:
           const lastFileTouched = recentChanges.length > 0 ? recentChanges[recentChanges.length - 1].file_path : null;
           const fromAgent = (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown";
           const result = db.prepare(`INSERT INTO handoffs (from_session_id, from_agent, created_at, reason, next_agent_instructions, resume_at, git_branch, open_task_ids, last_file_touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(sessionId, fromAgent, Date.now(), params.reason, params.next_agent_instructions ?? null, null, gitBranch, openTasks.length > 0 ? JSON.stringify(openTasks.map(t => t.id)) : null, lastFileTouched);
-          return success({ handoff_id: result.lastInsertRowid, message: `Handoff #${result.lastInsertRowid} created. Next agent will see this in start_session.` });
+          return success({ handoff_id: result.lastInsertRowid, from_session_id: sessionId, session_resolution: ambiguityNote(handoffResolution, "handoff"), message: `Handoff #${result.lastInsertRowid} created. Next agent will see this in start_session.` });
         }
 
         case "acknowledge_handoff": {
           if (params.id === undefined) return error("id required for acknowledge_handoff");
-          const sessionId = getCurrentSessionId();
+          const ackResolution = resolveSession(params, repos);
+          const sessionId = ackResolution.id;
+          // NOTE: ownership of the handoff itself is still unchecked — any agent
+          // can acknowledge any handoff. That is audit N3d, tracked as task #5.
           const fromAgent = sessionId ? (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown" : "unknown";
           const result = db.prepare(`UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL`).run(Date.now(), fromAgent, params.id);
           if ((result.changes as number) === 0) return error(`Handoff #${params.id} not found or already acknowledged.`);

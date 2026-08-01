@@ -121,7 +121,7 @@ packages/
   - `SQLITE_BUSY` is explicitly **not** treated as corruption ("FLAW-3 fix"). Do not re-conflate them.
   - **Corruption recovery is destructive.** A corrupt main DB is renamed `.corrupt.<ts>.bak` and replaced with an *empty* one. Warning to stderr only, no prompt. Coverage on this path: **3%**.
   - `queryAll/queryOne/execute/executeMany` take raw SQL strings — an unguarded escape hatch around the repository layer. No current caller abuses it. Watch it.
-  - `getCurrentSessionId()` (line 375) duplicates `SessionsRepo.getOpenSessionId()`, including its bug (§9).
+  - `getCurrentSessionId(agentName?)` (line 375) duplicates `SessionsRepo.getOpenSessionId()`. Both now take an optional agent scope (§12.1). **The unscoped form is still what ~40 call sites in `dispatcher-memory.ts` use to stamp `session_id` on records** — and since sessions are no longer force-closed on start, several may be open at once. Pass an agent name wherever identity is available.
 
 #### `migrations.ts` (823) — Schema history
 - **What:** 24 sequential migrations, V1 → V24, plus the runner.
@@ -163,7 +163,7 @@ Actions: `start` · `end` · `get_history` · `handoff` · `acknowledge_handoff`
 
 `start` is the densest code path in the project — a matrix of `verbosity` (nano/minimal/summary/full) × `intent` (full_context/quick_op/phase_work) × `agent_role` (primary/sub), plus runtime project-root override, focus filtering, abandoned-work detection, handoff surfacing, and PM phase detection.
 
-**Notes:** delivers a tiered tool catalog (tier 2 first-ever → tier 1 after 30 days → tier 0) via `selectCatalogTier`. `agent_rules` and `tool_catalog` are **unconditional in every tier**, which is why the token claims in the schema descriptions are wrong (audit N6). `AGENT_RULES` is imported at line 17 and never used. Contains the bugs in §9.
+**Notes:** delivers a tiered tool catalog (tier 2 first-ever → tier 1 after 30 days → tier 0) via `selectCatalogTier`. `agent_rules` and `tool_catalog` are **unconditional in every tier**, which is why the token claims in the schema descriptions are wrong (audit N6). `AGENT_RULES` is imported and never used. Session identity is resolved by the file-local `resolveSession()` (§12.1), **not** by `getCurrentSessionId` — that import was removed deliberately; don't reintroduce it here. Still contains §12.1b.
 
 #### Live: `dispatcher-memory.ts` (1,183) — `engram_memory`
 One flat Zod schema + a 38-branch switch. Everything that is not session or admin lives here: file notes, changes, decisions, conventions, tasks, checkpoints, search, dependency maps, milestones, scheduler, `dump`, observations, and multi-agent coordination (`claim_task`, `agent_sync`, `broadcast`, `route_task`).
@@ -215,7 +215,7 @@ One class per table, constructed once by `createRepositories(db)` in `index.ts` 
 
 | File | L | Owns | Watch for |
 |---|---|---|---|
-| `sessions.repo.ts` | 124 | sessions: create/close/autoClose/history/duration | **`getOpenSessionId()` is globally scoped — root cause of §9.1.** `countBySession(id, table)` interpolates the table name (line 97); only ever called with the literal `"decisions"` |
+| `sessions.repo.ts` | 158 | sessions: create/close/autoClose/getOpenSessions/history/duration | `getOpenSessionId(agentName?)` takes an agent scope; `close`/`autoClose` guard on `ended_at IS NULL` and return whether they acted; `create` writes `parent_session_id` (§12.1). `countBySession(id, table)` still interpolates the table name; only ever called with the literal `"decisions"` |
 | `decisions.repo.ts` | 173 | decisions + supersession + `depends_on` graph | `findSimilar` builds an FTS string but passes it as a **bound param** — safe. `getByFile` doesn't escape LIKE metacharacters |
 | `changes.repo.ts` | 101 | per-file change log | `recordBulk` correctly transactional. `insertCompacted`/`deleteNonCompacted` are only atomic because the *caller* wraps them |
 | `file-notes.repo.ts` | 141 | file metadata, staleness hashes | `upsert` uses `COALESCE(?, col)` so partial updates don't clobber. Defensively re-parses JSON strings (universal-mode fallout) |
@@ -295,12 +295,29 @@ Express 5 + `ws`, started only with `--mode=http`. Binds `127.0.0.1` exclusively
 
 Full analysis in [`engram-deep-audit-2026-08-02.md`](engram-deep-audit-2026-08-02.md). Summarised here so this document stands alone.
 
-#### 12.1 Session identity is globally scoped *(CRITICAL, proven)*
-`sessions.repo.ts:30` and `database.ts:375` both define "the current session" as `SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1` — **no agent, no connection, no parent scoping.** `sessions.ts:147/187` auto-closes whatever that finds, overwriting `summary`.
+#### 12.1 Session identity is globally scoped *(CRITICAL — **FIXED**, was proven)*
 
-Consequences: any agent's `start` destroys any other agent's open session, **in both directions**; `end` attaches one agent's summary to another's record; `sessions.ts:280` flags *other agents'* in-flight `pending_work` as abandoned; handoffs are unscoped (`LIMIT 1`, no ownership check on acknowledge).
+> **FIXED on `review/engram-audit` (task #2).** Session ownership is now enforced.
+> `tests/tools/session-identity.test.ts` (13 tests) is the regression suite; it failed
+> 11/13 against the pre-fix code. **N3c/N3d below are still open — see 12.1b.**
 
-Note `agent_name` defaults to `"unknown"` — scoping on it alone does not fix this.
+**Was:** `sessions.repo.ts:30` and `database.ts:375` both defined "the current session" as `SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1` — **no agent, no connection, no parent scoping** — and `sessions.ts:147/187` auto-closed whatever that found, overwriting `summary`. Any agent's `start` destroyed any other agent's open session in **both directions**, and `end` attached one agent's summary to another's record.
+
+**Now:**
+
+| Change | Where |
+|---|---|
+| `agent_name` **required** on `start` (breaking) — it used to default to the literal `"unknown"`, which is why scoping on it alone was insufficient | `sessions.ts` start branch |
+| `start` retires **only the calling agent's own** previous session | `sessions.ts`, via `getOpenSessionId(agentName)` |
+| `getOpenSessionId(agentName?)` / `getCurrentSessionId(agentName?)` take an optional agent scope | `sessions.repo.ts:30`, `database.ts:375` |
+| `close()` / `autoClose()` guard on `AND ended_at IS NULL` and return whether they acted — a closed session's summary can no longer be overwritten | `sessions.repo.ts` |
+| `end` / `handoff` / `acknowledge_handoff` resolve via `resolveSession()`: explicit `session_id` → caller's `agent_name` → newest-open, and the last rung reports `session_resolution` rather than guessing silently | `sessions.ts` |
+| `parent_session_id` is **written** on sub-agent start (explicit param, else inferred as the newest open session of another agent). The column existed unused since the V1 baseline | `sessions.repo.ts` `create()`, `sessions.ts` |
+
+**Consequence for the rest of the codebase:** more than one session can now be open at a time. The ~40 unscoped `getCurrentSessionId()` call sites in `dispatcher-memory.ts` still stamp records with the *newest open* session, so record attribution under concurrency is narrowed but not closed — that needs a caller-supplied handle on the memory surface and is tracked separately, not silently absorbed here.
+
+#### 12.1b `pending_work` and handoffs are still unscoped *(CRITICAL, proven — OPEN, task #5)*
+`sessions.ts:280` still flags *other agents'* in-flight `pending_work` as abandoned on every session start, and handoffs are still surfaced `LIMIT 1` with no ownership check on `acknowledge_handoff`. These were N3c/N3d; 12.1's fix is their prerequisite, not their remedy.
 
 #### 12.2 `engram_admin(config)` has no key whitelist *(CRITICAL, verified)*
 `dispatcher-admin.ts:257` writes **any** key, including `http_token`, `sharing_mode`, `sharing_types`, `sensitive_keys`. A single tool call disables cross-instance access control. The whitelist existed in `stats.ts:22-31` and was dropped in the v1.6 consolidation.
@@ -333,7 +350,7 @@ A corrupt main DB is renamed and replaced with an empty one. Warning to stderr o
 
 ### 13. Test posture
 
-**557/557 pass**, ~20s, zero skipped. Coverage **28.7% stmt / 20.2% branch**.
+**570/570 pass**, ~20s, zero skipped. Coverage **28.7% stmt / 20.2% branch** (measured at 557; the 13 added tests raise `sessions.ts` but the headline has not been re-measured).
 
 | Surface | Cov | |
 |---|---|---|
@@ -349,7 +366,9 @@ A corrupt main DB is renamed and replaced with an empty one. Warning to stderr o
 
 **The gap that matters most:** *no test migrates a database containing data.* Every suite builds a fresh `:memory:` DB and runs v1→v24 on empty tables, so V23's `UPDATE conventions SET summary = SUBSTR(rule,1,80) WHERE summary IS NULL` backfill — which only acts on pre-existing rows — is never exercised. Neither are the idempotency `catch` guards. Upgrading a real user's database is the one path with no coverage.
 
-Also: `agent_role` / `sub-agent` / `parent_session_id` appear **zero times** in `tests/`. And `dispatcher-smoke.test.ts` mocks `database.js` without `getServices`, so every test in it throws inside `pmSafe` and passes anyway.
+Also: `dispatcher-smoke.test.ts` mocks `database.js` without `getServices`, so every test in it throws inside `pmSafe` and passes anyway.
+
+`agent_role` / `sub-agent` / `parent_session_id` used to appear **zero times** in `tests/`. `tests/tools/session-identity.test.ts` now covers the whole sub-agent + concurrency path (§12.1). It is deliberately written against real migrations and real repositories with a mock that mirrors the *unscoped* `getCurrentSessionId` — so the dispatcher cannot pass by leaning on a friendlier mock.
 
 ---
 

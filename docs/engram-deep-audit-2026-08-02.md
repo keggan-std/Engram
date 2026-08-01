@@ -206,6 +206,13 @@ const KNOWN_CONFIG_KEYS = new Set([...]);
 
 **Grade: PROVEN.** PoC at `scratchpad/poc-session-clobber.mjs`, run against real migrations + repositories.
 
+> **STATUS (updated 2026-08-02, after this audit was written):** **N3a and N3b are FIXED**
+> on `review/engram-audit` — see [`ENGRAM_CONSTITUTION.md`](ENGRAM_CONSTITUTION.md) §12.1 for what
+> changed. The permanent reproduction now lives in `tests/tools/session-identity.test.ts`
+> (13 tests; 11 failed against the pre-fix code). **N3c (`pending_work` mass-abandonment) and
+> N3d (unscoped handoffs) remain OPEN** — task #5. Everything below is the original finding,
+> left unedited as the dated record.
+
 #### N3a — Clobbering is bidirectional, and misattributes work
 
 ```

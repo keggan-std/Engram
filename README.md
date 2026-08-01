@@ -885,12 +885,43 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 
 | Action                       | Purpose                                                                                                                                                        |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start`                      | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth.     |
-| `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. |
-| `end`                        | End session with a summary. Warns on unclosed claimed tasks.                                                                                                   |
+| `start`                      | Begin a session. **`agent_name` is required.** Returns `session_id`, context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth. |
+| `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. Records `parent_session_id`. |
+| `end`                        | End session with a summary. Pass `session_id` (or `agent_name`) to say which session. Warns on unclosed claimed tasks.                                        |
 | `get_history`                | Retrieve past session summaries.                                                                                                                               |
 | `handoff`                    | Package open tasks, git branch, and instructions for the next agent.                                                                                           |
 | `acknowledge_handoff`        | Clear a pending handoff from future start responses.                                                                                                           |
+
+#### Session ownership under concurrency
+
+A session belongs to exactly one agent. Starting a session retires **only your own**
+previous session — an orchestrator and the sub-agents it spawns stay open side by
+side, and no agent can close or overwrite another's record.
+
+Three rules follow from that:
+
+1. **`agent_name` is required on `start`** and should be stable across sessions.
+   It is the identity everything else is scoped by.
+2. **`start` returns a `session_id`.** Pass it back as `session_id` on `end`,
+   `handoff`, and `acknowledge_handoff` when other agents may be running. Passing
+   your `agent_name` instead resolves to your own newest open session. With
+   neither, the newest open session of any agent is used and the response says so
+   in `session_resolution`.
+3. **A sub-agent session records `parent_session_id`**, inferred from the most
+   recent open session belonging to another agent, or set explicitly by passing
+   `parent_session_id`.
+
+```js
+// Orchestrator
+const { session_id } = engram_session({ action: "start", agent_name: "lead" });
+
+// Sub-agent — does not disturb the orchestrator's session
+engram_session({ action: "start", agent_name: "sub-1", agent_role: "sub", task_id: 42,
+                 parent_session_id: session_id });
+
+// Each closes its own
+engram_session({ action: "end", session_id, summary: "..." });
+```
 
 ### `engram_memory` — All Memory Operations
 
@@ -1032,13 +1063,16 @@ Multi-step plans, analyses, proposals → write to `docs/<name>.md`. Chat gets s
 1. Record unrecorded changes
 2. Mark done tasks: `engram_memory({ action: "update_task", id: N, status: "done" })`
 3. Create tasks for incomplete work
-4. `engram_session({ action: "end", summary: "files touched, pending work, blockers" })`
+4. `engram_session({ action: "end", session_id: <from start>, summary: "files touched, pending work, blockers" })`
 
 ### Sub-Agent Sessions (v1.7+)
 ```js
-engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42 })
+engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42,
+                 parent_session_id: <orchestrator's session_id> })
 ```
 Returns only the assigned task, its file notes, matching decisions, and up to 5 conventions (~300–500 tokens). Sub-agents still call `record_change` and `session end` as normal.
+
+`agent_name` is required and must be unique per agent — it is what stops concurrent agents from closing each other's sessions. Pass your own `session_id` on `end`.
 
 <!-- ENGRAM_INSTRUCTIONS_END -->
 

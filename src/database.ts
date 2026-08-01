@@ -372,8 +372,18 @@ export function now(): string {
   return new Date().toISOString();
 }
 
-export function getCurrentSessionId(): number | null {
-  const row = queryOne("SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1");
+/**
+ * Newest open session, optionally scoped to one agent.
+ *
+ * AUDIT N3a: the unscoped form answers "the newest open session belonging to
+ * ANYONE". Since sessions are no longer force-closed on every start, more than
+ * one may be open at a time, so any caller that knows its own identity should
+ * pass `agentName`. Mirrors SessionsRepo.getOpenSessionId().
+ */
+export function getCurrentSessionId(agentName?: string): number | null {
+  const row = agentName
+    ? queryOne("SELECT id FROM sessions WHERE ended_at IS NULL AND agent_name = ? ORDER BY id DESC LIMIT 1", [agentName])
+    : queryOne("SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1");
   return row ? (row.id as number) : null;
 }
 
