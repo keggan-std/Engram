@@ -17,7 +17,7 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 24; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade, V24 observations
+export const DB_VERSION = 25; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade, V24 observations, V25 superseded_by repair
 
 // PM Framework — Phase / Keyword / Nudge constants
 /** Maps canonical phase name strings (from task tags like `phase:planning`) to phase numbers 1-6. */

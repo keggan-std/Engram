@@ -775,6 +775,29 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 25,
+    description: "Repair decisions.superseded_by — clear it on rows that were never superseded",
+    up: (db) => {
+      // DecisionsRepo.create() bound the `supersedes` argument to the NEW row's
+      // `superseded_by` column. That column means "the decision that replaced
+      // this one", so the new, authoritative decision was left pointing
+      // backwards at the one it replaced — `status:'active'` and
+      // `superseded_by:<older id>` simultaneously, which is self-contradictory.
+      //
+      // The write path is fixed in decisions.repo.ts. This repairs databases
+      // that already recorded a superseding decision.
+      //
+      // Only a row whose status is actually 'superseded' may carry the pointer.
+      // Idempotent, and a no-op on any database that never used `supersedes`.
+      db.exec(`
+        UPDATE decisions
+           SET superseded_by = NULL
+         WHERE superseded_by IS NOT NULL
+           AND status <> 'superseded';
+      `);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────

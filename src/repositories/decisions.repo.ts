@@ -19,17 +19,29 @@ export class DecisionsRepo {
         supersedes?: number | null,
         dependsOn?: number[] | null
     ): number {
+        // `superseded_by` is deliberately NOT set here.
+        //
+        // It means "the decision that REPLACED this one" and belongs on the OLD
+        // row, written by supersede(oldId, newId). Binding `supersedes` to it on
+        // INSERT pointed the new, authoritative decision backwards at the one it
+        // replaced — leaving a row that is `status:'active'` while also claiming
+        // to have been superseded. Nothing in src/ reads the column, but
+        // get_decisions returns it, and the consumer of that JSON is an agent
+        // deciding which decision is current.
+        //
+        // The caller (`record_decision`) already calls supersede() separately,
+        // which is the correct and only write.
         const result = this.db.prepare(
-            "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, superseded_by, depends_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO decisions (session_id, timestamp, decision, rationale, affected_files, tags, status, depends_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).run(
             sessionId, timestamp, decision,
             rationale || null,
             affectedFiles ? JSON.stringify(affectedFiles) : null,
             tags ? JSON.stringify(tags) : null,
             status,
-            supersedes || null,
             dependsOn && dependsOn.length > 0 ? JSON.stringify(dependsOn) : null
         );
+        void supersedes; // resolved by the caller via supersede(); see above
         return result.lastInsertRowid as number;
     }
 
