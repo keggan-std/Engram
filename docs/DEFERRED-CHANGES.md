@@ -370,6 +370,12 @@ already contains all of v1.12.0's code. Only the label is stale.
    `package.json` to 1.11.0, revert the README and `llms.txt`, and **delete the
    v1.12.0 release notes.**
 
+**Deferred deliberately.** 2026-08-02, by the maintainer: the rebase and the
+release decision are explicitly *not* being done now, to keep the master-plan
+work unblocked. Recorded here so the deferral is a decision on the record rather
+than an omission. **The security-exposure half keeps running while it waits** —
+see the last paragraph.
+
 **Trigger.** Before opening a PR, merging, or publishing. Also the moment anyone
 asks "why does it say 1.11.0?"
 
