@@ -33,3 +33,34 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  surface:
+    name: Capability surface
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Regenerates docs/CAPABILITY-SURFACE.md from the Zod schemas and fails if
+      # it differs from what is committed. This is what makes a removed action, a
+      # dropped enum or a loosened bound block the merge instead of shipping
+      # unnoticed — the failure mode that cost this project ten features.
+      - name: Check capability surface is up to date
+        run: node scripts/generate-capability-surface.mjs --check
+
+      # Dead-code detection. knip.json is scoped to src/; packages/* are separate
+      # build entry points and would drown the signal.
+      - name: Check for dead code
+        run: npx -y knip@5 --no-progress

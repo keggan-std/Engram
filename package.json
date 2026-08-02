@@ -31,7 +31,10 @@
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "build:dashboard": "cd packages/engram-dashboard && npm install && npm run build",
     "dev:http": "node dist/index.js --mode=http",
-    "dashboard": "npm run build && npm --prefix packages/engram-dashboard install --prefer-offline && concurrently -k --raw -n \"api,ui\" -c \"cyan,green\" \"node dist/index.js --mode=http --open-port=5173\" \"npm --prefix packages/engram-dashboard run dev\""
+    "dashboard": "npm run build && npm --prefix packages/engram-dashboard install --prefer-offline && concurrently -k --raw -n \"api,ui\" -c \"cyan,green\" \"node dist/index.js --mode=http --open-port=5173\" \"npm --prefix packages/engram-dashboard run dev\"",
+    "surface": "node scripts/generate-capability-surface.mjs",
+    "surface:check": "node scripts/generate-capability-surface.mjs --check",
+    "deadcode": "knip"
   },
   "keywords": [
     "mcp",
