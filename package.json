@@ -34,6 +34,8 @@
     "dashboard": "npm run build && npm --prefix packages/engram-dashboard install --prefer-offline && concurrently -k --raw -n \"api,ui\" -c \"cyan,green\" \"node dist/index.js --mode=http --open-port=5173\" \"npm --prefix packages/engram-dashboard run dev\"",
     "surface": "node scripts/generate-capability-surface.mjs",
     "surface:check": "node scripts/generate-capability-surface.mjs --check",
+    "state": "node scripts/generate-state.mjs",
+    "state:check": "node scripts/generate-state.mjs --check",
     "deadcode": "knip"
   },
   "keywords": [
