@@ -37,7 +37,9 @@
     "state": "node scripts/generate-state.mjs",
     "state:check": "node scripts/generate-state.mjs --check",
     "deadcode": "knip",
-    "fixture": "node scripts/make-golden-fixture.mjs"
+    "fixture": "node scripts/make-golden-fixture.mjs",
+    "http-surface": "node scripts/generate-http-surface.mjs",
+    "http-surface:check": "node scripts/generate-http-surface.mjs --check"
   },
   "keywords": [
     "mcp",

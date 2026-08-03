@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `7a3fea2`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `c0bc0e8`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `7a3fea2` — feat(FR-0f): golden fixture — migrations must carry REAL data forward |
+| **Working branch** | `fr/0g-state-register` @ `c0bc0e8` — chore(FR-0g): close out session 16 — handoff #5, final state |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
-| **Store** | schema V25 · 16 sessions · 19 decisions · 59 observations · 94 file notes |
+| **Uncommitted** | **4 file(s)** — `.github/workflows/ci.yml`, `package.json`, `docs/HTTP-SURFACE.md`, `scripts/generate-http-surface.mjs` |
+| **Store** | schema V25 · 17 sessions · 19 decisions · 60 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **17** | `interface-surface-agent` | _(in progress)_ |
 | **16** | `cherry-pick-verifier` | Verified the tripwire's emergency path, then built the agent-orientation register the operator asked for and fixed the rot it exposed. |
 | **15** | `agent_name` ⚠️ | Completed Phase 0 of the Foundations Review and set the direction for everything after it. |
-| **14** | `opus5-pm-infra` | Reorganised docs/ to remove the "which docs do I read" ambiguity. |
 
 ⚠️ A session is recorded under the literal placeholder `"agent_name"`. Attribution in the
 table this register is built on is already polluted — Engram schema gap 4, observation #54.
@@ -56,7 +56,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #5** — from `cherry-pick-verifier`, 2026-08-03 — **not yet acknowledged**.
+**Read #5** — from `cherry-pick-verifier`, 2026-08-03 (already acknowledged).
 FR-0f and FR-0g setup work complete; IDE restarting to load the new PreToolUse hook.
 
 ⚠️ **2 older handoffs still show as pending and should be ignored:** #2 (`opus5-pm-infra`, 2026-08-01), #1 (`opus5-deep-audit`, 2026-08-01).
