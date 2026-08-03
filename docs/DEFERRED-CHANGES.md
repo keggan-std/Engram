@@ -395,6 +395,69 @@ states it, and the release notes actively assert the opposite.
 
 ---
 
+## D12 — The unused-action report needs elapsed time before it means anything
+
+**Status:** ACTIVE · **Raised:** 2026-08-02 · **Commit:** `5ff7e2f`
+
+**What.** Every action now logs to `tool_call_log` (it previously logged 3 of 83).
+The measurement that motivated the fix — *which actions has nobody ever called* —
+**still cannot be run**, because "ever" now starts at this commit.
+
+**Why it matters.** This is the only evidence that can license **deleting** an
+action. Without it the surface can only grow, which is the asymmetry Trellis
+names: *a loop that learns only from failure can only add.* Settled input 2
+(*break only where evidence demands*) means no action gets removed until this
+report exists.
+
+**Trigger.** After a release plus a meaningful period of real usage — not just
+this project's own dogfooding, which exercises an unrepresentative slice.
+Concretely: **when `SELECT COUNT(DISTINCT tool_name) FROM tool_call_log` stops
+climbing between checks.**
+
+**Action.** Run the report, then decide deletions against it. Feeds FR-D7
+(ergonomics, task #22) and FR-D9 (traceability, task #23).
+
+**Also gated on this:** `replay` is still hollow for every session recorded
+before `5ff7e2f`. No amount of new logging recovers what was never written, so
+historical sessions are permanently unreplayable. Worth stating plainly rather
+than discovering later.
+
+**Would it be caught otherwise?** No. Nothing surfaces "this report is not ready
+yet", and the table now looks populated — which is exactly the condition under
+which someone concludes an action is unused when it is merely new.
+
+---
+
+## D13 — Distinctness was measured with three samples of one model
+
+**Status:** ACTIVE · **Raised:** 2026-08-02 · **Commit:** `517d2e6`
+
+**What.** FR-0c/1 routed 40 phrases through three "blind raters" that were the
+**same model with the same prompt**. It measured **routing stability**, not
+inter-model agreement.
+
+**Why it matters.** The result — 97.5% unanimous, 55% genuinely distinct — is
+being used to decide what may be cut. The 97.5% is the weaker half of that
+finding and the easier one to over-read. **A different model may route the same
+catalog differently**, and the 42.5% unanimous-but-low-confidence band is exactly
+where that would show up.
+
+**Trigger.** Before any decision that *keeps* an action on the grounds that
+routing is fine. The 55% figure is safe to act on; the 97.5% is not safe to rely
+on.
+
+**Action.** Re-run [`analyse-distinctness.mjs`](foundations/measurements/analyse-distinctness.mjs)
+with raters on at least two different model families, against the **same
+committed phrase set** — which is why that set was committed before results
+existed. Compare the ambiguous band, not the headline.
+
+**Would it be caught otherwise?** Partly. The limitation is stated at the top of
+both the raw data and the report, so a careful reader sees it. But a summary
+quoting "97.5% unanimous" without it would be actively misleading, and summaries
+are what get quoted.
+
+---
+
 ## DONE
 
 *(Entries move here when resolved, with the commit that closed them. Nothing yet.)*

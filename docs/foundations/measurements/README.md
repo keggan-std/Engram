@@ -12,7 +12,7 @@ reproducible: `node <script> "<repo-root>"`.
 | # | Measurement | Status | Headline |
 |---|---|---|---|
 | 1 | Action distinctness | ✅ ran | Routing is **stable** (97.5%) but only **55% genuinely distinct** |
-| 2 | Never-called actions | ❌ **impossible** | 72 of 75 actions have **no telemetry at all** |
+| 2 | Never-called actions | ⏳ **unblocked, needs time** | 72 of 83 actions had **no telemetry**; fixed in `5ff7e2f`, data accrues from now |
 | 3 | Session-start cost per tier | ✅ ran | Up to **66× the documented figure**; 88% of a response is overhead |
 | 4 | `knip` dead code | ✅ ran | Exactly **15 dead files**, zero false positives |
 
@@ -108,11 +108,19 @@ was a fourth overlapping action.
 
 ---
 
-## 2 — Never-called actions: **cannot be measured**
+## 2 — Never-called actions: **was impossible; instrumentation now shipped**
 
-**This measurement is impossible, and finding that out is worth more than the measurement.**
+> **STATUS (2026-08-02, commit `5ff7e2f`):** the *cause* below is **fixed** — every action
+> now logs. The **measurement still cannot be run today**, because the signal is "has this
+> action ever been called" and the log only starts from now. It needs a release plus real
+> usage before it means anything. Tracked as [D12](../../DEFERRED-CHANGES.md).
+>
+> The finding is preserved because it is the reason the fix exists, and because it corrects
+> a claim in one of our own design docs.
 
-`logToolCall` is called from **exactly 5 sites, all in `src/tools/sessions.ts`**, producing
+**This measurement was impossible, and finding that out was worth more than the measurement.**
+
+`logToolCall` was called from **exactly 5 sites, all in `src/tools/sessions.ts`**, producing
 exactly 3 distinct `tool_name` values: `start_session`, `start_session_sub`, `end_session`.
 
 ```
@@ -148,6 +156,30 @@ the domain docs: reasoning would have carried the claim straight into the master
    nothing else. **The feature is not merely disconnected — its data source is empty.**
 
 Recorded as Engram observation #52.
+
+### What shipped in response (`5ff7e2f`)
+
+`withToolTelemetry` returns a proxied server whose `registerTool` wraps the handler, so
+**every action logs as `<tool>.<action>` with an outcome**. The four dispatchers are
+untouched — a new action is instrumented because it came through the same door.
+
+Two earlier designs were tried and rejected, and the reasons are worth keeping:
+
+| Attempt | Why it failed |
+|---|---|
+| `logToolCall` per switch case | 83 edits that rot the first time someone adds an action and forgets one — the exact failure class this project keeps finding |
+| Wrapping the handler inside each dispatcher | Passing `async (params) => …` as an argument breaks the Zod inference the MCP SDK derives from `inputSchema`; every parameter degraded to `{}` (13 type errors) |
+
+Also fixed alongside: `agent_id` was hardcoded `null` and is now resolved, preferring the
+name the caller supplied; session resolution falls back to the caller's most recent closed
+session so `end` — which logs after closing its own session — is still attributed. `notes`
+carries a **strict allowlist** of enum-ish parameters; free text and `config.value` are
+excluded so telemetry never becomes a second copy of the memory, nor a place the dashboard
+token leaks to. The table is trimmed to 20,000 rows on a counter, since nothing else prunes
+it. 13 tests in `tests/unit/tool-telemetry.test.ts`.
+
+**`replay` is still hollow for historical sessions** — no amount of new logging recovers what
+was never recorded. It becomes useful only for sessions from this commit forward.
 
 ---
 
