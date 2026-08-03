@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `e166a4e`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `a975b89`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,13 +13,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d1-durability` @ `e166a4e` — fix(gates): normalise line endings before comparing generated artifacts |
+| **Working branch** | `fr/d1-durability` @ `a975b89` — fix(state): the drift gate compared values that can never match |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **2 file(s)** — `docs/STATE.md`, `scripts/generate-state.mjs` |
-| **Store** | schema V25 · 17 sessions · 19 decisions · 60 observations · 94 file notes |
+| **Uncommitted** | **6 file(s)** — `docs/README.md`, `docs/STATE.md`, `src/database.ts`, `src/tools/dispatcher-admin.ts` … |
+| **Store** | schema V25 · 17 sessions · 20 decisions · 63 observations · 96 file notes |
 
-**Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
+**Latest active decision — #20:** FR-D1 T1 ADOPTED AND SHIPPED: restore validates, closes, deletes main+wal+shm together, copies, reopens.
 
 **Nothing is marked in progress.**
 
@@ -43,15 +43,15 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**18 open tasks.** The ones that gate everything else:
+**26 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **16** | FR-D1: Durability & Recovery review | critical · backlog |
 | **17** | FR-D2: Trust & Safety review | critical · backlog |
-| **6** | P1-1: Port dropped validation from the 15 dead tool files, then delete them | high · backlog |
-| **7** | P1-2: Add a migration upgrade-path test (data survives v1 -> v24) | high · backlog |
+| **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
+| **35** | FR-D3 — fts_file_notes has no triggers: 94 file notes are unsearchable and nothing reports it | critical · backlog |
 
 ### Handoff
 
@@ -93,6 +93,6 @@ this is newest-first, not open-only (schema gap 2). Full text:
 2. [`README.md`](README.md) — the documentation router.
 3. [`foundations/00-CHARTER.md`](foundations/00-CHARTER.md) — the spec the review executes from.
 4. `engram_memory(action:"get_file_notes")` **before opening any source file.**
-   94 files are already noted — do not re-read the codebase.
+   96 files are already noted — do not re-read the codebase.
 
 <!-- PROJECT_STATE:GENERATED -->

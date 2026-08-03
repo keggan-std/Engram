@@ -27,7 +27,9 @@ Read in this order. This is the whole active set — eleven files.
 | Document | Read when |
 |---|---|
 | **[foundations/00-CHARTER.md](foundations/00-CHARTER.md)** | **Before touching anything in `foundations/`, and before writing the master plan.** Defines the ten domains, the mandatory six-part doc template, evidence grading, the delegation protocol, and the kill switches. It is the spec the whole exercise executes from |
+| **[foundations/01-durability.md](foundations/01-durability.md)** | **Before touching `backup`, `restore`, `export`, `import` or `migrations.ts`.** Domain 1, complete. Four README/tool-description claims in this area are false as written, and §2 says which. §4 carries the reasoning and the rejected alternatives |
 | [foundations/](foundations/) | The ten domain reviews. `01`–`10`, risk-ordered, durability first |
+| [foundations/tripwire-patch-runbook.md](foundations/tripwire-patch-runbook.md) | Only if decision #19's tripwire fires — the recipe for cherry-picking the security commits onto `main` |
 
 **Status is not in these files.** It lives in the Engram task board — `FR-*` tasks.
 That is deliberate: a doc that tracks its own state is the artifact the charter §2 exists to prevent.
