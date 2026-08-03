@@ -65,6 +65,13 @@ export const FOCUS_MAX_ITEMS_PER_CATEGORY = 15;
 export const FILE_MTIME_STALE_HOURS = 24; // After this many hours of drift, confidence = "stale"
 export const FILE_LOCK_DEFAULT_TIMEOUT_MINUTES = 30; // Auto-expire file locks after this many minutes
 export const DEFAULT_RETENTION_DAYS = 90;
+
+// tool_call_log retention. Every action logs a row (since 2026-08-02), and
+// nothing else prunes this table — compaction does not touch it. The cap is
+// generous enough to keep several sessions of replay history and small enough
+// that the table cannot become the largest thing in the database.
+export const TOOL_CALL_LOG_MAX_ROWS = 20_000;
+export const TOOL_CALL_LOG_PRUNE_INTERVAL = 200;
 export const MAX_BACKUP_COUNT = 10;
 
 // File patterns to exclude from scanning

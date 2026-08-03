@@ -29,6 +29,7 @@ import { registerSessionDispatcher } from "./tools/sessions.js";
 import { registerMemoryDispatcher } from "./tools/dispatcher-memory.js";
 import { registerAdminDispatcher } from "./tools/dispatcher-admin.js";
 import { registerFindTool } from "./tools/find.js";
+import { withToolTelemetry } from "./tool-telemetry.js";
 
 // ─── v1.7 Universal Mode — 1 tool ~80 token schema ──────────────────────────
 import { registerUniversalMode } from "./modes/universal.js";
@@ -278,16 +279,22 @@ async function main(): Promise<void> {
 
   const isUniversalMode = args.includes("--mode=universal") || process.env.ENGRAM_MODE === "universal";
 
+  // Every tool registered through this view logs its invocations to
+  // tool_call_log. Registering here rather than inside each dispatcher means a
+  // new action is instrumented because it came through the same door — it
+  // cannot be forgotten. See src/tool-telemetry.ts.
+  const instrumented = withToolTelemetry(server);
+
   if (isUniversalMode) {
     // Universal mode: 1 "engram" tool, ~80 schema tokens. All agents.
-    registerUniversalMode(server);
+    registerUniversalMode(instrumented);
     log.info(`${SERVER_NAME} v${SERVER_VERSION} — universal mode (1 tool, ~80 schema tokens)`);
   } else {
     // Standard mode: 4 dispatcher tools, ~1,600 schema tokens.
-    registerSessionDispatcher(server);  // engram_session: start, end, get_history, handoff
-    registerMemoryDispatcher(server);   // engram_memory: all memory operations via action enum
-    registerAdminDispatcher(server);    // engram_admin: backup, restore, stats, health, config, scan
-    registerFindTool(server);           // engram_find: catalog keyword search
+    registerSessionDispatcher(instrumented);  // engram_session: start, end, get_history, handoff
+    registerMemoryDispatcher(instrumented);   // engram_memory: all memory operations via action enum
+    registerAdminDispatcher(instrumented);    // engram_admin: backup, restore, stats, health, config, scan
+    registerFindTool(instrumented);           // engram_find: catalog keyword search
     log.info(`${SERVER_NAME} v${SERVER_VERSION} — standard mode (4 tools, ~1,600 schema tokens)`);
   }
 

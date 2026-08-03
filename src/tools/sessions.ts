@@ -7,7 +7,7 @@ import { z } from "zod";
 // getCurrentSessionId is deliberately NOT imported here: session identity in this
 // file is resolved through resolveSession() below, which is agent-scoped. The
 // global helper remains for legacy call sites that have no identity available.
-import { now, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
+import { now, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, reinitDatabase } from "../database.js";
 import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
@@ -246,7 +246,6 @@ Actions:
               const keyword = `${c.category} ${c.rule}`.toLowerCase();
               return taskTags.some(t => keyword.includes(t.toLowerCase())) || assignedFiles.some(f => keyword.includes(f.toLowerCase().split("/").pop() ?? ""));
             }).slice(0, 5).map(c => ({ id: c.id, category: c.category, rule: truncate(c.rule, 100) }));
-            logToolCall("start_session_sub", "success", `agent=${agent_name} task=${params.task_id}`);
             return success({
               session_id: sessionId,
               agent_role: "sub",
@@ -290,7 +289,6 @@ Actions:
             let qTriggeredEvents: ScheduledEventRow[] = [];
             try { qTriggeredEvents = services.events.triggerSessionEvents(); } catch { /* best effort */ }
             const qUpdateNotification = services.update.getNotification();
-            logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=quick_op (dispatcher)`);
             return success({
               session_id: sessionId,
               intent: 'quick_op',
@@ -415,7 +413,6 @@ Actions:
             if (candidates.length > 0) suggestedFocus = candidates[0];
           }
 
-          logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=${intent} (dispatcher)`);
 
           // ── phase_work: detect current phase from task tags ────────────────
           let phaseKnowledge: { phase: number; name: string; label: string; compact: string; entryCriteria: string[]; exitCriteria: string[]; instructionSummaries: string[] } | undefined;
@@ -543,7 +540,6 @@ Actions:
           const tasksDone = repos.tasks.countDoneInSession(sessionId);
           let observationCount = 0;
           try { observationCount = repos.observations.countBySession(sessionId); } catch { /* table may not exist */ }
-          logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} observations=${observationCount} (dispatcher)`);
           const didClose = repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
           if (!didClose) return error(`Session #${sessionId} is already closed. Its summary was left untouched.`);
 

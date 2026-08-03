@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import * as fs from "fs";
 import * as path from "path";
-import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
+import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, TOOL_CALL_LOG_MAX_ROWS, TOOL_CALL_LOG_PRUNE_INTERVAL } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService, CrossInstanceService, SensitiveDataService, WorkflowAdvisorService, PMDiagnosticsTracker } from "./services/index.js";
@@ -415,26 +415,69 @@ export function forceFlush(): void {
   db.pragma("wal_checkpoint(TRUNCATE)");
 }
 
+/** Insert counter driving the periodic prune below. Process-local, not persisted. */
+let _toolCallsSincePrune = 0;
+
 /**
- * F10: Log a tool invocation for session replay diagnostics.
- * Silent no-op if the tool_call_log table doesn't exist (older schemas).
+ * Log a tool invocation. Feeds two things that did not previously work:
+ * the `replay` timeline, and the "which actions are never called" signal that
+ * licenses deleting an action.
+ *
+ * Until 2026-08-02 this was called from five sites, all in sessions.ts, so 72 of
+ * the 83 actions had no telemetry at all and the unused-action report could not
+ * be computed. See docs/foundations/measurements/README.md §2.
+ *
+ * `agent_id` is resolved from the owning session rather than passed in — it is
+ * derivable, and deriving it means it cannot disagree with the session record.
+ * Previously hardcoded `null`.
+ *
+ * Silent no-op if the table doesn't exist (older schemas). Never throws: losing
+ * a diagnostic row must never fail the operation being diagnosed.
  */
 export function logToolCall(
   toolName: string,
   outcome: "success" | "error" = "success",
-  notes?: string
+  notes?: string,
+  agentName?: string
 ): void {
   try {
     const db = getDb();
+
+    // Resolve the owning session. Prefer the caller's own OPEN session; fall
+    // back to its most recent closed one. The fallback matters for `end`, which
+    // logs from a finally block after the session it belongs to is already
+    // closed — without it, every session-end event would be unattributed.
+    let sessionId: number | null;
+    if (agentName) {
+      const row = db.prepare(
+        `SELECT id FROM sessions WHERE agent_name = ?
+          ORDER BY (ended_at IS NULL) DESC, id DESC LIMIT 1`
+      ).get(agentName) as { id: number } | undefined;
+      sessionId = row?.id ?? getCurrentSessionId();
+    } else {
+      sessionId = getCurrentSessionId();
+    }
+
+    // agent_id prefers the name the caller supplied over the one derived from
+    // the session: the caller identifying itself is the stronger signal, and it
+    // still resolves when no session is open.
     db.prepare(
-      "INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(
-      getCurrentSessionId(),
-      null,
-      toolName,
-      Date.now(),
-      outcome,
-      notes ?? null
-    );
+      `INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes)
+       VALUES (?, COALESCE(?, (SELECT agent_name FROM sessions WHERE id = ?)), ?, ?, ?, ?)`
+    ).run(sessionId, agentName ?? null, sessionId, toolName, Date.now(), outcome, notes ?? null);
+
+    // Now that every action logs, this table grows without bound — nothing else
+    // prunes it (compaction does not touch it). Trim on a counter rather than
+    // every insert so the cost is amortised.
+    if (++_toolCallsSincePrune >= TOOL_CALL_LOG_PRUNE_INTERVAL) {
+      _toolCallsSincePrune = 0;
+      db.prepare(
+        `DELETE FROM tool_call_log WHERE id < (
+           SELECT MIN(id) FROM (
+             SELECT id FROM tool_call_log ORDER BY id DESC LIMIT ?
+           )
+         )`
+      ).run(TOOL_CALL_LOG_MAX_ROWS);
+    }
   } catch { /* table may not exist on older schemas — always silent */ }
 }
