@@ -33,6 +33,7 @@ let _repos: Repositories | null = null;
 let _services: Services | null = null;
 let _projectRoot: string = process.cwd();
 let _dbPath: string = "";
+let _ideKey: string | undefined;
 
 // ─── Initialization ──────────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
 // shard, eliminating write-lock contention between different IDEs on the same project.
 export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType {
   _projectRoot = projectRoot;
+  _ideKey = ideKey;
   const dbDir = path.join(projectRoot, DB_DIR_NAME);
   fs.mkdirSync(dbDir, { recursive: true });
   ensureGitignore(projectRoot);
@@ -302,6 +304,107 @@ export function backupDatabase(destPath?: string): string {
   fs.copyFileSync(getDbPath(), destPath);
 
   return destPath;
+}
+
+// ─── Restore ─────────────────────────────────────────────────────────
+
+/**
+ * Replace the live database with the contents of a backup file.
+ *
+ * FR-D1 T1. The previous implementation (dispatcher-admin `case "restore"`)
+ * copied the backup over memory.db while this process still held the
+ * connection open, and never removed the old -wal/-shm. SQLite then
+ * checkpointed the STALE WAL back over the freshly restored file — so the
+ * restore silently did not happen, `integrity_check` still returned "ok", and
+ * the user was told to restart, which is the very act that undid their
+ * rollback. Proof and quoted output: docs/foundations/01-durability.md P1.
+ *
+ * sqlite.org/howtocorrupt.html §1.4 lists "overwriting a database file with
+ * another without also deleting any hot journal associated with the original
+ * database" among the actions likely to lead to corruption. This function is
+ * the fix for that specific bullet.
+ *
+ * Order matters and every step is load-bearing:
+ *   1. validate the candidate before touching anything (it may not be a
+ *      database at all — the old code checked existence only)
+ *   2. safety-backup, and ABORT if it fails. The live path used to swallow
+ *      that failure; only the dead code in tools/backup.ts got it right
+ *   3. close the connection, so nothing can write behind us
+ *   4. delete main + -wal + -shm TOGETHER — this is the actual bug fix
+ *   5. copy, then reopen through initDatabase so migrations run against a
+ *      possibly-older backup and repos/services are rebuilt
+ *
+ * @throws if the candidate is unreadable, fails integrity_check, carries no
+ *         schema_meta version, or if the safety backup cannot be written.
+ */
+export function restoreDatabase(inputPath: string): {
+  restored_from: string;
+  safety_backup: string;
+  schema_version: string;
+} {
+  const resolved = path.isAbsolute(inputPath) ? inputPath : path.join(_projectRoot, inputPath);
+  if (!fs.existsSync(resolved)) throw new Error(`Backup file not found: ${resolved}`);
+
+  // ── 1. Validate the candidate ──────────────────────────────────────
+  // Read-only so a malformed file cannot be modified by the act of checking it.
+  let schemaVersion: string;
+  {
+    let probe: DatabaseType | null = null;
+    try {
+      probe = new Database(resolved, { readonly: true, fileMustExist: true });
+      const integrity = probe.pragma("integrity_check", { simple: true });
+      if (integrity !== "ok") {
+        throw new Error(`refusing to restore: integrity_check returned "${integrity}"`);
+      }
+      // Ask sqlite_master first: a plain SELECT throws "no such table", which
+      // is SQLite's message, not an answer to the user's question.
+      const hasMeta = probe.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'").get();
+      const row = hasMeta
+        ? probe.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined
+        : undefined;
+      if (!row?.value) {
+        throw new Error("refusing to restore: no schema_meta version — this is not an Engram database");
+      }
+      schemaVersion = row.value;
+    } catch (e) {
+      throw new Error(`Backup file rejected: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      try { probe?.close(); } catch { /* best effort */ }
+    }
+  }
+
+  // ── 2. Safety backup — blocking, unlike the path this replaces ──────
+  let safetyBackup: string;
+  try {
+    safetyBackup = backupDatabase();
+  } catch (e) {
+    throw new Error(`Failed to create a safety backup before restore: ${e}. Aborting — nothing was changed.`);
+  }
+
+  // ── 3. Close ────────────────────────────────────────────────────────
+  if (_db) {
+    try { _services?.registry.shutdown(); } catch { /* best effort */ }
+    try { _db.close(); } catch { /* best effort */ }
+    _db = null;
+    _repos = null;
+    _services = null;
+  }
+
+  // ── 4. Delete main + journals together ──────────────────────────────
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { fs.rmSync(_dbPath + suffix, { force: true }); } catch { /* best effort */ }
+  }
+
+  // ── 5. Copy and reopen ──────────────────────────────────────────────
+  try {
+    fs.copyFileSync(resolved, _dbPath);
+  } catch (e) {
+    // The live database is gone at this point; say exactly where it went.
+    throw new Error(`Failed to restore: ${e}. Your previous database is at ${safetyBackup}.`);
+  }
+  initDatabase(_projectRoot, _ideKey);
+
+  return { restored_from: resolved, safety_backup: safetyBackup, schema_version: schemaVersion };
 }
 
 // ─── Gitignore ───────────────────────────────────────────────────────

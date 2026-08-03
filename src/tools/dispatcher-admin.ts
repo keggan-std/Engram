@@ -5,7 +5,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, getDbPath, now } from "../database.js";
+import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, now } from "../database.js";
 import { success, error } from "../response.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
@@ -138,12 +138,17 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         case "restore": {
           if (!params.input_path) return error("input_path required for restore.");
           if (params.confirm !== "yes-restore") return error("Set confirm: 'yes-restore' to execute restore.");
-          if (!fs.existsSync(params.input_path)) return error(`Backup file not found: ${params.input_path}`);
-          let safetyBackupPath: string | undefined;
-          try { safetyBackupPath = backupDatabase(); } catch { /* non-blocking */ }
-          const dbPath = getDbPath();
-          fs.copyFileSync(params.input_path, dbPath);
-          return success({ message: "Database restored. Please RESTART the MCP server to load the restored database.", restored_from: params.input_path, safety_backup: safetyBackupPath });
+          // FR-D1 T1. The restore mechanics live in database.ts:restoreDatabase —
+          // validate, safety-backup (blocking), close, delete main+wal+shm
+          // TOGETHER, copy, reopen. The previous inline version copied over a
+          // live database and left the hot WAL in place, so the restore was
+          // silently undone on the next close. See docs/foundations/01-durability.md P1.
+          try {
+            const r = restoreDatabase(params.input_path);
+            return success({ ...r, message: `Database restored from ${r.restored_from} (schema v${r.schema_version}) and reopened. Safety backup: ${r.safety_backup}` });
+          } catch (e) {
+            return error(e instanceof Error ? e.message : String(e));
+          }
         }
 
         // ─── LIST BACKUPS ────────────────────────────────────────────────
