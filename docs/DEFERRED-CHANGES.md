@@ -393,7 +393,14 @@ unpushed.** The residual risk is independent discovery on an unwatched repo.
 
 ### 🚨 Tripwire — overrides the hold
 
-**If any of these fire, cut a patch release that week, wherever the review has got to:**
+**The mechanics are verified and written down:**
+[`foundations/tripwire-patch-runbook.md`](foundations/tripwire-patch-runbook.md).
+All four commits cherry-pick onto `main` with zero code conflicts; the result
+builds and passes 603/603. **Use Recipe B** (N1 + N2 only) — `f234052` requires
+`agent_name` on session start, so the full set is a **minor, not a patch**, and
+"patch release" below is wrong for it.
+
+**If any of these fire, cut a release that week, wherever the review has got to:**
 
 - A GitHub issue or discussion matching an N1 / N2 / N3 signature
 - A sustained rise in npm downloads (baseline: ~193/month, ~26/week, 2026-08-02)

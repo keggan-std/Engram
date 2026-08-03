@@ -378,10 +378,17 @@ uniform, the dashboard breaks and nothing currently reports it. Close that gap
 
 Ten reviewable units instead of one twenty-commit blob.
 
-**Open gap, to close early:** the tripwire commits to *"a patch release that week."*
-Off `main`, that means cherry-picking four security commits out of twenty-plus,
-improvised, under time pressure, in the one scenario where mistakes are expensive.
-**Verify those four cherry-pick cleanly in isolation now**, while it is free.
+**Closed 2026-08-03** — [`tripwire-patch-runbook.md`](tripwire-patch-runbook.md).
+The tripwire commits to *"a patch release that week."* Off `main`, that means
+cherry-picking four security commits out of twenty-six, improvised, under time
+pressure, in the one scenario where mistakes are expensive. Verified in advance:
+all four apply with **zero code conflicts** — the only conflicts are two audit
+docs absent from `main` — and the result builds and passes 603/603.
+
+The check paid for itself. `f234052` requires `agent_name` on session start, so
+**Recipe A is not a patch release**, and the tripwire's own wording is wrong for
+it. Recipe B ships N1 + N2 alone, verified independently against bare `main`,
+with no required-parameter change.
 
 ### 11b.3 Back up before anything that can break data
 
