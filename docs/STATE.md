@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `8def08a`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `108c4ad`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `8def08a` — verify(FR-0f): the four security commits cherry-pick onto main |
+| **Working branch** | `fr/0g-state-register` @ `108c4ad` — feat(FR-0g): generated project-state register — docs/STATE.md |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `package.json`, `docs/STATE.md`, `scripts/generate-state.mjs` |
-| **Store** | schema V25 · 16 sessions · 19 decisions · 56 observations · 94 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V25 · 16 sessions · 19 decisions · 57 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
 
@@ -43,7 +43,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**17 open tasks.** The ones that gate everything else:
+**18 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
