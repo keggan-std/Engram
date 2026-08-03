@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # The review line and its per-domain branches are included deliberately.
+    # With `main` alone, every gate in this file — the capability surface and
+    # now the golden-fixture migration test — would sit idle for the entire
+    # Foundations Review and only fire at merge, which is the one moment a
+    # failure is most expensive and least expected.
+    branches: [main, develop, v2-foundations, "fr/**"]
   pull_request:
-    branches: [main]
+    branches: [main, develop, v2-foundations]
 
 jobs:
   test:

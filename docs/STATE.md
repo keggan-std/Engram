@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `e2ec2b0`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `015c453`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,10 +13,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `e2ec2b0` — fix(sessions): handoffs supersede — an overtaken baton is not live |
+| **Working branch** | `fr/0g-state-register` @ `015c453` — feat(FR-0g): PreToolUse hook — protected branches, push-as-disclosure |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | clean |
+| **Uncommitted** | **3 file(s)** — `.github/workflows/ci.yml`, `scripts/make-golden-fixture.mjs`, `tests/migrations/` |
 | **Store** | schema V25 · 16 sessions · 19 decisions · 57 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
