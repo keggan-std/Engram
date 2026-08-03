@@ -370,11 +370,47 @@ already contains all of v1.12.0's code. Only the label is stale.
    `package.json` to 1.11.0, revert the README and `llms.txt`, and **delete the
    v1.12.0 release notes.**
 
-**Deferred deliberately.** 2026-08-02, by the maintainer: the rebase and the
-release decision are explicitly *not* being done now, to keep the master-plan
-work unblocked. Recorded here so the deferral is a decision on the record rather
-than an omission. **The security-exposure half keeps running while it waits** —
-see the last paragraph.
+**Decided, not merely deferred.** 2026-08-03, Engram decision **#19**: *no release
+until the master plan is drafted and solidified.* This is a considered position,
+not drift — see the tripwire below, which is what separates the two.
+
+**Why holding is correct.** Phase 1 is likely to produce breaking changes in at
+least four domains — D7 may cut the action surface, D2 adds provenance columns to
+every memory table, D6 may make the response envelope uniform (breaking the
+dashboard and both thin clients), D3 may reshape storage. Releasing 2.0.0 now
+means 3.0.0 within weeks and the same users migrated twice, for no benefit.
+
+**Why the exposure is smaller than it first looked.** N1 requires cloning a
+*specifically crafted* hostile repo — a targeted attack on a package with 26
+downloads/week, 0 stars, 0 watchers. N2 requires an **already prompt-injected**
+agent, so it is escalation, not entry. N3 is a data-integrity bug, not
+exploitable. And decisively: **nothing is disclosed while the branch is
+unpushed.** The residual risk is independent discovery on an unwatched repo.
+
+> The earlier framing of this as urgent applied settled input 1 (*public product,
+> wide adoption*) as a **current** state. It is the **target** state. The threat
+> model has to be calibrated to actual exposure.
+
+### 🚨 Tripwire — overrides the hold
+
+**If any of these fire, cut a patch release that week, wherever the review has got to:**
+
+- A GitHub issue or discussion matching an N1 / N2 / N3 signature
+- A sustained rise in npm downloads (baseline: ~193/month, ~26/week, 2026-08-02)
+- Any third-party activity on the repo's Security tab, or a fork/star spike
+- Any decision to push the branch publicly — **pushing IS disclosure**, and it
+  inverts this entire calculus
+
+**Accepted consequence.** The branch accumulates breaking changes, so the eventual
+migration chain is longer and riskier than an incremental path. That makes the
+migration upgrade-path test (task #7, FR-D1's binding) **more** important, not
+less, and is why D1 stays first in risk order.
+
+**Guard against "solidified" becoming never.** Charter kill switch 2: if two
+consecutive domains produce no target that changes anything, stop the review and
+write the master plan from what exists. And the master plan must **explicitly own
+the release strategy** — version, migration path, advisory, first-release contents
+— or the release becomes a receding horizon.
 
 **Trigger.** Before opening a PR, merging, or publishing. Also the moment anyone
 asks "why does it say 1.11.0?"
