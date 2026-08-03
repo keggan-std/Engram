@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `5d473c1`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `e166a4e`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,10 +13,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d1-durability` @ `5d473c1` — merge(FR-0f/FR-0g): register, golden fixture, HTTP surface, branch guard |
+| **Working branch** | `fr/d1-durability` @ `e166a4e` — fix(gates): normalise line endings before comparing generated artifacts |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **2 file(s)** — `scripts/generate-http-surface.mjs`, `scripts/generate-state.mjs` |
+| **Uncommitted** | **2 file(s)** — `docs/STATE.md`, `scripts/generate-state.mjs` |
 | **Store** | schema V25 · 17 sessions · 19 decisions · 60 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
