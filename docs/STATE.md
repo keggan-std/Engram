@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `015c453`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `7a3fea2`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `015c453` — feat(FR-0g): PreToolUse hook — protected branches, push-as-disclosure |
+| **Working branch** | `fr/0g-state-register` @ `7a3fea2` — feat(FR-0f): golden fixture — migrations must carry REAL data forward |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `.github/workflows/ci.yml`, `scripts/make-golden-fixture.mjs`, `tests/migrations/` |
-| **Store** | schema V25 · 16 sessions · 19 decisions · 57 observations · 94 file notes |
+| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
+| **Store** | schema V25 · 16 sessions · 19 decisions · 59 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
 
@@ -29,7 +29,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **16** | `cherry-pick-verifier` | _(in progress)_ |
+| **16** | `cherry-pick-verifier` | Verified the tripwire's emergency path, then built the agent-orientation register the operator asked for and fixed the rot it exposed. |
 | **15** | `agent_name` ⚠️ | Completed Phase 0 of the Foundations Review and set the direction for everything after it. |
 | **14** | `opus5-pm-infra` | Reorganised docs/ to remove the "which docs do I read" ambiguity. |
 
@@ -56,8 +56,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #4** — from `agent_name`, 2026-08-03 (already acknowledged).
-Phase 0 of the Foundations Review is complete.
+**Read #5** — from `cherry-pick-verifier`, 2026-08-03 — **not yet acknowledged**.
+FR-0f and FR-0g setup work complete; IDE restarting to load the new PreToolUse hook.
 
 ⚠️ **2 older handoffs still show as pending and should be ignored:** #2 (`opus5-pm-infra`, 2026-08-01), #1 (`opus5-deep-audit`, 2026-08-01).
 
@@ -73,6 +73,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#59** | friction | FIVE OCCURRENCES OF THE SAME AGENT-SIDE TOOL-CALL SYNTAX ERROR IN ONE SESSION, and the fifth corrupted the session record itself. |
 | **#47** | idea | HEADLINE RECOMMENDATION - the generated capability surface. |
 | **#41** | concern | COUNTER-EVIDENCE 1: A stale/frozen register is argued to be actively worse than no register because it looks authoritative while misleading readers — "Your Risk Register Is Already Dead" (2… |
 | **#35** | idea | carto-src's mode-detection decision table (STEP 0: first-match-wins ordered conditions producing one of Map/Remap/Dry-run/Document-only/Skip) plus its explicit write-failure handling table… |
@@ -80,7 +81,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#29** | idea | ghostwriter's doc-scaffold.js SCAFFOLDS registry (per doc-type: ordered sections, required/optional flags, writeLast flags, dependency notes, fastMode drop list) is HIGH reusability for Eng… |
 | **#28** | concern | CONCERN / capability-surface overlap: the skill "tracer" (root-cause debugging playbook, no data structures) shares its core word "trace" with completely unrelated Engram-ecosystem MCP tool… |
 | **#26** | idea | carto-src's "Last Remap Diff" block (single mutable entry, replaced on every remap, prefix language + / ~ / - / ✓ for added/updated/removed/unchanged) is a MEDIUM-reusability pattern: Engra… |
-| **#24** | idea | carto-src's index.md project inventory (one row per mapped file: file, cat, zones-count, last-mapped date, hash, status ✅/⚠️stale/❌orphaned) is exactly the shape of a project-state ledger d… |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
