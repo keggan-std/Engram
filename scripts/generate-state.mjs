@@ -344,7 +344,9 @@ this is newest-first, not open-only (schema gap 2). Full text:
  */
 const normalise = (s) => s
   .replace(/\r\n/g, "\n")
-  .replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ")
+  // The whole header line, not just the date: it also carries branch and HEAD,
+  // which change on every commit — including the commit that stores this file.
+  .replace(/^\*\*Generated:\*\*.*$/m, "**Generated:** <volatile>")
   .replace(/^\| \*\*Working branch\*\* \|.*$/m, "| **Working branch** | <volatile> |")
   .replace(/^\| \*\*Published line\*\* \|.*$/m, "| **Published line** | <volatile> |")
   .replace(/^\| \*\*Uncommitted\*\* \|.*$/m, "| **Uncommitted** | <volatile> |")
