@@ -156,6 +156,19 @@ What goes wrong — **adversarial and accidental**. For each: trigger, blast rad
 whether it is silent, and whether the user can recover. Silence is scored explicitly:
 a loud failure is cheaper than a quiet one.
 
+**3b — Prior art: how this has gone wrong for other people.** Required, not optional.
+Search the **failure** literature for this domain — incidents, postmortems, CVEs,
+retracted designs — not the "how to do X" literature. Cite with URLs.
+
+> The failure mode here is not forgetting to research. It is **researching to confirm.**
+> A search that returns only support for what we already planned was the wrong search.
+> Every load-bearing finding in this project came from outside it — CVE-2026-21852,
+> the MAST taxonomy, Chroma's distractor result, MemDelta, the shadowing numbers — and
+> each one *changed* a decision rather than ratifying it.
+
+If a domain genuinely has no prior art, say so explicitly. That is itself a finding:
+it means we are the ones who will be cited, and the confidence should drop accordingly.
+
 ### 4 — Target and rejected alternatives
 What should be true, and **why this and not the alternatives.** At least one
 seriously-considered rejected option per target, with the reason it lost.
@@ -325,6 +338,69 @@ Written now, while it is still easy to be honest.
 4. **If this review is still running when a security fix needs shipping, the fix wins.**
    Published v1.12.0 currently carries all four P0 findings — see
    [D11](../DEFERRED-CHANGES.md).
+
+---
+
+## 11b. Working rules
+
+Four rules adopted 2026-08-03. Written here rather than agreed in conversation,
+because a rule that lives only in a chat log is one this project has already
+demonstrated it will lose.
+
+### 11b.1 The migration path is a gate, not an end-of-project task
+
+The risk under a no-release strategy ([D11](../DEFERRED-CHANGES.md), decision #19)
+is drifting far enough that the shipped version cannot reach the new one. Asking
+"can we still migrate?" at the end is how that becomes unrecoverable.
+
+**Mechanism:** a **golden fixture** — a real database, captured from live use and
+sanitised (`machine_id`, `http_token`, `instance_id` stripped) — committed to the
+repo. CI migrates it to head on every change. Real shapes, not synthetic rows.
+
+It fails the day migration breaks, rather than the day we go looking. Owned by
+**FR-D1**; it is that domain's §5 binding, and it supersedes task #7's one-off
+framing.
+
+**The second half — interface compatibility.** "Cannot connect to the rest" is not
+only the database. The dashboard, both thin clients and 14 IDE integrations are
+consumers. `docs/CAPABILITY-SURFACE.md` covers the MCP tool contract; **the HTTP
+API and `packages/*` have no equivalent.** If D6 makes the response envelope
+uniform, the dashboard breaks and nothing currently reports it. Close that gap
+**before** D6, not with it. Owned by **FR-D6**, flagged to **FR-D8**.
+
+### 11b.2 Branch per domain; `main` stays releasable
+
+| Branch | Role |
+|---|---|
+| `main` | The published line. **Always releasable.** Tripwire patch releases come off *here*, never off the review line |
+| `v2-foundations` | Integration branch for the whole review (currently named `review/engram-audit` — the name no longer describes the contents, which is the drift this project keeps finding) |
+| `fr/d1-durability`, `fr/d2-trust`, … | One per domain, merged back with a real diff |
+
+Ten reviewable units instead of one twenty-commit blob.
+
+**Open gap, to close early:** the tripwire commits to *"a patch release that week."*
+Off `main`, that means cherry-picking four security commits out of twenty-plus,
+improvised, under time pressure, in the one scenario where mistakes are expensive.
+**Verify those four cherry-pick cleanly in isolation now**, while it is free.
+
+### 11b.3 Back up before anything that can break data
+
+A **copy** protects the original. A **backup** protects against the copy being
+wrong. The measurement harnesses already copy `.engram/memory.db` to a temp root
+rather than touching the live one — keep that.
+
+**Rule:** no destructive or schema-touching operation against a real database
+without `engram_admin(action:"backup")` taken in the same session. That action has
+existed since v1 and has never once been used by this project — which is its own
+small finding about whether the tool's safety features are reachable in practice.
+
+### 11b.4 Research the failure literature before deciding
+
+Codified in the §7 template as **§3b**. Stated separately here because it applies
+to operational choices too, not only domain docs: before doing something with
+consequences we have not personally seen, check whether someone has already
+reported the outcome. See §3b for the caution that matters — researching to
+*confirm* is the failure mode, not forgetting to research.
 
 ---
 
