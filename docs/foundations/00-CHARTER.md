@@ -218,14 +218,95 @@ project has never had.
 **It only counts if we say in advance what would falsify it.** Deciding afterwards
 whether Engram "felt useful" is selection bias, which
 [`trellis-engram-integration-analysis.md`](../trellis-engram-integration-analysis.md) §3
-covers at length.
+covers at length. So the criteria below are fixed now, before the first domain doc.
 
-To be fixed in Phase 0, before the first domain doc:
+### 10.1 What is being tested
 
-- What is sampled, and how often
-- What a blind judge is asked
-- What result would mean **retire the feature**, stated numerically
-- Which Engram features are in the experiment and which are assumed
+**Not "is Engram good".** That is unfalsifiable. The claim under test is narrow:
+
+> **Recalled memory changes what the agent does, in a direction that helps.**
+
+Everything Engram does divides into *write* (storing) and *recall* (surfacing). Only
+recall is measured here — a write nobody ever reads has already failed, and will show up
+as recall that never happens.
+
+| In the experiment | Assumed, not measured |
+|---|---|
+| Session-start auto-loaded context: `previous_session`, decisions, conventions, tasks, `changes_since_last` | The storage layer itself |
+| `get_file_notes` | The task board (human-facing) |
+| On-demand `search` / `get_decisions` / `get_observations` | The capability surface (a build script) |
+| Handoffs between sessions | Telemetry (measures, isn't measured) |
+
+### 10.2 The unit is the recall event, not the session
+
+A **recall event** is one moment where Engram returned stored memory into an agent's
+context. A domain doc might involve twenty. Sessions are too coarse — a session where
+one recall was decisive and nineteen were noise is not "a success".
+
+**Sample:** every recall event feeding a domain doc, ten docs. Expected n ≈ 50–150.
+
+### 10.3 Instrument 1 — shadow judgment *(primary)*
+
+After each domain doc completes, a **fresh-context judge, blind to whether the recall was
+used**, sees the task, the outcome, and one recalled item, and answers one question:
+
+> *Could this outcome have been reached without this specific recall — from the code
+> itself, or from general knowledge?*
+
+| Verdict | Meaning |
+|---|---|
+| **REQUIRED** | The outcome depended on it. Unavailable elsewhere at reasonable cost |
+| **REPLACEABLE** | Genuinely helped, but reading the code would have got there |
+| **IRRELEVANT** | Consumed context, changed nothing |
+| **MISLEADING** | Was wrong, stale, or pointed the wrong way |
+
+**MISLEADING is the bucket that matters and the one nobody measures.** For a memory tool,
+a wrong recall is worse than no recall — it is the *confident wrong answer* this whole
+review is organised around, and Chroma's distractor finding says even one of them drops
+performance below baseline. A design that only counts hits cannot see its own harm.
+
+This project has already produced two MISLEADING events in a single session: the stale
+`.mcp.json` conclusion (report §5.1) and the `tool_call_log` claim in our own design doc.
+Both were believed and acted on. Neither would have registered as anything but a hit.
+
+### 10.4 Instrument 2 — true suppression *(calibration only)*
+
+A judge told *"here is memory that was used"* will over-attribute. So on a **small
+rotating sample — two of the ten domain docs** — Engram recall is genuinely withheld and
+the work is done without it. Compare outcome and effort against the judged prediction.
+
+This exists **only to calibrate instrument 1's bias.** It is not the primary measurement,
+because at n=2 it cannot be.
+
+**Pair within the unit, never between units.** Per Trellis §9.1: naturally-occurring
+no-recall runs are *not* a valid control, because tasks where nothing was recalled are
+systematically different from tasks where something was. A confounded baseline is worse
+than none.
+
+### 10.5 Retirement criteria — written before the data exists
+
+These are commitments, not guidelines. If one fires, the feature goes.
+
+| # | Condition | Consequence |
+|---|---|---|
+| **R1** | **MISLEADING ≥ 10%** of judged recalls | **Stop auto-loading memory at session start.** Recall becomes on-demand only. A tool that misleads one time in ten is worse than no tool, and auto-load is what makes it unavoidable |
+| **R2** | REQUIRED + REPLACEABLE **< 50%** over ≥ 30 events | The recall surface is mostly noise. Cut what is delivered by default to the categories that scored |
+| **R3** | Suppression shows **no detectable difference** in outcome or effort across both sampled docs | The counterfactual does not exist. Retire the auto-load path entirely — this is Trellis kill switch 1, the only one that can fire while everything feels fine |
+| **R4** | Any single memory *category* scores **0 REQUIRED** over the full sample | That category stops being auto-delivered. It has never been load-bearing |
+
+### 10.6 Honest limits
+
+Stated because a measurement oversold is worse than none:
+
+- **n is small and the operator is one person.** This produces a *local decision*, not a
+  publishable claim. It cannot distinguish "Engram helps" from "Engram helps *this
+  project, this agent, this codebase*."
+- **The judge is a model, judging a model's work.** Shared blind spots are likely.
+  Suppression partly checks this; two samples does not check it much.
+- **The reviewer is not blind to the hypothesis.** I built the thing being measured. R1–R4
+  are written now precisely because I will be motivated not to see them later.
+- **Effort is not instrumented.** Token cost per outcome would strengthen this
+  considerably and is not being captured. Recorded as a gap rather than pretended away.
 
 ---
 
@@ -253,9 +334,9 @@ Written now, while it is still easy to be honest.
 |---|---|---|
 | **0a** | This charter | ✓ |
 | **0b** | Task board — one Engram task per Phase 0 item and per domain | The tracker |
-| **0c** | **Gating measurements:** action distinctness (~40 phrases × 75 actions), never-called actions from `tool_call_log`, measured response size per verbosity tier, `knip` with a real config | `docs/foundations/measurements/` |
-| **0d** | Capability surface generator + CI diff gate | `docs/CAPABILITY-SURFACE.md` — and the binding most domains will reuse |
-| **0e** | Baseline experiment design (§10) | A section in this file |
+| **0c** | **Gating measurements:** action distinctness (~40 phrases × 83 actions), never-called actions from `tool_call_log`, measured response size per verbosity tier, `knip` with a real config | ✅ [`measurements/`](measurements/README.md) |
+| **0d** | Capability surface generator + CI diff gate | ✅ [`../CAPABILITY-SURFACE.md`](../CAPABILITY-SURFACE.md) — the binding most domains reuse |
+| **0e** | Baseline experiment design | ✅ §10 above |
 | **1** | Ten domain reviews, risk-ordered | `docs/foundations/01..10-*.md` |
 | **2** | Synthesis | `docs/ENGRAM-MASTER-PLAN.md` |
 | **3** | Skills and playbooks, **derived from Phase 1 findings** | `docs/skills/` or `.claude/skills/` |
