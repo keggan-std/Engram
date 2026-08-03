@@ -319,8 +319,17 @@ this is newest-first, not open-only (schema gap 2). Full text:
 
 // ─── write or check ─────────────────────────────────────────────────────────
 
-/** Strip the generated-on date so routine timestamp churn is not "drift". */
-const normalise = (s) => s.replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ");
+/**
+ * Strip the generated-on date so routine timestamp churn is not "drift", and
+ * normalise line endings. The generator writes LF; git's autocrlf rewrites the
+ * working copy to CRLF on checkout, so comparing raw bytes fails on every
+ * Windows machine while passing in Ubuntu CI — broken exactly where it is used
+ * most. generate-capability-surface.mjs already got this right.
+ */
+const normalise = (s) => s
+  .replace(/\r\n/g, "\n")
+  .replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ")
+  .trimEnd();
 
 if (CHECK) {
   if (!existsSync(OUT)) {

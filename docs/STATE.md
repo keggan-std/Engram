@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `c0bc0e8`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `5d473c1`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,15 +13,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `c0bc0e8` — chore(FR-0g): close out session 16 — handoff #5, final state |
+| **Working branch** | `fr/d1-durability` @ `5d473c1` — merge(FR-0f/FR-0g): register, golden fixture, HTTP surface, branch guard |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **4 file(s)** — `.github/workflows/ci.yml`, `package.json`, `docs/HTTP-SURFACE.md`, `scripts/generate-http-surface.mjs` |
+| **Uncommitted** | **2 file(s)** — `scripts/generate-http-surface.mjs`, `scripts/generate-state.mjs` |
 | **Store** | schema V25 · 17 sessions · 19 decisions · 60 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
 
-**In progress:** #26 FR-0f: Working-rules setup — golden fixture, branch split, cherry-pick check
+**Nothing is marked in progress.**
 
 ---
 
@@ -43,11 +43,10 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**19 open tasks.** The ones that gate everything else:
+**18 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
-| **26** | FR-0f: Working-rules setup — golden fixture, branch split, cherry-pick check | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **16** | FR-D1: Durability & Recovery review | critical · backlog |
 | **17** | FR-D2: Trust & Safety review | critical · backlog |
