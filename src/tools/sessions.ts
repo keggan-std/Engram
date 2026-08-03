@@ -388,17 +388,40 @@ Actions:
           // under the agent it was meant for. Surface all of them; prefer one
           // authored by somebody else, since that is what "handed off to you"
           // actually means.
+          // FR-0g: handoffs never superseded each other, so an unacknowledged one
+          // stayed "pending" forever and was eventually promoted as live. Handoffs
+          // #1 and #2 sat pending for two days; the moment #4 was acknowledged,
+          // this query would have handed the next agent #2 — a stale baton from a
+          // session closed days earlier — because acknowledgement was the only
+          // thing that could retire a handoff, and acknowledging the CURRENT one
+          // did nothing to the ones it had already overtaken.
+          //
+          // A handoff is a baton, and the pass is linear. Once any LATER handoff
+          // has been acknowledged, every EARLIER one has been overtaken by events
+          // and cannot still be live. So the newest acknowledgement is a cutoff.
+          // Superseded ones are still reported — losing them would repeat N3d —
+          // but they are marked stale and can never be promoted.
           let handoffPending: HandoffRow | null = null;
-          let otherHandoffs: Array<{ id: number; from_agent: string | null; reason: string }> = [];
+          let otherHandoffs: Array<{ id: number; from_agent: string | null; reason: string; stale?: true }> = [];
           try {
             const allPending = db.prepare(
               "SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 10"
             ).all() as HandoffRow[];
-            handoffPending = allPending.find(h => h.from_agent !== agent_name) ?? allPending[0] ?? null;
-            otherHandoffs = allPending
-              .filter(h => h.id !== handoffPending?.id)
-              .slice(0, 4)
-              .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100) }));
+            const cutoff = (db.prepare(
+              "SELECT MAX(acknowledged_at) AS t FROM handoffs WHERE acknowledged_at IS NOT NULL"
+            ).get() as { t: number | null } | undefined)?.t ?? 0;
+
+            const live = allPending.filter(h => h.created_at > cutoff);
+            const superseded = allPending.filter(h => h.created_at <= cutoff);
+
+            handoffPending = live.find(h => h.from_agent !== agent_name) ?? live[0] ?? null;
+            otherHandoffs = [
+              ...live
+                .filter(h => h.id !== handoffPending?.id)
+                .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100) })),
+              ...superseded
+                .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100), stale: true as const })),
+            ].slice(0, 4);
           } catch { /* best effort */ }
 
           let suggestedFocus: string | undefined;

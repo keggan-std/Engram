@@ -143,11 +143,16 @@ function workStatus(id: number): string {
     return (db.prepare("SELECT status FROM pending_work WHERE id = ?").get(id) as { status: string }).status;
 }
 
-function makeHandoff(fromSessionId: number, fromAgent: string, reason: string): number {
+function makeHandoff(fromSessionId: number, fromAgent: string, reason: string, createdAt = Date.now()): number {
     const r = db.prepare(
         "INSERT INTO handoffs (from_session_id, from_agent, created_at, reason) VALUES (?, ?, ?, ?)"
-    ).run(fromSessionId, fromAgent, Date.now(), reason);
+    ).run(fromSessionId, fromAgent, createdAt, reason);
     return r.lastInsertRowid as number;
+}
+
+/** Mark a handoff acknowledged at an explicit time, so supersession order is deterministic. */
+function ackHandoffAt(id: number, at: number, by = "someone"): void {
+    db.prepare("UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ?").run(at, by, id);
 }
 
 // ─── N3a — no agent may close another agent's session ─────────────────────────
@@ -431,6 +436,59 @@ describe("N3d — handoff surfacing and acknowledgement", () => {
 });
 
 // ─── The audit's own reproduction, end to end ─────────────────────────────────
+
+// ─── FR-0g — handoffs are a baton, and an overtaken one is not live ───────────
+
+describe("FR-0g — handoff supersession", () => {
+    const T = 1_700_000_000_000;
+
+    it("an unacknowledged handoff older than the newest acknowledgement is NOT promoted", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const stale = makeHandoff(a.session_id as number, "old-agent", "two days ago", T);
+        const current = makeHandoff(a.session_id as number, "recent-agent", "the live one", T + 2000);
+        ackHandoffAt(current, T + 3000);
+
+        const next = await callSession("start", { agent_name: "agent-next", verbosity: "summary" });
+        // Before the fix this promoted `stale`, because it was the newest thing
+        // still unacknowledged — acknowledging the CURRENT handoff retired only itself.
+        expect(next.handoff_pending).toBeUndefined();
+        const others = (next.other_handoffs_pending ?? []) as Array<{ id: number; stale?: boolean }>;
+        expect(others.find(h => h.id === stale)?.stale).toBe(true);
+    });
+
+    it("a superseded handoff is still reported, never silently dropped (N3d guard)", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        const one = makeHandoff(a.session_id as number, "agent-one", "first", T);
+        const two = makeHandoff(a.session_id as number, "agent-two", "second", T + 1000);
+        ackHandoffAt(two, T + 2000);
+
+        const next = await callSession("start", { agent_name: "agent-next", verbosity: "summary" });
+        const ids = ((next.other_handoffs_pending ?? []) as Array<{ id: number }>).map(h => h.id);
+        expect(ids).toContain(one);
+    });
+
+    it("with nothing acknowledged yet, every pending handoff is still live", async () => {
+        const a = await callSession("start", { agent_name: "agent-a", verbosity: "nano" });
+        makeHandoff(a.session_id as number, "agent-one", "first", T);
+        const two = makeHandoff(a.session_id as number, "agent-two", "second", T + 1000);
+
+        const next = await callSession("start", { agent_name: "agent-next", verbosity: "summary" });
+        expect((next.handoff_pending as { id: number }).id).toBe(two);
+    });
+
+    it("replays the real sequence: #1 and #2 abandoned, #4 acknowledged", async () => {
+        const a = await callSession("start", { agent_name: "opus5-deep-audit", verbosity: "nano" });
+        const h1 = makeHandoff(a.session_id as number, "opus5-deep-audit", "audit phase done", T);
+        const h2 = makeHandoff(a.session_id as number, "opus5-pm-infra", "research phase done", T + 1000);
+        const h4 = makeHandoff(a.session_id as number, "phase-0-agent", "Phase 0 complete", T + 5000);
+        ackHandoffAt(h4, T + 6000, "cherry-pick-verifier");
+
+        const next = await callSession("start", { agent_name: "fresh-agent", verbosity: "summary" });
+        expect(next.handoff_pending).toBeUndefined();
+        const others = (next.other_handoffs_pending ?? []) as Array<{ id: number; stale?: boolean }>;
+        expect(others.filter(h => h.stale).map(h => h.id).sort()).toEqual([h1, h2].sort());
+    });
+});
 
 describe("N3 — the PoC sequence from the audit, replayed", () => {
     it("orchestrator / sub / orchestrator / sub-end produces three correctly-owned rows", async () => {
