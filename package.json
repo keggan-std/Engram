@@ -34,7 +34,12 @@
     "dashboard": "npm run build && npm --prefix packages/engram-dashboard install --prefer-offline && concurrently -k --raw -n \"api,ui\" -c \"cyan,green\" \"node dist/index.js --mode=http --open-port=5173\" \"npm --prefix packages/engram-dashboard run dev\"",
     "surface": "node scripts/generate-capability-surface.mjs",
     "surface:check": "node scripts/generate-capability-surface.mjs --check",
-    "deadcode": "knip"
+    "state": "node scripts/generate-state.mjs",
+    "state:check": "node scripts/generate-state.mjs --check",
+    "deadcode": "knip",
+    "fixture": "node scripts/make-golden-fixture.mjs",
+    "http-surface": "node scripts/generate-http-surface.mjs",
+    "http-surface:check": "node scripts/generate-http-surface.mjs --check"
   },
   "keywords": [
     "mcp",

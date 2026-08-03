@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # The review line and its per-domain branches are included deliberately.
+    # With `main` alone, every gate in this file — the capability surface and
+    # now the golden-fixture migration test — would sit idle for the entire
+    # Foundations Review and only fire at merge, which is the one moment a
+    # failure is most expensive and least expected.
+    branches: [main, develop, v2-foundations, "fr/**"]
   pull_request:
-    branches: [main]
+    branches: [main, develop, v2-foundations]
 
 jobs:
   test:
@@ -59,6 +64,13 @@ jobs:
       # unnoticed — the failure mode that cost this project ten features.
       - name: Check capability surface is up to date
         run: node scripts/generate-capability-surface.mjs --check
+
+      # The other half of the contract. CAPABILITY-SURFACE.md gates the MCP tool
+      # surface; this gates the HTTP API the dashboard consumes. Without it, a
+      # response-envelope change in FR-D6 breaks packages/engram-dashboard and
+      # nothing reports it until someone opens the dashboard.
+      - name: Check HTTP surface is up to date
+        run: node scripts/generate-http-surface.mjs --check
 
       # Dead-code detection. knip.json is scoped to src/; packages/* are separate
       # build entry points and would drown the signal.

@@ -6,6 +6,13 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+
+# The golden fixture is a COMMITTED database on purpose — it is FR-D1's binding,
+# the only test that migrates real data rather than empty tables. Without this
+# exception `*.db` above silently excludes it, and the gate passes locally while
+# being absent from CI, which is the worst of both.
+# Rebuild deliberately: node scripts/make-golden-fixture.mjs
+!tests/fixtures/*.db
 .agents/
 .env
 .env.*
