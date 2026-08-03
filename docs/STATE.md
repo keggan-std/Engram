@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `dde0976`
+**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/0g-state-register` @ `e2ec2b0`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,10 +13,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/0g-state-register` @ `dde0976` — chore(FR-0g): split convention #1; correct a tool-blame attribution |
+| **Working branch** | `fr/0g-state-register` @ `e2ec2b0` — fix(sessions): handoffs supersede — an overtaken baton is not live |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `package-lock.json`, `src/tools/sessions.ts`, `tests/tools/session-identity.test.ts` |
+| **Uncommitted** | clean |
 | **Store** | schema V25 · 16 sessions · 19 decisions · 57 observations · 94 file notes |
 
 **Latest active decision — #19:** NO RELEASE until the master plan is drafted and solidified.
@@ -43,7 +43,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**18 open tasks.** The ones that gate everything else:
+**19 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
