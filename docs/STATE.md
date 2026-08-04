@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d4-concurrency` @ `b4d1970`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `4b8f883`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,15 +13,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d4-concurrency` @ `b4d1970` — chore(FR-D4): reconcile the board, and the register that orients agents is unbound |
+| **Working branch** | `v2-foundations` @ `4b8f883` — merge(FR-D4): concurrency & multi-agent — 5 of 10 domains complete |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `docs/README.md`, `docs/foundations/04-concurrency.md`, `tests/e2e/multi-agent-wire.test.ts` |
+| **Uncommitted** | **1 file(s)** — `docs/DEFERRED-CHANGES.md` |
 | **Store** | schema V25 · 31 sessions · 23 decisions · 80 observations · 96 file notes |
 
 **Latest active decision — #23:** FR-D4 ADOPTED — Engram has exactly one correct coordination primitive, and it is the only one the product does not depend on.
 
-**In progress:** #20 FR-D4: Concurrency & Multi-Agent review
+**Nothing is marked in progress.**
 
 ---
 
@@ -40,11 +40,10 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**45 open tasks.** The ones that gate everything else:
+**44 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
-| **20** | FR-D4: Concurrency & Multi-Agent review | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |

@@ -189,7 +189,31 @@ notice is reported.
 
 ## D5 — Session record attribution is narrowed, not closed *(Engram task #12)*
 
-**Status:** ACTIVE · **Raised:** 2026-08-02 · **Commit:** `f234052`
+**Status:** ACTIVE — **now PROVEN, reclassified CRITICAL** · **Raised:** 2026-08-02 · **Commit:** `f234052`
+
+> **FR-D4 update, 2026-08-04.** Three things changed, and the wording above is
+> now too soft.
+>
+> 1. **It is not a race — it is deterministic.** A parent session is always
+>    created *before* the sub-agents it spawns, so its id is always lower.
+>    Under `ORDER BY id DESC` on open sessions, **an orchestrator can never win
+>    attribution against its own live child.** It loses 100% of the time.
+> 2. **Measured, not theorised.** Session #24 (`fr-lead`) produced the whole of
+>    [`foundations/06-observability.md`](foundations/06-observability.md) and
+>    owns **zero rows** across decisions, observations, tasks, changes,
+>    conventions and milestones. Decision #21 is stamped to #27, a sub-agent.
+>    Reproduced from a clean store in
+>    [`tests/e2e/multi-agent-wire.test.ts`](../tests/e2e/multi-agent-wire.test.ts)
+>    test 4. The real count is **16** unscoped call sites, not ~40.
+> 3. **The severity was wrong because the literature was not consulted.** MAST
+>    ([arXiv:2503.13657](https://arxiv.org/abs/2503.13657)) puts inter-agent
+>    misalignment — agents acting on inconsistent views of shared state — at
+>    **36.9% of all multi-agent failures**, the largest structural class. This
+>    is not bookkeeping.
+>
+> Tracked as Engram task **#58**, superseding task #12's framing. The shape is
+> now pinned by a test whose assertion names the *wrong* agent deliberately, so
+> the fix must edit it in the same commit.
 
 **What.** ~40 call sites in `dispatcher-memory.ts` still call the **unscoped**
 `getCurrentSessionId()` to stamp `session_id` on records
