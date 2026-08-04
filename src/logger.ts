@@ -18,7 +18,29 @@ const LEVEL_LABELS: Record<LogLevel, string> = {
     error: "ERROR",
 };
 
-let currentLevel: LogLevel = (process.env.ENGRAM_LOG_LEVEL as LogLevel) || "info";
+/**
+ * FR-D6: ENGRAM_LOG_LEVEL is validated.
+ *
+ * It used to be a bare `as LogLevel` cast. A typo — ENGRAM_LOG_LEVEL=verbose,
+ * =trace, =INFO — put an unknown key in `currentLevel`, so `LEVEL_ORDER[currentLevel]`
+ * was `undefined`, every `>=` comparison against it was false, and ALL LOGGING
+ * SILENTLY DISAPPEARED. The one knob the product has for turning observability
+ * up was also the one way to turn it off by accident, with no message saying so.
+ *
+ * An unknown value now falls back to "info" and says why — on stderr, which is
+ * the only channel a stdio MCP server may use.
+ */
+function resolveInitialLevel(): LogLevel {
+    const raw = process.env.ENGRAM_LOG_LEVEL;
+    if (!raw) return "info";
+    if (raw in LEVEL_ORDER) return raw as LogLevel;
+    console.error(
+        `[Engram] [WARN] Ignoring ENGRAM_LOG_LEVEL="${raw}" — expected one of ${Object.keys(LEVEL_ORDER).join(", ")}. Falling back to "info".`,
+    );
+    return "info";
+}
+
+let currentLevel: LogLevel = resolveInitialLevel();
 
 function shouldLog(level: LogLevel): boolean {
     return LEVEL_ORDER[level] >= LEVEL_ORDER[currentLevel];

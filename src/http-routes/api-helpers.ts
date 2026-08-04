@@ -43,3 +43,17 @@ export function serverError(res: Response, err: unknown) {
 export function noContent(res: Response) {
   return res.status(204).end();
 }
+
+/**
+ * FR-D6: for a route that is mounted and routable but does no work.
+ *
+ * The alternative this replaces is the one that shipped: returning `ok:true`
+ * with a state noun ("staged") for a payload that was parsed and discarded.
+ * Every consumer of this API branches on `ok` — packages/engram-dashboard does
+ * it at client.ts:59 — so a truthful `ok:false` is the only value that reaches
+ * a user as the truth. 501 rather than 500 because nothing went wrong: the
+ * feature is absent, which is a fact about the server, not an incident.
+ */
+export function notImplemented(res: Response, message: string) {
+  return res.status(501).json({ ok: false, error: "NOT_IMPLEMENTED", message } satisfies ApiError);
+}

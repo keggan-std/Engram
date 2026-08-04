@@ -202,16 +202,36 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── COMPACT ────────────────────────────────────────────────────
         case "compact": {
+          // FR-D6 T1. This case previously told three separate lies:
+          //
+          //  1. It called manualCompact(keepSessions, maxAgeDays) with TWO
+          //     arguments. The signature is (keepSessions, maxAgeDays?, dryRun
+          //     = true), so dry_run:false took the dry-run early return, then
+          //     `success(result)` reported non-zero sessionsCompacted /
+          //     changesSummarized in the past tense for work that never ran.
+          //     Proven end-to-end over MCP stdio: 12 sessions in, "compacted 9",
+          //     12 sessions out, zero backups on disk.
+          //  2. The preview counted a DIFFERENT number from the execution —
+          //     raw SQL `total_sessions - keep_sessions` here versus
+          //     countCompactableSessions() (ended sessions only, age-filtered)
+          //     in the service. Two answers to one question.
+          //  3. Both said sessions "would be removed". Compaction never removes
+          //     a session. compactBeforeCutoff() collapses each ended session's
+          //     change rows into one summary row and deletes the originals.
+          //
+          // Preview and execution now run the SAME call with dryRun as data, so
+          // a future divergence is impossible rather than merely unlikely.
           const dryRun = params.dry_run ?? true;
           const keepSessions = params.keep_sessions ?? 50;
           const maxAgeDays = params.max_age_days;
-          if (dryRun) {
-            const totalSessions = (db.prepare("SELECT COUNT(*) as c FROM sessions").get() as { c: number }).c;
-            const wouldRemove = Math.max(0, totalSessions - keepSessions);
-            return success({ dry_run: true, total_sessions: totalSessions, would_remove: wouldRemove, message: `Dry run. ${wouldRemove} session(s) would be removed. Set dry_run: false to execute.` });
-          }
-          const result = await services.compaction.manualCompact(keepSessions, maxAgeDays);
-          return success(result as Record<string, unknown>);
+          const result = services.compaction.manualCompact(keepSessions, maxAgeDays, dryRun);
+          return success({
+            dry_run: dryRun,
+            ...result,
+            message: dryRun
+              ? `Dry run — nothing was changed. ${result.changesSummarized} change record(s) across ${result.sessionsCompacted} session(s) would be summarised. Sessions are never deleted. Set dry_run: false to execute.`
+              : `Summarised ${result.changesSummarized} change record(s) across ${result.sessionsCompacted} session(s). Sessions were not deleted. Safety backup: ${result.backupPath}`,
+          });
         }
 
         // ─── CLEAR ──────────────────────────────────────────────────────
@@ -273,14 +293,36 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           try { const result = db.prepare("PRAGMA integrity_check").get() as { integrity_check: string }; checks.integrity = result.integrity_check === "ok" ? "ok" : `FAILED: ${result.integrity_check}`; } catch (e) { checks.integrity = `ERROR: ${e}`; }
           // WAL mode check
           try { const result = db.prepare("PRAGMA journal_mode").get() as { journal_mode: string }; checks.journal_mode = result.journal_mode; } catch { checks.journal_mode = "unknown"; }
-          // FTS check
-          try { db.prepare("SELECT * FROM decisions LIMIT 1").all(); checks.fts = "available"; } catch { checks.fts = "unavailable"; }
+          // FTS check.
+          // FR-D6: this ran `SELECT * FROM decisions LIMIT 1` — the BASE table —
+          // and reported fts:"available" on success. It never touched an FTS
+          // index, so it answered "available" whenever decisions was readable,
+          // which is always. FR-D1 established why the query below is the only
+          // one that works: fts_* are EXTERNAL-CONTENT tables, so COUNT(*) and
+          // SELECT * delegate to the content table and succeed over a destroyed
+          // index. Only MATCH touches the index itself.
+          try { db.prepare("SELECT rowid FROM fts_decisions WHERE fts_decisions MATCH ? LIMIT 1").all("engram_health_probe"); checks.fts = "available"; } catch (e) { checks.fts = `unavailable: ${e instanceof Error ? e.message : String(e)}`; }
           // Schema version
           try { const vRow = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined; checks.schema_version = vRow ? parseInt(vRow.value, 10) : 0; } catch { checks.schema_version = 0; }
           // DB size
           checks.database_size_kb = getDbSizeKb();
-          const healthy = checks.integrity === "ok";
-          return success({ healthy, checks, message: healthy ? "Database is healthy." : "Issues detected — see checks." });
+          // FR-D6: `healthy` was `checks.integrity === "ok"` alone, so four of the
+          // five checks were computed, displayed, and then ignored — "Database is
+          // healthy." could be returned with the FTS index destroyed and the
+          // schema version reading 0. A check that cannot affect the verdict is
+          // decoration. Migrations run on every open, so by the time this
+          // executes fts_decisions exists on any database Engram will serve.
+          const failures = [
+            checks.integrity === "ok" ? null : `integrity: ${checks.integrity}`,
+            checks.fts === "available" ? null : `fts: ${checks.fts}`,
+            (checks.schema_version as number) > 0 ? null : "schema_version: unreadable",
+          ].filter(Boolean) as string[];
+          const healthy = failures.length === 0;
+          return success({
+            healthy,
+            checks,
+            message: healthy ? "Database is healthy." : `Issues detected — ${failures.join("; ")}`,
+          });
         }
 
         // ─── CONFIG ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d5-distribution` @ `0b83d34`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d6-observability` @ `d420c10`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,15 +13,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d5-distribution` @ `0b83d34` — merge(FR-D2): trust & safety domain — 19 of 32 security claims wrong, provenance actively wrong |
+| **Working branch** | `fr/d6-observability` @ `d420c10` — merge(main): bring v1.12.0 into the review line — task #49 |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `src/installer/config-writer.ts`, `docs/foundations/05-distribution.md`, `tests/installer/config-write-safety.test.ts` |
-| **Store** | schema V25 · 23 sessions · 20 decisions · 75 observations · 96 file notes |
+| **Uncommitted** | **13 file(s)** — `.claude/settings.json`, `docs/HTTP-SURFACE.md`, `docs/README.md`, `docs/STATE.md` … |
+| **Store** | schema V25 · 29 sessions · 21 decisions · 78 observations · 96 file notes |
 
-**Latest active decision — #20:** FR-D1 T1 ADOPTED AND SHIPPED: restore validates, closes, deletes main+wal+shm together, copies, reopens.
+**Latest active decision — #21:** FR-D6 ADOPTED AND SHIPPED: the wire is tested, and every diagnostic must be able to fail.
 
-**Nothing is marked in progress.**
+**In progress:** #19 FR-D6: Failure & Observability review
 
 ---
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **23** | `d5-priorart-agent` | FR-D5 external prior-art research (no repo reading). |
-| **22** | `d5-publish-agent` | FR-D5 publish-surface map complete. Full findings in observation #73 (finding). Tarball verified via npm pack --dry-run --ignore-scripts: 367 files / 1.60 MB unpacked, files:["dist/"] whitelist is cl… |
-| **21** | `d5-install-agent` | FR-D5 task #45: mapped the install surface across all 14 IDEs. |
+| **29** | `d6-priorart-agent` | FR-D6 external prior-art research (charter §3b). |
+| **28** | `d6-consumer-agent` | Measured packages/* coupling to the Engram response envelope for the pre-D6 gate. |
+| **27** | `d6-logging-agent` | _(in progress)_ |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,10 +40,11 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**39 open tasks.** The ones that gate everything else:
+**45 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
+| **19** | FR-D6: Failure & Observability review | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **16** | FR-D1: Durability & Recovery review | critical · backlog |
 | **17** | FR-D2: Trust & Safety review | critical · backlog |

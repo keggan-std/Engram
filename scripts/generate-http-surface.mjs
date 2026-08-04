@@ -177,6 +177,57 @@ function scanConsumers() {
 
 const consumers = scanConsumers();
 
+// ─── Response envelope, parsed from source ───────────────────────────────────
+// FR-D6. The envelope was previously a hardcoded template literal in this file,
+// so the "gate" on it was a sentence a human had to remember to update. It is
+// now derived: change a helper's status code, its `ok` flag or its error code,
+// and HTTP-SURFACE.md changes with it and `--check` fails.
+function scanEnvelope() {
+  const src = readFileSync(path.join(root, "src", "http-routes", "api-helpers.ts"), "utf-8");
+  const rows = [];
+  const parsed = new Map();
+  // Split on export boundaries so each helper's body is scanned in isolation;
+  // a single regex over the whole file would attribute codes to the wrong helper.
+  const parts = src.split(/export function /).slice(1);
+  for (const part of parts) {
+    const name = part.match(/^(\w+)/)?.[1];
+    if (!name) continue;
+    const body = part.slice(0, part.indexOf("\n}") + 1);
+
+    const statuses = [...body.matchAll(/\.status\((\d+)\)/g)].map((m) => m[1]);
+    const defaulted = body.match(/status\s*=\s*(\d+)/)?.[1];
+    const delegated = body.match(/return (\w+)\(res[^)]*?,\s*(\d+)\)/);
+    if (delegated) statuses.push(delegated[2]);
+    if (defaulted) statuses.push(defaulted);
+
+    // A helper that delegates (created -> ok) inherits the target's envelope.
+    // Reporting "—" there would understate the contract, which is the failure
+    // this whole table replaced.
+    const inherited = delegated ? parsed.get(delegated[1]) : undefined;
+    const okFlag = /ok:\s*true/.test(body) ? "true"
+      : /ok:\s*false/.test(body) ? "false"
+        : inherited?.okFlag ?? "—";
+    const code = body.match(/error:\s*"([A-Z_]+)"/)?.[1] ?? inherited?.code ?? "—";
+    const bodyShape = /\.end\(\)/.test(body)
+      ? "(empty)"
+      : okFlag === "true"
+        ? "`{ ok, data, meta? }`"
+        : okFlag === "false"
+          ? "`{ ok, error, message }`"
+          : "—";
+
+    parsed.set(name, { okFlag, code });
+    const via = inherited ? ` (via \`${delegated[1]}()\`)` : "";
+    rows.push(`| \`${name}()\`${via} | ${[...new Set(statuses)].join(", ") || "—"} | \`${okFlag}\` | \`${code}\` | ${bodyShape} |`);
+  }
+  return [
+    "| helper | HTTP status | `ok` | error code | body |",
+    "|---|---|---|---|---|",
+    ...rows,
+  ].join("\n");
+}
+const envelopeTable = scanEnvelope();
+
 // ─── Render ──────────────────────────────────────────────────────────────────
 
 const stamp = new Date().toISOString().slice(0, 10);
@@ -220,17 +271,18 @@ contract is captured here *before* D6 rather than with it.
 
 ## Response envelope — the contract D6 must not break silently
 
-Every route returns one of these two shapes, via \`src/http-routes/api-helpers.ts\`:
+**Derived from \`src/http-routes/api-helpers.ts\`, not asserted.** Every route
+returns through one of these helpers.
 
-\`\`\`jsonc
-// success — ok / created
-{ "ok": true, "data": <payload>, "meta": { /* pagination, optional */ } }
+${envelopeTable}
 
-// failure — notFound / badRequest / serverError
-{ "ok": false, "error": "<code>", "message": "<human text>" }
-\`\`\`
-
-\`noContent\` returns HTTP 204 with no body.
+> This block used to be a hand-written \`jsonc\` literal in the generator. It was
+> prose pretending to be a gate: FR-D6 changed \`POST /api/v1/import\` from
+> \`ok:true\` to a 501 and added a \`notImplemented\` helper, and
+> \`http-surface:check\` passed unchanged, because the generator read the endpoint
+> list from \`dist/\` and the envelope from itself. The table above is now parsed
+> out of the helper source, so an envelope change fails the gate the way an
+> endpoint change already did.
 
 > **This is already uniform, and the MCP side is not.** The MCP dispatchers return
 > \`isError: true\` with **plain text** for errors while success returns JSON — the

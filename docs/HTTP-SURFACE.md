@@ -1,6 +1,6 @@
 # HTTP Surface — the dashboard API contract
 
-**Generated:** 2026-08-03 · **Source:** `dist/http-server.js` via [`scripts/generate-http-surface.mjs`](../scripts/generate-http-surface.mjs)
+**Generated:** 2026-08-04 · **Source:** `dist/http-server.js` via [`scripts/generate-http-surface.mjs`](../scripts/generate-http-surface.mjs)
 
 > **Generated artifact — never hand-edit.** Regenerate with `npm run http-surface`;
 > `npm run http-surface:check` fails on drift and runs in CI.
@@ -31,17 +31,26 @@ contract is captured here *before* D6 rather than with it.
 
 ## Response envelope — the contract D6 must not break silently
 
-Every route returns one of these two shapes, via `src/http-routes/api-helpers.ts`:
+**Derived from `src/http-routes/api-helpers.ts`, not asserted.** Every route
+returns through one of these helpers.
 
-```jsonc
-// success — ok / created
-{ "ok": true, "data": <payload>, "meta": { /* pagination, optional */ } }
+| helper | HTTP status | `ok` | error code | body |
+|---|---|---|---|---|
+| `ok()` | 200 | `true` | `—` | `{ ok, data, meta? }` |
+| `created()` (via `ok()`) | 201 | `true` | `—` | `{ ok, data, meta? }` |
+| `notFound()` | 404 | `false` | `NOT_FOUND` | `{ ok, error, message }` |
+| `badRequest()` | 400 | `false` | `BAD_REQUEST` | `{ ok, error, message }` |
+| `serverError()` | 500 | `false` | `SERVER_ERROR` | `{ ok, error, message }` |
+| `noContent()` | 204 | `—` | `—` | (empty) |
+| `notImplemented()` | 501 | `false` | `NOT_IMPLEMENTED` | `{ ok, error, message }` |
 
-// failure — notFound / badRequest / serverError
-{ "ok": false, "error": "<code>", "message": "<human text>" }
-```
-
-`noContent` returns HTTP 204 with no body.
+> This block used to be a hand-written `jsonc` literal in the generator. It was
+> prose pretending to be a gate: FR-D6 changed `POST /api/v1/import` from
+> `ok:true` to a 501 and added a `notImplemented` helper, and
+> `http-surface:check` passed unchanged, because the generator read the endpoint
+> list from `dist/` and the envelope from itself. The table above is now parsed
+> out of the helper source, so an envelope change fails the gate the way an
+> endpoint change already did.
 
 > **This is already uniform, and the MCP side is not.** The MCP dispatchers return
 > `isError: true` with **plain text** for errors while success returns JSON — the
