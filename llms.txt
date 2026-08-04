@@ -22,7 +22,7 @@ npx -y engram-mcp-server --install
 
 ## Compatible With
 Claude Code, Claude Desktop, Cursor, Windsurf, GitHub Copilot (VS Code),
-Visual Studio, Trae IDE, JetBrains, Cline, Antigravity IDE — any MCP client.
+Visual Studio, Trae IDE, JetBrains, Cline, Antigravity IDE, Android Studio — any MCP client.
 
 ## Source
 https://github.com/keggan-std/Engram

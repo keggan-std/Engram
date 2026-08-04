@@ -45,7 +45,7 @@
 
 **Engram** is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI coding agents persistent memory across sessions. Instead of re-reading files, re-discovering architecture, and re-learning conventions every time a session starts, the agent calls `engram_session(action:"start")` and instantly receives everything it needs.
 
-It operates seamlessly as a background brain for popular AI tools like **Claude Code**, **Claude Desktop**, **Cursor**, **Windsurf**, **Cline**, **Trae IDE**, **Antigravity IDE**, and **GitHub Copilot** (VS Code & Visual Studio).
+It operates seamlessly as a background brain for popular AI tools like **Claude Code**, **Claude Desktop**, **Cursor**, **Windsurf**, **Cline**, **Trae IDE**, **Antigravity IDE**, **Android Studio**, and **GitHub Copilot** (VS Code & Visual Studio).
 
 ---
 
@@ -194,7 +194,7 @@ npm install -g engram-mcp-server
 engram install --ide <your-ide>
 ```
 
-Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`
+Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`, `androidstudio`
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
@@ -291,7 +291,7 @@ Engram maintains a **SQLite database** — one per project — that stores all a
 
 If you prefer to configure manually, find your IDE below. Each entry shows the correct config file path and JSON format.
 
-> **Config key note:** VS Code, Visual Studio, and JetBrains use `"servers"` as the top-level key. All other IDEs use `"mcpServers"`.
+> **Config key note:** VS Code, Visual Studio, and JetBrains use `"servers"` as the top-level key. All other IDEs (including Android Studio) use `"mcpServers"`.
 
 <details>
 <summary><strong>VS Code (GitHub Copilot)</strong></summary>
@@ -659,6 +659,29 @@ Open the Cline extension settings → MCP Servers, or edit the settings file dir
 ```
 
 > Note: JetBrains uses `"servers"` (not `"mcpServers"`) as the config key — same as VS Code. The file-based path above is best-effort; use the Settings UI for a guaranteed configuration.
+
+</details>
+
+<details>
+<summary><strong>Android Studio</strong></summary>
+
+**Global** — `%APPDATA%\Google\AndroidStudio<version>\mcp.json` (Windows) or `~/Library/Application Support/Google/AndroidStudio<version>/mcp.json` (Mac):
+
+The installer automatically discovers all installed Android Studio versions and writes to each one.
+
+```json
+{
+    "mcpServers": {
+        "engram": {
+            "command": "npx",
+            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"],
+            "enabled": true
+        }
+    }
+}
+```
+
+> Android Studio requires `"enabled": true` in each MCP server entry. The config path is version-specific (e.g., `AndroidStudio2024.3`, `AndroidStudio2025.1`). The installer's `--check` flag shows the status of all discovered versions.
 
 </details>
 
