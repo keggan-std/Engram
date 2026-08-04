@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d6-observability` @ `d420c10`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `d542697`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,15 +13,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d6-observability` @ `d420c10` — merge(main): bring v1.12.0 into the review line — task #49 |
+| **Working branch** | `v2-foundations` @ `d542697` — merge(FR-D6): failure & observability — 4 of 10 domains complete |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **13 file(s)** — `.claude/settings.json`, `docs/HTTP-SURFACE.md`, `docs/README.md`, `docs/STATE.md` … |
-| **Store** | schema V25 · 29 sessions · 21 decisions · 78 observations · 96 file notes |
+| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
+| **Store** | schema V25 · 31 sessions · 21 decisions · 79 observations · 96 file notes |
 
 **Latest active decision — #21:** FR-D6 ADOPTED AND SHIPPED: the wire is tested, and every diagnostic must be able to fail.
 
-**In progress:** #19 FR-D6: Failure & Observability review
+**Nothing is marked in progress.**
 
 ---
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **31** | `claude-opus-5-orchestrator` | _(in progress)_ |
+| **30** | `claude-opus-5-orchestrator` | (auto-closed: new session started) |
 | **29** | `d6-priorart-agent` | FR-D6 external prior-art research (charter §3b). |
-| **28** | `d6-consumer-agent` | Measured packages/* coupling to the Engram response envelope for the pre-D6 gate. |
-| **27** | `d6-logging-agent` | _(in progress)_ |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,21 +40,20 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**45 open tasks.** The ones that gate everything else:
+**40 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
-| **19** | FR-D6: Failure & Observability review | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
-| **16** | FR-D1: Durability & Recovery review | critical · backlog |
-| **17** | FR-D2: Trust & Safety review | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
+| **35** | FR-D3 — fts_file_notes has no triggers: 94 file notes are unsearchable and nothing reports it | critical · backlog |
+| **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 
 ### Handoff
 
-**Read #5** — from `cherry-pick-verifier`, 2026-08-03 (already acknowledged).
-FR-0f and FR-0g setup work complete; IDE restarting to load the new PreToolUse hook.
+**Read #6** — from `fr-lead`, 2026-08-04 — **not yet acknowledged**.
+FR-D6 complete and merged. Next session starts FR-D4 Concurrency & Multi-Agent.
 
 ⚠️ **2 older handoffs still show as pending and should be ignored:** #2 (`opus5-pm-infra`, 2026-08-01), #1 (`opus5-deep-audit`, 2026-08-01).
 
