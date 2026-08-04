@@ -13,6 +13,8 @@ import { fileURLToPath } from "url";
 import type { WebSocketServer } from "ws";
 import { bearerAuth } from "./http-auth.js";
 import { broadcaster } from "./ws-broadcaster.js";
+import { getDb } from "./database.js";
+import { SERVER_VERSION } from "./constants.js";
 
 // ─── Route imports ────────────────────────────────────────────────────────────
 import { sessionsRouter } from "./http-routes/sessions.routes.js";
@@ -72,7 +74,24 @@ export function createHttpServer(options: HttpServerOptions) {
 
   // ─── Health (no auth) ─────────────────────────────────────────────
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, version: "1.9.0", database: "connected" });
+    // FR-D6: this returned `{ok:true, version:"1.9.0", database:"connected"}` —
+    // three literals and zero checks. It reported "connected" with the database
+    // closed, and stamped 1.9.0 on a 1.12.0 server for three minor versions.
+    // A health endpoint that cannot fail proves only that Express is listening,
+    // which is the one thing anyone calling it already knows.
+    try {
+      const db = getDb();
+      db.prepare("SELECT 1").get();
+      res.json({ ok: true, version: SERVER_VERSION, database: "connected" });
+    } catch (e) {
+      res.status(503).json({
+        ok: false,
+        version: SERVER_VERSION,
+        database: "unavailable",
+        error: "DATABASE_UNAVAILABLE",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
   });
 
   // ─── Auth guard on all /api routes ────────────────────────────────

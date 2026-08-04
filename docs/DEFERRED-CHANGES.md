@@ -222,7 +222,30 @@ attribution until someone queries it.
 
 ## D6 — The MCP-stdio verification harness lives in a scratchpad and will be lost
 
-**Status:** ACTIVE · **Raised:** 2026-08-02
+**Status:** ✅ **CLOSED 2026-08-04 by FR-D6** · **Raised:** 2026-08-02
+
+> **Resolved.** The wire path now has a permanent home:
+> [`tests/e2e/mcp-wire.test.ts`](../tests/e2e/mcp-wire.test.ts) — 9 tests that
+> spawn `node dist/index.js` and speak real JSON-RPC. It covers what the
+> scratchpad harness covered and more: stdout purity, the envelope shape, the
+> flat error taxonomy, `compact` checked against row counts, and a health check
+> proven to fail under an injected fault. CI runs it (`npm ci` → `npm run build`
+> → `npm test`), so it cannot rot unnoticed. See
+> [`foundations/06-observability.md`](foundations/06-observability.md) §5.
+>
+> **Two claims below were wrong and are corrected here rather than edited out,
+> because the record is the point.**
+> 1. *"All 603 tests call dispatcher handlers directly with a mocked database"* —
+>    overstated. Only **8** of 34 test files mock `src/database`; the rest use
+>    real temporary databases. The accurate claim is narrower and was still
+>    damning: no test crossed the **transport**.
+> 2. *"[the audit's two PoCs] were never committed and no longer exist"* — they
+>    still exist, in session scratchpads (`poc-cache-poison.mjs`,
+>    `poc-session-clobber.mjs`), as does `live-n3-check.mjs`. They are
+>    uncommitted and ephemeral, which was the real point, but "no longer exist"
+>    was not checked before it was written.
+
+**Original entry, preserved unedited:**
 
 **What.** `live-n3-check.mjs` — spawns `node dist/index.js` as a real MCP stdio
 process, replays the audit's N3 sequence over JSON-RPC, and asserts 8 properties
@@ -256,7 +279,24 @@ audit's two PoCs did.
 
 ## D7 — Response envelope is inconsistent: `error()` returns plain text, not JSON
 
-**Status:** ACTIVE — **behaviour unchanged, decision deferred** · **Raised:** 2026-08-02
+**Status:** ACTIVE — **behaviour unchanged, decision deferred, now EVIDENCED** · **Raised:** 2026-08-02
+
+> **FR-D6 update, 2026-08-04.** Still deferred, deliberately — it changes the
+> dashboard and both thin clients. Three things changed about the *decision*:
+> 1. **A second half of the asymmetry was found.** Success does not set
+>    `isError: false` — it omits the field entirely, so a consumer branching on
+>    `isError === false` gets `undefined` and takes the error path.
+> 2. **The obvious fix is disqualified.** `outputSchema` + `structuredContent` is
+>    the spec-sanctioned route and
+>    [claude-code#80094](https://github.com/anthropics/claude-code/issues/80094)
+>    shows Claude Desktop refuses to dispatch such tools at all. The envelope must
+>    stay inside `content[0].text`.
+> 3. **The shape is now pinned by a test**, `tests/e2e/mcp-wire.test.ts`, whose
+>    error-envelope assertion is inverted on purpose. Unifying the envelope must
+>    edit that file in the same commit.
+>
+> Tracked as Engram task **#52**. `errorWithData()` — the one helper that already
+> returns the right shape — has **0 call sites**; see task #55.
 
 **What.** `src/response.ts`: `success()` and `errorWithData()` return JSON in
 `content[0].text`; `error()` returns a **bare string**. Nothing was changed —

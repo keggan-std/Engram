@@ -62,13 +62,22 @@ export class CompactionService {
             return { sessionsCompacted: sessionsToCompact, changesSummarized: changesToSummarize };
         }
 
-        // Create backup before compacting
-        let backupPath: string | undefined;
+        // FR-D6: the safety backup BLOCKS. This used to be
+        //   try { backupPath = backupDatabase(); } catch (e) { log.warn(...); }
+        // and then deleted change rows anyway — so a failed backup produced
+        // exactly the outcome the backup exists to prevent, and the only trace
+        // was a stderr line nobody reads. Third instance of this exact shape:
+        // the restore path (FR-D1 T1) and the installer config write (FR-D5 T2)
+        // both swallowed a failed backup and destroyed the thing it protected.
+        // See docs/foundations/06-observability.md F4.
+        let backupPath: string;
         try {
             backupPath = backupDatabase();
             log.info(`Auto-backup created before compaction: ${backupPath}`);
         } catch (e) {
-            log.warn(`Failed to create backup before compaction: ${e}`);
+            throw new Error(
+                `Refusing to compact: the safety backup failed (${e}). Nothing was changed.`
+            );
         }
 
         this.compactBeforeCutoff(cutoffId);
