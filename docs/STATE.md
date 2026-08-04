@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d2-trust-safety` @ `007a2c3`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d5-distribution` @ `0b83d34`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d2-trust-safety` @ `007a2c3` — merge(FR-D1): durability domain — restore was a silent no-op, now fixed and bound |
+| **Working branch** | `fr/d5-distribution` @ `0b83d34` — merge(FR-D2): trust & safety domain — 19 of 32 security claims wrong, provenance actively wrong |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **4 file(s)** — `docs/README.md`, `docs/STATE.md`, `docs/foundations/02-trust-safety.md`, `tests/security/no-inert-surface.test.ts` |
-| **Store** | schema V25 · 20 sessions · 20 decisions · 69 observations · 96 file notes |
+| **Uncommitted** | **3 file(s)** — `src/installer/config-writer.ts`, `docs/foundations/05-distribution.md`, `tests/installer/config-write-safety.test.ts` |
+| **Store** | schema V25 · 23 sessions · 20 decisions · 75 observations · 96 file notes |
 
 **Latest active decision — #20:** FR-D1 T1 ADOPTED AND SHIPPED: restore validates, closes, deletes main+wal+shm together, copies, reopens.
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **20** | `d2-priorart-agent` | _(in progress)_ |
-| **19** | `d2-injection-agent` | _(in progress)_ |
-| **18** | `d2-claims-agent` | FR-D2 claim inventory complete: 32 security/privacy/trust claims catalogued and verified against source. |
+| **23** | `d5-priorart-agent` | FR-D5 external prior-art research (no repo reading). |
+| **22** | `d5-publish-agent` | FR-D5 publish-surface map complete. Full findings in observation #73 (finding). Tarball verified via npm pack --dry-run --ignore-scripts: 367 files / 1.60 MB unpacked, files:["dist/"] whitelist is cl… |
+| **21** | `d5-install-agent` | FR-D5 task #45: mapped the install surface across all 14 IDEs. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,7 +40,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**34 open tasks.** The ones that gate everything else:
+**39 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -48,7 +48,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 | **16** | FR-D1: Durability & Recovery review | critical · backlog |
 | **17** | FR-D2: Trust & Safety review | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
-| **35** | FR-D3 — fts_file_notes has no triggers: 94 file notes are unsearchable and nothing reports it | critical · backlog |
+| **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
 
 ### Handoff
 

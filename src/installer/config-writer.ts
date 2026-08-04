@@ -136,16 +136,30 @@ export function readJson(filePath: string): Record<string, any> | null {
  * Write a JSON config file, creating parent directories if needed.
  */
 export function writeJson(filePath: string, data: any): void {
+    // FR-D5 T2: atomic. These targets are files OTHER products own — ~/.claude.json
+    // is Claude Code's entire user state (53 top-level keys, of which mcpServers is
+    // one). A crash or full disk between open and close used to truncate it.
+    // Mirrors atomicWriteJson in services/instance-registry.service.ts, which had
+    // the right shape all along and was module-private, so the installer could not
+    // call it. See docs/foundations/05-distribution.md F2.
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    const tmpPath = `${filePath}.tmp.${process.pid}`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    fs.renameSync(tmpPath, filePath);
 }
 
 export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
 
 /**
  * Add or update the Engram entry in a config file.
- * FLAW-8 FIX: if the config file exists but has invalid JSON, back it up
- * before overwriting so the user doesn't lose their other tool configs.
+ *
+ * FR-D5 T2: THROWS ConfigParseError if the file exists but does not parse.
+ * It never overwrites a config it could not read. The FLAW-8 behaviour this
+ * replaces — back up best-effort, then write a file containing only the Engram
+ * entry — is what made a single trailing comma in ~/.claude.json cost the user
+ * 52 unrelated keys. installToPath (index.ts:897) catches per-IDE, prints the
+ * manual entry, and continues with the other IDEs, so one unreadable config no
+ * longer stops an install and no longer destroys anything.
  *
  * Returns:
  *   "added"           — fresh install, no prior entry
@@ -154,22 +168,32 @@ export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
  *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era)
  */
 export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): InstallResult {
+    // FR-D5 T2. This used to back up best-effort, set `config = {}`, and carry on —
+    // writing a file containing ONLY the Engram entry. Measured blast radius:
+    // ~/.claude.json is 40.5 KB with 53 top-level keys (oauthAccount, userID,
+    // machineID, projects, onboarding state); mcpServers is one of them. Same for
+    // ~/.gemini/settings.json and ~/.mcp.json. The backup was
+    // `try { copyFileSync } catch {}` and the overwrite ran regardless, so a failed
+    // backup still lost the file — the same defect as the restore path fixed in
+    // FR-D1 T1.
+    //
+    // readJson's own docstring, twelve lines above, already specified the correct
+    // behaviour: "callers should warn and bail rather than silently overwriting the
+    // user's config." This is that caller, now doing what it says.
+    //
+    // Prior art for the old behaviour, in another product: microsoft/vscode#125970,
+    // where an extension wrote a small block and replaced a 600-line settings file.
     let config: Record<string, any>;
     try {
         config = readJson(configPath) ?? {};
     } catch (e) {
         if (e instanceof ConfigParseError) {
-            // Backup the broken file then start fresh
-            const ts = new Date().toISOString().replace(/[:.]/g, "-");
-            const bakPath = configPath + `.invalid.${ts}.bak`;
-            try { fs.copyFileSync(configPath, bakPath); } catch { /* best-effort */ }
-            console.warn(`[Engram] Config at ${configPath} contains invalid JSON.`);
-            console.warn(`         Backed up to: ${bakPath}`);
-            console.warn(`         Writing a fresh config with only the Engram entry.`);
-            config = {};
-        } else {
-            throw e;
+            console.error(`[Engram] Refusing to write ${configPath} — it exists but is not valid JSON.`);
+            console.error(`         Engram will not overwrite a config it cannot read: this file may`);
+            console.error(`         belong to another tool and contain settings unrelated to Engram.`);
+            console.error(`         Fix the JSON (or move the file aside) and run install again.`);
         }
+        throw e;
     }
 
     const key = ide.configKey;
