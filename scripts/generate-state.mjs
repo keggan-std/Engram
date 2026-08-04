@@ -319,8 +319,39 @@ this is newest-first, not open-only (schema gap 2). Full text:
 
 // ─── write or check ─────────────────────────────────────────────────────────
 
-/** Strip the generated-on date so routine timestamp churn is not "drift". */
-const normalise = (s) => s.replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ");
+/**
+ * Reduce the document to the part that can meaningfully drift.
+ *
+ * THIS IS NOT THE CAPABILITY-SURFACE CHECK AND MUST NOT PRETEND TO BE.
+ * That file is generated from src/, so any diff is real drift and can block a
+ * merge. This one is generated from a live database and from git, so three of
+ * its values change on their own and can never match a committed copy:
+ *
+ *   - the generated-on date
+ *   - the branch@HEAD line, which changes with every single commit
+ *   - the uncommitted-files row, which this file's own regeneration alters —
+ *     write it on a clean tree and the tree is no longer clean
+ *
+ * The first version compared everything and was therefore ALWAYS stale: it
+ * failed immediately after a clean commit, which is the definition of a gate
+ * that gets switched off in a week. Normalising the volatile rows out leaves
+ * the part worth guarding — tasks, sessions, handoffs, flagged observations —
+ * so `--check` answers "has the memory store moved on without a regenerate?"
+ *
+ * Line endings are normalised too: the generator writes LF and git's autocrlf
+ * rewrites the working copy to CRLF, so a byte comparison fails on Windows and
+ * passes in Ubuntu CI.
+ */
+const normalise = (s) => s
+  .replace(/\r\n/g, "\n")
+  // The whole header line, not just the date: it also carries branch and HEAD,
+  // which change on every commit — including the commit that stores this file.
+  .replace(/^\*\*Generated:\*\*.*$/m, "**Generated:** <volatile>")
+  .replace(/^\| \*\*Working branch\*\* \|.*$/m, "| **Working branch** | <volatile> |")
+  .replace(/^\| \*\*Published line\*\* \|.*$/m, "| **Published line** | <volatile> |")
+  .replace(/^\| \*\*Uncommitted\*\* \|.*$/m, "| **Uncommitted** | <volatile> |")
+  .replace(/^\*\*Branch:\*\*.*$/m, "**Branch:** <volatile>")
+  .trimEnd();
 
 if (CHECK) {
   if (!existsSync(OUT)) {

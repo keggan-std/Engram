@@ -299,7 +299,15 @@ rather than pretended away.
 
 // ─── Write or check ──────────────────────────────────────────────────────────
 
-const normalise = (s) => s.replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ");
+// Line endings MUST be normalised before comparing. The generator writes LF;
+// git's autocrlf rewrites the working copy to CRLF on checkout, so a naive
+// comparison fails on every Windows machine while passing in Ubuntu CI — a gate
+// that is broken exactly where it is used most, and cries wolf until someone
+// switches it off. generate-capability-surface.mjs already got this right.
+const normalise = (s) => s
+  .replace(/\r\n/g, "\n")
+  .replace(/^\*\*Generated:\*\* \d{4}-\d{2}-\d{2} /m, "**Generated:** <date> ")
+  .trimEnd();
 
 if (CHECK) {
   if (!existsSync(OUT)) {
