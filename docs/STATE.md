@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `d542697`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d4-concurrency` @ `b4d1970`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,15 +13,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `d542697` — merge(FR-D6): failure & observability — 4 of 10 domains complete |
+| **Working branch** | `fr/d4-concurrency` @ `b4d1970` — chore(FR-D4): reconcile the board, and the register that orients agents is unbound |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
-| **Store** | schema V25 · 31 sessions · 21 decisions · 79 observations · 96 file notes |
+| **Uncommitted** | **3 file(s)** — `docs/README.md`, `docs/foundations/04-concurrency.md`, `tests/e2e/multi-agent-wire.test.ts` |
+| **Store** | schema V25 · 31 sessions · 23 decisions · 80 observations · 96 file notes |
 
-**Latest active decision — #21:** FR-D6 ADOPTED AND SHIPPED: the wire is tested, and every diagnostic must be able to fail.
+**Latest active decision — #23:** FR-D4 ADOPTED — Engram has exactly one correct coordination primitive, and it is the only one the product does not depend on.
 
-**Nothing is marked in progress.**
+**In progress:** #20 FR-D4: Concurrency & Multi-Agent review
 
 ---
 
@@ -40,10 +40,11 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**40 open tasks.** The ones that gate everything else:
+**45 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
+| **20** | FR-D4: Concurrency & Multi-Agent review | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
@@ -69,6 +70,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#80** | friction | SIXTH occurrence of the convention #7 tool-call syntax error, this time by a different agent and model than the five in observation #59. |
 | **#59** | friction | FIVE OCCURRENCES OF THE SAME AGENT-SIDE TOOL-CALL SYNTAX ERROR IN ONE SESSION, and the fifth corrupted the session record itself. |
 | **#47** | idea | HEADLINE RECOMMENDATION - the generated capability surface. |
 | **#41** | concern | COUNTER-EVIDENCE 1: A stale/frozen register is argued to be actively worse than no register because it looks authoritative while misleading readers — "Your Risk Register Is Already Dead" (2… |
@@ -76,7 +78,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#30** | concern | CRITICAL COUNTER-ARGUMENT to "build a ledger where work signs in and off": Engram ALREADY HAD a ledger, and the ledger became the disinformation source. |
 | **#29** | idea | ghostwriter's doc-scaffold.js SCAFFOLDS registry (per doc-type: ordered sections, required/optional flags, writeLast flags, dependency notes, fastMode drop list) is HIGH reusability for Eng… |
 | **#28** | concern | CONCERN / capability-surface overlap: the skill "tracer" (root-cause debugging playbook, no data structures) shares its core word "trace" with completely unrelated Engram-ecosystem MCP tool… |
-| **#26** | idea | carto-src's "Last Remap Diff" block (single mutable entry, replaced on every remap, prefix language + / ~ / - / ✓ for added/updated/removed/unchanged) is a MEDIUM-reusability pattern: Engra… |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
