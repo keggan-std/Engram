@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d3-storage` @ `abb18d4`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `0bee0a1`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,10 +13,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d3-storage` @ `abb18d4` — docs(FR-D4): DEFERRED-CHANGES D5 was too soft — reclassified CRITICAL |
+| **Working branch** | `v2-foundations` @ `0bee0a1` — merge(FR-D3): storage & retrieval — 6 of 10 domains complete |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **3 file(s)** — `docs/STATE.md`, `docs/foundations/03-storage.md`, `tests/storage/` |
+| **Uncommitted** | clean |
 | **Store** | schema V25 · 33 sessions · 24 decisions · 87 observations · 96 file notes |
 
 **Latest active decision — #24:** FR-D3 ADOPTED — Engram's storage is sound and its retrieval is not; the worst defect is not that memory cannot be found but that a wrong memory can be refreshed into looking current.
