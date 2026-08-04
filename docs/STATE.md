@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `4b8f883`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d3-storage` @ `abb18d4`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,13 +13,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `4b8f883` — merge(FR-D4): concurrency & multi-agent — 5 of 10 domains complete |
+| **Working branch** | `fr/d3-storage` @ `abb18d4` — docs(FR-D4): DEFERRED-CHANGES D5 was too soft — reclassified CRITICAL |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **1 file(s)** — `docs/DEFERRED-CHANGES.md` |
-| **Store** | schema V25 · 31 sessions · 23 decisions · 80 observations · 96 file notes |
+| **Uncommitted** | **3 file(s)** — `docs/STATE.md`, `docs/foundations/03-storage.md`, `tests/storage/` |
+| **Store** | schema V25 · 33 sessions · 24 decisions · 87 observations · 96 file notes |
 
-**Latest active decision — #23:** FR-D4 ADOPTED — Engram has exactly one correct coordination primitive, and it is the only one the product does not depend on.
+**Latest active decision — #24:** FR-D3 ADOPTED — Engram's storage is sound and its retrieval is not; the worst defect is not that memory cannot be found but that a wrong memory can be refreshed into looking current.
 
 **Nothing is marked in progress.**
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **31** | `claude-opus-5-orchestrator` | _(in progress)_ |
-| **30** | `claude-opus-5-orchestrator` | (auto-closed: new session started) |
-| **29** | `d6-priorart-agent` | FR-D6 external prior-art research (charter §3b). |
+| **33** | `FR-D3-Storage` | _(in progress)_ |
+| **32** | `claude-opus-5-orchestrator` | Handoff session. Created handoff #7 for the FR-D3 agent with startup friction, method notes and inherited findings. Acknowledged the two dead 2026-08-01 handoffs (#1, #2) that STATE.md says to ignore… |
+| **31** | `claude-opus-5-orchestrator` | FR-D4 Concurrency & Multi-Agent domain review complete — 5 of 10 domains done. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,7 +40,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**44 open tasks.** The ones that gate everything else:
+**49 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -52,14 +52,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #6** — from `fr-lead`, 2026-08-04 — **not yet acknowledged**.
-FR-D6 complete and merged. Next session starts FR-D4 Concurrency & Multi-Agent.
-
-⚠️ **2 older handoffs still show as pending and should be ignored:** #2 (`opus5-pm-infra`, 2026-08-01), #1 (`opus5-deep-audit`, 2026-08-01).
-
-They were never acknowledged, so they surface at every session start alongside the live
-one, as though equally current. Handoffs do not supersede each other — Engram schema
-gap 3, observation #54.
+**Read #7** — from `claude-opus-5-orchestrator`, 2026-08-04 (already acknowledged).
+FR-D4 complete and merged (5 of 10 domains).
 
 ---
 
@@ -69,6 +63,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#83** | friction | SEVENTH occurrence of the convention #7 tool-call syntax error — and this one is inside handoff #7 itself, the record whose entire purpose was to warn the next agent about it. |
 | **#80** | friction | SIXTH occurrence of the convention #7 tool-call syntax error, this time by a different agent and model than the five in observation #59. |
 | **#59** | friction | FIVE OCCURRENCES OF THE SAME AGENT-SIDE TOOL-CALL SYNTAX ERROR IN ONE SESSION, and the fifth corrupted the session record itself. |
 | **#47** | idea | HEADLINE RECOMMENDATION - the generated capability surface. |
@@ -76,7 +71,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#35** | idea | carto-src's mode-detection decision table (STEP 0: first-match-wins ordered conditions producing one of Map/Remap/Dry-run/Document-only/Skip) plus its explicit write-failure handling table… |
 | **#30** | concern | CRITICAL COUNTER-ARGUMENT to "build a ledger where work signs in and off": Engram ALREADY HAD a ledger, and the ledger became the disinformation source. |
 | **#29** | idea | ghostwriter's doc-scaffold.js SCAFFOLDS registry (per doc-type: ordered sections, required/optional flags, writeLast flags, dependency notes, fastMode drop list) is HIGH reusability for Eng… |
-| **#28** | concern | CONCERN / capability-surface overlap: the skill "tracer" (root-cause debugging playbook, no data structures) shares its core word "trace" with completely unrelated Engram-ecosystem MCP tool… |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
