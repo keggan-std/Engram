@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-03 · **Source:** Engram `memory.db` · **Branch:** `fr/d1-durability` @ `a975b89`
+**Generated:** 2026-08-04 · **Source:** Engram `memory.db` · **Branch:** `fr/d2-trust-safety` @ `007a2c3`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `fr/d1-durability` @ `a975b89` — fix(state): the drift gate compared values that can never match |
+| **Working branch** | `fr/d2-trust-safety` @ `007a2c3` — merge(FR-D1): durability domain — restore was a silent no-op, now fixed and bound |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **6 file(s)** — `docs/README.md`, `docs/STATE.md`, `src/database.ts`, `src/tools/dispatcher-admin.ts` … |
-| **Store** | schema V25 · 17 sessions · 20 decisions · 63 observations · 96 file notes |
+| **Uncommitted** | **4 file(s)** — `docs/README.md`, `docs/STATE.md`, `docs/foundations/02-trust-safety.md`, `tests/security/no-inert-surface.test.ts` |
+| **Store** | schema V25 · 20 sessions · 20 decisions · 69 observations · 96 file notes |
 
 **Latest active decision — #20:** FR-D1 T1 ADOPTED AND SHIPPED: restore validates, closes, deletes main+wal+shm together, copies, reopens.
 
@@ -29,12 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **17** | `interface-surface-agent` | _(in progress)_ |
-| **16** | `cherry-pick-verifier` | Verified the tripwire's emergency path, then built the agent-orientation register the operator asked for and fixed the rot it exposed. |
-| **15** | `agent_name` ⚠️ | Completed Phase 0 of the Foundations Review and set the direction for everything after it. |
-
-⚠️ A session is recorded under the literal placeholder `"agent_name"`. Attribution in the
-table this register is built on is already polluted — Engram schema gap 4, observation #54.
+| **20** | `d2-priorart-agent` | _(in progress)_ |
+| **19** | `d2-injection-agent` | _(in progress)_ |
+| **18** | `d2-claims-agent` | FR-D2 claim inventory complete: 32 security/privacy/trust claims catalogued and verified against source. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -43,7 +40,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**26 open tasks.** The ones that gate everything else:
+**34 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|

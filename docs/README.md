@@ -28,6 +28,7 @@ Read in this order. This is the whole active set — eleven files.
 |---|---|
 | **[foundations/00-CHARTER.md](foundations/00-CHARTER.md)** | **Before touching anything in `foundations/`, and before writing the master plan.** Defines the ten domains, the mandatory six-part doc template, evidence grading, the delegation protocol, and the kill switches. It is the spec the whole exercise executes from |
 | **[foundations/01-durability.md](foundations/01-durability.md)** | **Before touching `backup`, `restore`, `export`, `import` or `migrations.ts`.** Domain 1, complete. Four README/tool-description claims in this area are false as written, and §2 says which. §4 carries the reasoning and the rejected alternatives |
+| **[foundations/02-trust-safety.md](foundations/02-trust-safety.md)** | **Before editing SECURITY.md, README's privacy sections, or any tool description.** Domain 2, complete. 19 of 32 security and privacy claims are wrong or incomplete, and §1 says which. §3b is the failure literature — read it before proposing any injection mitigation, because it rules most of them out |
 | [foundations/](foundations/) | The ten domain reviews. `01`–`10`, risk-ordered, durability first |
 | [foundations/tripwire-patch-runbook.md](foundations/tripwire-patch-runbook.md) | Only if decision #19's tripwire fires — the recipe for cherry-picking the security commits onto `main` |
 
