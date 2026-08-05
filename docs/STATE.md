@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `e35cedb`
+**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `5cd4a20`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,15 +20,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `e35cedb` — merge(Phase 2): master plan — Phase 1 synthesised, release strategy owned |
+| **Working branch** | `v2-foundations` @ `5cd4a20` — merge(Phase 2): item 0 landed, Release A assembled and verified |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
 | **Uncommitted** | clean |
-| **Store** | schema V25 · 38 sessions · 30 decisions · 114 observations · 96 file notes |
+| **Store** | schema V25 · 39 sessions · 33 decisions · 119 observations · 96 file notes |
 
-**Latest active decision — #30:** PHASE 2 ADOPTED — master plan written. One finding organises all ten domains: an advertised capability that does not execute. Release splits in two (1.12.1 patch off main, 2.0.0 later from the review line). Tripwire gets a 45-day clock, 20…
+**Latest active decision — #33:** RELEASE A IS 1.13.0, NOT 1.12.1 — assembled, verified, not published.
 
-**In progress:** #84 FR-D10 T1 — remove the false network-access denial from main's SECURITY.md (documentation only, NOT a release)
+**In progress:** #49 FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first
 
 ---
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **39** | `FR-Phase2-Item0` | ITEM 0 LANDED AND RELEASE A IS ASSEMBLED AND VERIFIED, unpushed and unpublished. |
 | **38** | `FR-Phase2-MasterPlan` | Phase 2 complete — docs/ENGRAM-MASTER-PLAN.md written, decision #30, merged to v2-foundations at e35cedb. |
 | **37** | `FR-D10-PublicSurface` | FR-D10 Public Surface complete and merged into v2-foundations — ALL 10 DOMAINS DONE, Phase 1 finished. |
-| **36** | `FR-D8-CodebaseMaintainability` | FR-D8 Codebase and Maintainability complete and merged into v2-foundations — 9 of 10 domains done. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -51,7 +51,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 | # | Task | State |
 |---|---|---|
-| **84** | FR-D10 T1 — remove the false network-access denial from main's SECURITY.md (documentation only, NOT a release) | **in progress** |
+| **49** | FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #13** — from `FR-Phase2-MasterPlan`, 2026-08-05 — **not yet acknowledged**.
-Phase 2 master plan drafted and merged. Next is item 0 — make the gates run in CI — then the sequencing table.
+**Read #14** — from `FR-Phase2-Item0`, 2026-08-05 — **not yet acknowledged**.
+Item 0 landed and Release A is assembled and verified on release/1.13.0.
 
 ---
 
@@ -71,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#116** | friction | THIRD RECURRENCE OF THE CLOSING-DISCIPLINE GAP, and this one was load-bearing. |
 | **#108** | concern | SUPPRESSION ARM 2 LEAKED THROUGH THREE CHANNELS, not one. |
 | **#107** | concern | WHY SO MUCH RECALL WAS REPLACEABLE — the judges' own reason, and it is a limit on the whole experiment. |
 | **#101** | friction | TENTH OCCURRENCE of the convention #7 tool-call syntax corruption — committed by me, FR-D10, on my second Engram write, in the session whose domain doc is about records that lie to readers. |
@@ -78,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#99** | concern | FR-D8 SUPPRESSION ARM — the control leaked, in two ways neither charter §10.4 nor decision #25 anticipated. |
 | **#97** | idea | FR-D8 PRE-REGISTERED PREDICTIONS — written before any dead-code run, any delegation, and before opening src/tools/dispatcher-memory.ts. |
 | **#89** | concern | FR-D7 T7, handed to FR-D9 which owns the anti-drift machinery. |
-| **#88** | friction | NINTH occurrence of the convention #7 corruption, on FR-D7's FIRST Engram write of the session, by an agent who had read handoff #8's warning about it minutes earlier and had explicitly res… |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
