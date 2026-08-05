@@ -24,8 +24,11 @@ Read in this order. This is the whole active set — eleven files.
 
 ### The Foundations Review — the current major workstream
 
+**Phase 1 is complete: all ten domains.** Phase 2 is the master plan below.
+
 | Document | Read when |
 |---|---|
+| **[ENGRAM-MASTER-PLAN.md](ENGRAM-MASTER-PLAN.md)** | **Start here for direction, the cut list, sequencing, and the release strategy.** Phase 2 output, draft for adoption. Synthesises all ten domains into one finding — *an advertised capability that does not execute* — and names the single change (§2) that makes the other ten bindings enforceable. Owns the release: two releases, not one, and a **clock** on the tripwire that previously had only event triggers |
 | **[foundations/00-CHARTER.md](foundations/00-CHARTER.md)** | **Before touching anything in `foundations/`, and before writing the master plan.** Defines the ten domains, the mandatory six-part doc template, evidence grading, the delegation protocol, and the kill switches. It is the spec the whole exercise executes from |
 | **[foundations/01-durability.md](foundations/01-durability.md)** | **Before touching `backup`, `restore`, `export`, `import` or `migrations.ts`.** Domain 1, complete. Four README/tool-description claims in this area are false as written, and §2 says which. §4 carries the reasoning and the rejected alternatives |
 | **[foundations/02-trust-safety.md](foundations/02-trust-safety.md)** | **Before editing SECURITY.md, README's privacy sections, or any tool description.** Domain 2, complete. 19 of 32 security and privacy claims are wrong or incomplete, and §1 says which. §3b is the failure literature — read it before proposing any injection mitigation, because it rules most of them out |

@@ -249,6 +249,12 @@ as recall that never happens.
 | `get_file_notes` | The task board (human-facing) |
 | On-demand `search` / `get_decisions` / `get_observations` | The capability surface (a build script) |
 | Handoffs between sessions | Telemetry (measures, isn't measured) |
+| **Generated re-exports of the store** — `docs/STATE.md`, `docs/engram-memory/` | |
+| **Stored content returned by *write* calls** — `record_decision`'s similar-decisions payload, the `_advisor` field | |
+
+> **The last two rows were added 2026-08-05** (D10 T5, task #89) after both
+> pre-registered suppression arms leaked through them. They are listed here, not
+> only in §10.4, because a reader deciding what to suppress reads this table.
 
 ### 10.2 The unit is the recall event, not the session
 
@@ -313,6 +319,41 @@ than none.
 > Choosing afterwards which completed docs "felt like" controls is exactly the selection
 > bias this section exists to prevent. It was very nearly what happened. See observation
 > **#90** for the state of instrument 1, which is also behind.
+
+#### 10.4a — What counts as recall *(amended 2026-08-05 — D10 T5, task #89)*
+
+Both pre-registered arms ran, and **both leaked.** Not through one channel but
+three, and only one of them is session start:
+
+| # | Channel | What arrived under suppression |
+|---|---|---|
+| 1 | **`docs/STATE.md`** — generated *from* the store, and the file every agent is told to read first | A decision, three sessions, five tasks, eight observations, as prose. **Third identical occurrence** |
+| 2 | **`record_decision`'s own response** | Four similar decisions **with full rationales** — content, not a prompt, returned by a **write** |
+| 3 | The **`_advisor`** field on write calls | Unsolicited *"use `get_decisions`"* prompts |
+
+**Therefore, normatively:**
+
+> **Recall is any path by which stored Engram content re-enters an agent's
+> context — including generated re-exports of the store, and stored content
+> returned by write calls.** Calling no recall *action* is not suppression.
+
+**This is a finding about R1, not only about the arms.** R1 (§10.5) defines
+retirement as *"stop auto-loading memory at session start."* Two of the three
+channels above are not session start, so **R1 as written would not achieve what
+it describes.** Any future firing of R1 must close all three or say which it is
+leaving open.
+
+**Rejected — declare the arms void.** The interactive channel *was* fully
+suppressed in both, and what leaked is bounded and enumerable. Voiding discards
+the only control data the experiment has (n=2 of a planned 2). Per §10.6 the leak
+is a **limit**, not a disqualification — and R3 must be read as *"no detectable
+difference **given a leaked generated summary**."*
+
+**Rejected — instruct future agents not to read `STATE.md`.** Its own first line
+is *"Where to go next: 1. This file."* An instruction contradicting the
+entry-point document will lose. The mitigation is to make `STATE.md` **declare
+itself** a recall channel at the point of reading — implemented in
+`scripts/generate-state.mjs`, so it cannot be lost to a regeneration.
 
 ### 10.5 Retirement criteria — written before the data exists
 

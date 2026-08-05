@@ -426,9 +426,23 @@ becomes "so it must be fine."
 
 ---
 
-## D11 — This branch is one commit behind `main`'s version bump, and must be rebased before release
+## D11 — ~~This branch is one commit behind `main`'s version bump~~ · the release hold
 
-**Status:** ACTIVE · **Raised:** 2026-08-02
+**Status:** ACTIVE — **first half CLOSED 2026-08-05, second half more urgent than when written**
+**Raised:** 2026-08-02
+
+> **✅ The version-regression half is resolved.** PROVEN 2026-08-05:
+> `git merge-base --is-ancestor main HEAD` → true (`main` is fully merged into
+> `v2-foundations`), and `package.json` on this branch reads **1.12.0**. The stated
+> Action below — *"Rebase onto `main` (or merge `main` in)"* — **has already been
+> done**, at merge commit `d420c10`. Everything in the "What" and "Two
+> consequences" sections below is therefore historical; it is preserved unedited
+> because the record is the point. Engram task **#87**. Noted in [`DONE`](#done).
+>
+> **What is NOT resolved, and is now the whole entry:** the release hold
+> (decision #19), the tripwire, and *"published v1.12.0 is the vulnerable build."*
+> See the two additions at the end of this entry — the risk argument below has
+> been **contradicted by evidence**, and the tripwire has **no clock**.
 
 **What.** `review/engram-audit` was cut from `develop@804a8d7`, one commit before
 `main`'s v1.12.0 version bump. `package.json` here says **1.11.0**; `main` says
@@ -472,6 +486,26 @@ agent, so it is escalation, not entry. N3 is a data-integrity bug, not
 exploitable. And decisively: **nothing is disclosed while the branch is
 unpushed.** The residual risk is independent discovery on an unwatched repo.
 
+> ### ⛔ The paragraph above is contradicted by evidence and should not be relied on
+>
+> **Added 2026-08-05.** FR-D10 §3b searched the failure literature and every
+> load-bearing citation cuts against it:
+>
+> | This entry assumed | The evidence says |
+> |---|---|
+> | *"a targeted attack on a package with 26 downloads/week"* | [postmark-mcp](https://thehackernews.com/2025/09/first-malicious-mcp-server-found.html) — the **first malicious MCP server found in the wild** — had ~1,500 weekly downloads and ran unscrutinised for 15 versions **because** low counts draw less scrutiny |
+> | *"too small to be worth attacking"* | [arXiv:2003.03471](https://arxiv.org/pdf/2003.03471): **93.9%** of npm packages get under 350 weekly downloads. Obscurity is the ecosystem's default state, not a defence |
+> | *"exposure is low because it is undisclosed"* | [Arora et al. 2006](https://link.springer.com/article/10.1007/s10796-006-9012-5): undisclosed vulnerabilities are attacked at slowly **increasing** rates without ever being published. The silent case is not the zero case |
+>
+> **And the calculus was aimed at the wrong hazard.** Every line of it reasons
+> about *disclosure* and therefore about attackers. The largest live hazard on
+> published v1.12.0 needs no attacker at all: the installer replaces another
+> product's user-level config with a stub when that file fails to parse, backing
+> it up only best-effort (`try{…}catch{/* best-effort */}`). `~/.claude.json` was
+> measured at **40.5 KB / 53 top-level keys**. Download counts, stars and
+> watchers are irrelevant to a bug that fires on a malformed file. Engram task
+> **#46**; [`ENGRAM-MASTER-PLAN.md`](ENGRAM-MASTER-PLAN.md) §4.1 hazard **H1**.
+
 > The earlier framing of this as urgent applied settled input 1 (*public product,
 > wide adoption*) as a **current** state. It is the **target** state. The threat
 > model has to be calibrated to actual exposure.
@@ -492,6 +526,22 @@ builds and passes 603/603. **Use Recipe B** (N1 + N2 only) — `f234052` require
 - Any third-party activity on the repo's Security tab, or a fork/star spike
 - Any decision to push the branch publicly — **pushing IS disclosure**, and it
   inverts this entire calculus
+
+**⏱ And a clock, added 2026-08-05 — the tripwire had none.** Every trigger above
+is an *event*. If no event fires, this entry permits silence forever, and
+indefinite silence is the failure mode institutional policy exists to prevent.
+[CERT/CC](https://certcc.github.io/certcc_disclosure_policy/) publishes at **45
+days regardless of patch status**, while warning that *"gratuitously announcing
+vulnerabilities may not be in the best interest of public safety"* — both poles
+are failure modes, which is why the deadline is a deadline and not a rule about
+content.
+
+> **45 days from 2026-08-02, when the P0 findings were recorded → `2026-09-16`.**
+> On that date, either the advisory is published, or the reason for extending is
+> written down as an Engram decision. **The clock does not force disclosure. It
+> forces continued silence to be a decision rather than a default** — which is
+> exactly what "guard against 'solidified' becoming never" below asks for and
+> did not supply a mechanism for.
 
 **Accepted consequence.** The branch accumulates breaking changes, so the eventual
 migration chain is longer and riskier than an incremental path. That makes the
@@ -644,7 +694,17 @@ might notice is the one that has already been configured to look away.
 
 ## DONE
 
-*(Entries move here when resolved, with the commit that closed them. Nothing yet.)*
+*(Entries move here when resolved, with the commit that closed them.)*
+
+- **[D6](#d6--the-mcp-stdio-verification-harness-lives-in-a-scratchpad-and-will-be-lost)** — closed 2026-08-04 by FR-D6. The wire path has a permanent home at
+  `tests/e2e/mcp-wire.test.ts` (9 tests). Entry kept in place above because it
+  carries two corrections worth preserving.
+- **[D11](#d11--this-branch-is-one-commit-behind-mains-version-bump--the-release-hold), first half only** — closed 2026-08-05 at merge `d420c10`, verified
+  2026-08-05 by task #87. `main` is fully merged into `v2-foundations` and
+  `package.json` reads 1.12.0, so the version regression and the "rebase before
+  release" action are both resolved. **The rest of D11 — the hold, the tripwire
+  and the vulnerable published build — remains ACTIVE and is now the entire
+  entry.**
 
 ---
 

@@ -1,11 +1,18 @@
 # Project State — read this first
 
-**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `730b4a2`
+**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `18dad68`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
 > If you find yourself editing this file, the answer is to fix the record it came from.
 > A register kept by discipline is audit finding F5 repeating (observation #30).
+
+> ⚠️ **This file IS Engram recall.** It is generated *from* the store, so reading it
+> delivers decisions, sessions, tasks and observations into your context — even if you
+> never call a recall action. **If you are running a suppressed arm of the charter §10
+> experiment, you have just been contaminated; record it.** Both pre-registered arms
+> leaked through this file before anyone noticed. See
+> [`foundations/00-CHARTER.md`](foundations/00-CHARTER.md) §10.4a.
 
 ---
 
@@ -13,15 +20,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `730b4a2` — merge(FR-D10): public surface — all 10 domains complete |
+| **Working branch** | `v2-foundations` @ `18dad68` — chore(FR-D10): regenerate STATE.md — handoff #12 and session 37 both present |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | clean |
-| **Store** | schema V25 · 37 sessions · 29 decisions · 108 observations · 96 file notes |
+| **Uncommitted** | **7 file(s)** — `SECURITY.md`, `docs/DEFERRED-CHANGES.md`, `docs/README.md`, `docs/STATE.md` … |
+| **Store** | schema V25 · 38 sessions · 29 decisions · 112 observations · 96 file notes |
 
 **Latest active decision — #29:** FR-D10 ADOPTED — bind the public surface with referential-integrity tests, and split the false denial in SECURITY.md from the disclosure decision it was accidentally bundled with.
 
-**Nothing is marked in progress.**
+**In progress:** #84 FR-D10 T1 — remove the false network-access denial from main's SECURITY.md (documentation only, NOT a release)
 
 ---
 
@@ -29,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **37** | `FR-D10-PublicSurface` | _(in progress)_ |
+| **38** | `FR-Phase2-MasterPlan` | _(in progress)_ |
+| **37** | `FR-D10-PublicSurface` | FR-D10 Public Surface complete and merged into v2-foundations — ALL 10 DOMAINS DONE, Phase 1 finished. |
 | **36** | `FR-D8-CodebaseMaintainability` | FR-D8 Codebase and Maintainability complete and merged into v2-foundations — 9 of 10 domains done. |
-| **35** | `FR-D9-ProcessTraceability` | FR-D9 Process and Traceability complete and merged — 8 of 10 domains. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,10 +47,11 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**73 open tasks.** The ones that gate everything else:
+**70 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
+| **84** | FR-D10 T1 — remove the false network-access denial from main's SECURITY.md (documentation only, NOT a release) | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
@@ -52,14 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #12** — from `FR-D10-PublicSurface`, 2026-08-05 — **not yet acknowledged**.
+**Read #12** — from `FR-D10-PublicSurface`, 2026-08-05 (already acknowledged).
 FR-D10 complete and merged. All 10 domains done — Phase 1 is finished. Next is Phase 2, the master plan (task #11).
-
-⚠️ **1 older handoff still shows as pending and should be ignored:** #11 (`FR-D8-CodebaseMaintainability`, 2026-08-05).
-
-They were never acknowledged, so they surface at every session start alongside the live
-one, as though equally current. Handoffs do not supersede each other — Engram schema
-gap 3, observation #54.
 
 ---
 
