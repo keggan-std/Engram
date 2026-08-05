@@ -1,3 +1,148 @@
+# v1.13.0 — Security, data-safety, and honest failures
+
+**Released:** v1.13.0 — August 5, 2026
+
+## Overview
+
+This release exists because an internal review found that several things Engram
+advertised did not actually execute — including two security behaviours this
+project's own `SECURITY.md` described incorrectly. Every fix below is either a
+security fix, a data-loss fix, or a case of a command reporting success while
+doing nothing.
+
+**Please upgrade from v1.12.0.** Three of the issues need no attacker at all.
+
+598 tests pass across 29 files. No schema migration.
+
+### Why this is 1.13.0 and not 1.12.1
+
+It was planned as a patch. It is a **minor** because one fix changes a response
+shape on the optional dashboard HTTP API — `POST /api/v1/import` used to return
+`200 {"ok":true,"status":"staged"}` while writing nothing, and now returns
+`501 NOT_IMPLEMENTED`. That is the honest answer, but a consumer branching on
+`ok` sees a different value than before, and calling that a patch would be a
+second false claim in a release whose purpose is removing the first one.
+
+No required parameters were added. No database migration runs. If you use only
+the MCP interface (the default), nothing you call changes shape.
+
+---
+
+## Security
+
+### Agent rules are no longer fetched from the network
+
+**This is the significant one.** Up to and including v1.12.0, Engram fetched its
+agent rules from this project's GitHub README at session start and cached them
+to `.engram/agent_rules_cache.json`, reading the cache back with a type cast
+rather than a validation.
+
+`.gitignore` does not prevent a repository from *shipping* a file. Any
+repository could therefore commit that cache file, and every agent that opened
+the project would receive attacker-authored instructions labelled CRITICAL —
+permanently, offline, with no network involved after the first time.
+
+The fetch, the cache write and the cache read have all been **deleted**, not
+hardened. Rules now ship inside the npm package and are versioned with the
+release, so no file on disk and no network response can influence them. This is
+the same remedy Anthropic shipped for the structurally identical CVE-2026-21852
+("MemoryTrap") in Claude Code v2.1.50: validating untrusted instructions more
+carefully still leaves you loading untrusted instructions.
+
+**If you have a `.engram/agent_rules_cache.json`**, Engram now ignores it, logs
+a warning, and returns a `security_notice` on session start. It does **not**
+delete the file — inspect it first. If it was not written by an older Engram, it
+is evidence and worth keeping.
+
+### The config write path had lost its key whitelist
+
+`engram_admin(action:"config")` and the dashboard's settings route could both
+write security-relevant configuration keys. The whitelist that used to prevent
+this had been dropped during an earlier refactor. It is restored on both paths,
+and secrets are redacted from `GET /api/v1/settings`.
+
+### `SECURITY.md` corrected — it denied things that were true
+
+The published security policy is corrected in this release. It previously
+stated that the only outbound network call was the update check (there were
+three), that there was no HTTP server and no authentication surface (there is
+an opt-in, loopback-only, token-authenticated dashboard server), and it named a
+database path that does not exist. These were documentation errors, not
+behaviour changes, and they are listed here rather than quietly edited.
+
+---
+
+## Data safety
+
+### The installer could replace another product's config with a stub
+
+If a config file existed but did not parse as JSON, the installer backed it up
+*best-effort* — inside a `try/catch` that swallowed any failure — and then wrote
+a fresh file containing only the Engram entry. Since Engram installs into config
+files owned by other tools, a single malformed character could cost you an
+unrelated product's entire user-level state, with no undo if the backup itself
+threw.
+
+**Engram now refuses to write a config it cannot read.** It prints what is
+wrong, what file, and what to do, and exits without touching anything. Writes
+are also now atomic (temp file plus rename), so an interrupted install can no
+longer leave a half-written config behind.
+
+### `restore` reported success and restored nothing
+
+`engram_admin(action:"restore")` returned a success envelope without reliably
+replacing the database — and left the `-wal` and `-shm` sidecar files in place,
+so SQLite could serve the *old* content from a stale write-ahead log after a
+"successful" restore. At the moment you need a restore, that is the worst
+possible failure.
+
+Restore now validates the candidate file read-only before touching anything
+(integrity check plus a schema version probe), takes a **blocking** safety
+backup, removes the database and both sidecars together, copies, and reopens.
+If any step fails, it fails loudly instead of reporting success.
+
+### `compact` no longer proceeds when its safety backup fails
+
+It used to warn and continue. It now aborts.
+
+---
+
+## Honest failures
+
+These are cases where a command reported success it had not earned.
+
+| Surface | Was | Now |
+|---|---|---|
+| `POST /api/v1/import` | `200 {"ok":true,"status":"staged"}`, wrote nothing | `501 NOT_IMPLEMENTED` |
+| `/export` | claimed "all data", shipped 5 of 24 tables | declares `partial: true` and reports exactly what it omits, filters, caps and truncates |
+| `GET /health` | always `200`, even with the database unavailable | `503 DATABASE_UNAVAILABLE` when the database cannot be opened |
+| `engram_admin(action:"health")` | derived health from an integrity check alone | probes full-text search with a real query and derives health from every check |
+
+---
+
+## Build and CI
+
+The published branch now runs the capability-surface, HTTP-surface and dead-code
+gates that previously existed only on an internal branch — so a removed action, a
+dropped enum, a loosened bound or a changed HTTP route blocks the merge instead
+of shipping unnoticed. The two surface gates also run inside `npm test`, which
+means they cannot be lost to a workflow edit.
+
+---
+
+## Upgrade
+
+No configuration changes are required and no schema migration runs.
+
+```bash
+npx -y engram-mcp-server install
+```
+
+If you script against the dashboard HTTP API, see the `/api/v1/import` note
+above. Everything else is source-compatible.
+
+---
+
 # v1.12.0 — Android Studio Support + Installer UX Redesign
 
 **Released:** v1.12.0 — March 6, 2026

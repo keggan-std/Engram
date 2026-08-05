@@ -2,11 +2,19 @@
 
 ## Overview
 
-Engram is a **local MCP server** with no network-facing endpoints, no remote
-database, and no telemetry. All data is stored in a project-local SQLite file
-(`.engram/memory.db`) and a user-local global database (`~/.engram/memory.db`).
-There is no authentication surface, no cloud sync, and no data that leaves the
-machine without explicit user action.
+Engram is a **local MCP server** with no remote database and no telemetry. All
+data is stored in a project-local SQLite file (`.engram/memory.db`), a
+user-local global knowledge base (`~/.engram/global.db`), and — only when no
+project root can be detected — a fallback project database at
+`~/.engram/global/memory.db`. There is no cloud sync, and no data that leaves
+the machine without explicit user action.
+
+**Engram does ship an HTTP server**, used by the optional dashboard. It is
+**off unless explicitly requested** (`--mode=dashboard` or
+`ENGRAM_MODE=dashboard`), binds **loopback only** (`127.0.0.1`, default port
+7432), and is **token-authenticated** — WebSocket upgrades are rejected on
+token mismatch. It is in scope for this policy; see
+[Dashboard HTTP Server](#dashboard-http-server) below.
 
 This means Engram's attack surface is narrow and mostly concerns local system
 security. Nonetheless, we take security issues seriously and ask for responsible
@@ -116,16 +124,36 @@ These notes help security researchers understand Engram's design:
 AI Agent (IDE) → MCP Protocol (local stdio/pipe) → Engram Server → SQLite (.engram/)
 ```
 
-There is no TCP port opened by default, no HTTP server, and no remote endpoint.
-Communication is strictly over a local stdio pipe managed by the IDE's MCP
-runtime.
+**In the default MCP mode** no TCP port is opened and there is no remote
+endpoint: communication is over a local stdio pipe managed by the IDE's MCP
+runtime. The dashboard mode below is the one exception, and it is opt-in.
+
+<a id="dashboard-http-server"></a>
+
+### Dashboard HTTP Server
+
+Started only by `--mode=dashboard` / `ENGRAM_MODE=dashboard`
+(`src/index.ts:138-141`). When started it:
+
+- binds `127.0.0.1` only — never `0.0.0.0` (`src/index.ts:243`)
+- generates a per-project token and rejects WebSocket upgrades that do not
+  present it (`src/index.ts:156`, `:217`)
+- redacts secrets from `GET /api/v1/settings` and refuses writes to
+  security-relevant config keys (`src/http-routes/settings.routes.ts`)
+
+Reports against this surface **are in scope**, including any path that reaches
+it without the token, any bind to a non-loopback interface, and any secret that
+survives redaction.
 
 ### File System Access
 
 Engram reads and writes:
 
 - `.engram/memory.db` — project-local database
-- `~/.engram/memory.db` — global knowledge base
+- `~/.engram/global.db` — cross-project global knowledge base
+  (`src/global-db.ts:18`)
+- `~/.engram/global/memory.db` — fallback project database, used only when no
+  project root is detected (`src/utils.ts:251`)
 - `.engram/agent_rules_cache.json` — cached agent rules (7-day TTL)
 - `.engram/backups/` — user-triggered backup files
 
@@ -134,10 +162,15 @@ provided by the agent — not raw file content.
 
 ### Network Access
 
-The only outbound network calls come from the **update check**
-(`update.service.ts`): the latest published version number from the npm
-registry (`registry.npmjs.org`), falling back to the GitHub releases API
-(`api.github.com`) when npm is unreachable. These are:
+Engram makes outbound network calls from exactly **two** places in `src/`, both
+version checks against the npm registry:
+
+| Source | Call |
+|---|---|
+| `src/services/update.service.ts` | latest published version from `registry.npmjs.org`, falling back to the GitHub releases API (`api.github.com`) when npm is unreachable |
+| `src/installer/index.ts` | latest published version from `registry.npmjs.org`, to show whether the installed copy is current |
+
+Both are:
 
 - Fire-and-forget (async, non-blocking)
 - Version number only, no identifying information sent
@@ -152,7 +185,8 @@ The `agent_rules` returned by `engram_session(action:"start")` ship inside the
 npm package. They are versioned with the release, and **no file on disk and no
 network response can influence them.**
 
-Up to and including v1.11.0 this was not true. Engram fetched rules from the
+Up to and including **v1.12.0** this was not true, and **v1.13.0 is the release
+that fixes it.** Engram fetched rules from the
 GitHub README at session start — an undisclosed outbound call this section
 previously denied — and cached them at `.engram/agent_rules_cache.json`, which
 was read back with a cast rather than a validation. Because `.gitignore` does
@@ -160,7 +194,7 @@ not stop a repository from *shipping* a file, any repository could commit that
 cache and hand every agent that opened the project a set of attacker-authored
 instructions labelled CRITICAL and binding, permanently and offline.
 
-That entire mechanism has been removed rather than hardened, which is the fix
+That entire mechanism has been **removed in v1.13.0** rather than hardened, which is the fix
 Anthropic shipped for the structurally identical CVE-2026-21852 ("MemoryTrap")
 in Claude Code v2.1.50. Validating untrusted instructions harder still leaves
 you loading untrusted instructions.

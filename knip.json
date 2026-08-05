@@ -1,0 +1,31 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/index.ts", "src/scripts/install-hooks.ts"],
+  "project": ["src/**/*.ts"],
+  "ignore": [
+    "src/**/*.d.ts",
+    "src/tools/backup.ts",
+    "src/tools/changes.ts",
+    "src/tools/compaction.ts",
+    "src/tools/conventions.ts",
+    "src/tools/coordination.ts",
+    "src/tools/decisions.ts",
+    "src/tools/export-import.ts",
+    "src/tools/file-notes.ts",
+    "src/tools/intelligence.ts",
+    "src/tools/knowledge.ts",
+    "src/tools/milestones.ts",
+    "src/tools/report.ts",
+    "src/tools/scheduler.ts",
+    "src/tools/stats.ts",
+    "src/tools/tasks.ts"
+  ],
+  "ignoreBinaries": ["reg", "ioreg"],
+  "rules": {
+    "exports": "warn",
+    "types": "warn",
+    "enumMembers": "warn",
+    "classMembers": "warn",
+    "duplicates": "warn"
+  }
+}

@@ -33,3 +33,47 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  # Added in v1.13.0. Until this release the published line ran build + test
+  # only, so the capability-surface, HTTP-surface and dead-code gates existed
+  # solely on an unpushed review branch and had never executed here at all.
+  #
+  # The two generator gates ALSO run inside `npm test`
+  # (tests/process/ci-parity.test.ts). That is what makes them impossible to
+  # lose to a workflow edit, which is exactly how they came to be missing:
+  # two branches carried two different workflow files and nothing compared
+  # them. This job exists to isolate the failure and to give knip a home.
+  surface:
+    name: Capability surface
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Regenerates docs/CAPABILITY-SURFACE.md from the Zod schemas and fails if
+      # it differs from what is committed, so a removed action, a dropped enum
+      # or a loosened bound blocks the merge instead of shipping unnoticed.
+      - name: Check capability surface is up to date
+        run: node scripts/generate-capability-surface.mjs --check
+
+      # The other half of the contract: this gates the HTTP API the dashboard
+      # consumes.
+      - name: Check HTTP surface is up to date
+        run: node scripts/generate-http-surface.mjs --check
+
+      # Dead-code detection. knip.json is scoped to src/; packages/* are
+      # separate build entry points and are not analysed here.
+      - name: Check for dead code
+        run: npx -y knip@5 --no-progress
