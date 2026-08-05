@@ -154,7 +154,7 @@ Lazy singleton over `~/.engram/global.db` with its own hand-rolled schema. **No 
 > **Only 4 of the 20 files in `src/tools/` are reachable.** `index.ts` imports exactly:
 > `registerSessionDispatcher` (`sessions.ts`), `registerMemoryDispatcher` (`dispatcher-memory.ts`), `registerAdminDispatcher` (`dispatcher-admin.ts`), `registerFindTool` (`find.ts`).
 >
-> The other **15 files (4,057 lines, 23% of `src/`) are dead** — verified zero external references. They are v1.6-era predecessors whose logic was copy-pasted into the dispatchers.
+> The other **15 files (4,057 lines, 22% of `src/`) are dead** — verified zero external references. They are v1.6-era predecessors whose logic was copy-pasted into the dispatchers.
 >
 > **Do not delete them yet.** They hold validation the live code lost. See §8.
 
@@ -437,17 +437,26 @@ Also: `dispatcher-smoke.test.ts` mocks `database.js` without `getServices`, so e
 
 | Area | Files | Lines | Live? |
 |---|---|---|---|
-| Core (`src/*.ts`) | 10 | ~2,900 | Yes |
-| `repositories/` | 14 | ~1,250 | Yes |
-| `services/` | 13 | ~2,700 | Yes |
-| `tools/` — live | 4 | 2,709 | Yes |
+| Core (`src/*.ts`, excl. http core) | 12 | 3,630 | Yes |
+| `repositories/` | 14 | 1,283 | Yes |
+| `services/` | 12 | 2,494 | Yes |
+| `tools/` — live | 4 | 2,970 | Yes |
 | `tools/` — dead | 15 | 4,057 | **No** |
 | `modes/` | 1 | 253 | Opt-in |
-| `knowledge/` | 8 | ~750 | Yes |
-| `installer/` | 4 | 1,619 | CLI only |
-| `http-routes/` + http core | 20 | ~1,000 | `--mode=http` only |
+| `knowledge/` | 8 | 734 | Yes |
+| `installer/` | 4 | 1,643 | CLI only |
+| `http-routes/` + http core | 20 | 1,193 | `--mode=http` only |
 | `scripts/` | 1 | 96 | npm script |
-| **Total `src/`** | **90** | **17,560** | **~77% reachable** |
+| **Total `src/`** | **91** | **18,353** | **~78% reachable** |
+
+> **Re-measured 2026-08-05 by FR-D8.** The previous row read 90 files / 17,560
+> lines / ~77%, and six of the ten sub-rows were also wrong — `services/` was
+> counted as 13 files when there are 12, and `tools/` — live had drifted 261
+> lines. Nothing recomputes this table; it is hand-maintained prose about the
+> codebase, which is finding F5's exact shape. The dead-code row is the only one
+> that held exactly, because that set has not changed. **This table should be
+> generated, not typed** — Engram task **#81**. Until it is, treat every number
+> here as of its stamp date, not as current.
 
 ---
 

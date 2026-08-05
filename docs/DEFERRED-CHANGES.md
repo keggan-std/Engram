@@ -618,6 +618,28 @@ dashboard and thin clients are built separately, and `knip`'s zero-config run
 flags them as unused entry points rather than as consumers — so the one tool that
 might notice is the one that has already been configured to look away.
 
+> **FR-D8 correction, 2026-08-05.** The conclusion above is right and **the
+> mechanism it rests on is wrong** — which matters, because the mechanism
+> determines the fix.
+>
+> `knip` does **not** flag `packages/*` as unused entry points. VERIFIED:
+> `knip.json` sets `project` to `["src/**/*.ts"]`; `packages/` appears in
+> `project`, `entry` and `ignore` **nowhere**. PROVEN by running the gate — no
+> `packages/*` path appears in knip's output at any severity, in any category.
+> They are not suppressed, not ignored, and not "looked away from": they are
+> **outside the analysis entirely**. Three shipped packages and 29 dashboard
+> files have never been subject to dead-code analysis of any kind.
+>
+> `.github/workflows/ci.yml:75-76` states the scoping is because `packages/*`
+> *"would drown the signal"* — describing the suppression of a noise that has
+> never been generated. The concern is still legitimate (see
+> [`foundations/08-codebase.md`](foundations/08-codebase.md) §4 T4, which rejects
+> merging them into the existing glob for exactly that reason), but it was being
+> offered as a description of current behaviour and it is not one.
+>
+> **Consequence for the action:** this entry's trigger is unchanged, but the work
+> is *adding* an analysis rather than *reconfiguring* one. Engram task **#83**.
+
 ---
 
 ## DONE
