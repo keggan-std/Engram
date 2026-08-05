@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `89fe95c`
+**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `a752310`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -13,13 +13,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `89fe95c` — merge(FR-D7): agent ergonomics — 7 of 10 domains complete |
+| **Working branch** | `v2-foundations` @ `a752310` — merge(FR-D9): process & traceability — 8 of 10 domains complete |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
 | **Uncommitted** | clean |
-| **Store** | schema V25 · 34 sessions · 26 decisions · 91 observations · 96 file notes |
+| **Store** | schema V25 · 35 sessions · 27 decisions · 96 observations · 96 file notes |
 
-**Latest active decision — #26:** FR-D7 ADOPTED — Engram's agent rules are replayed rather than enforced, and the product already concedes it; but the reason they fail is a surface defect, not agent indiscipline.
+**Latest active decision — #27:** FR-D9 ADOPTED — Engram's anti-drift machinery is real, well built, and pointed in exactly one direction: it gates structural drift between source and generated document, and it is blind both to the prose an agent actually reads and to the…
 
 **Nothing is marked in progress.**
 
@@ -29,9 +29,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **35** | `FR-D9-ProcessTraceability` | FR-D9 Process and Traceability complete and merged — 8 of 10 domains. |
 | **34** | `FR-D7-AgentErgonomics` | FR-D7 Agent Ergonomics complete and merged — 7 of 10 domains. |
 | **33** | `FR-D3-Storage` | FR-D3 Storage & Retrieval domain review complete and merged — 6 of 10 domains done. |
-| **32** | `claude-opus-5-orchestrator` | Handoff session. Created handoff #7 for the FR-D3 agent with startup friction, method notes and inherited findings. Acknowledged the two dead 2026-08-01 handoffs (#1, #2) that STATE.md says to ignore… |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -40,7 +40,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**55 open tasks.** The ones that gate everything else:
+**60 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -52,8 +52,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #9** — from `FR-D7-AgentErgonomics`, 2026-08-05 — **not yet acknowledged**.
-FR-D7 Agent Ergonomics complete and merged into v2-foundations — 7 of 10 domains done.
+**Read #10** — from `FR-D9-ProcessTraceability`, 2026-08-05 — **not yet acknowledged**.
+FR-D9 Process and Traceability complete and merged into v2-foundations — 8 of 10 domains done.
 
 ---
 
