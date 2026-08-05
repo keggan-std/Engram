@@ -1,11 +1,44 @@
 # Tripwire Patch Runbook — cherry-picking the four security fixes onto `main`
 
-**Date:** 2026-08-03 · **Status:** Verified · **Task:** #26 (FR-0f) item 3
+**Date:** 2026-08-03 · **Status:** Verified · **Re-verified:** 2026-08-05 · **Task:** #26 (FR-0f) item 3
 **Governs:** the emergency path in [`../DEFERRED-CHANGES.md`](../DEFERRED-CHANGES.md) **D11**, decision **#19**
 **Charter:** [`00-CHARTER.md`](00-CHARTER.md) §11b.2
 
 > **This document does not carry status.** It records a verified procedure.
 > Whether the tripwire has fired lives in the Engram task board.
+
+---
+
+## 0. Re-verification, 2026-08-05 — **still valid, zero drift**
+
+§7 says this document goes stale the moment either side moves, and the master
+plan flagged that its numbers were measured at 603 tests while the review line
+now runs 742. Re-run rather than assumed. **PROVEN**, in a throwaway worktree
+that was removed afterwards:
+
+| Check | Result |
+|---|---|
+| All four SHAs still resolve, unchanged | ✅ `f234052` `ea347e4` `53eba90` `87712f4`, same subjects and dates |
+| `main` gained a commit touching `src/` since 2026-08-03 | ❌ **No.** `git log main --since=2026-08-03 -- src/` is empty; `main` is still `1afe18f` |
+| Recipe B cherry-pick | ✅ Zero code conflicts. Both commits hit only the known `DU docs/ENGRAM_CONSTITUTION.md` |
+| Build | ✅ `BUILD_EXIT=0` |
+| Tests | ✅ `Test Files 27 passed (27)` · `Tests 579 passed (579)` · `TEST_EXIT=0` |
+| `npm ci` | ✅ exit 0, 260 packages, `better_sqlite3.node` from a **prebuilt binary** — no source compile |
+| `package.json` version in the result | ✅ `1.12.0`, confirming §6.1 |
+
+> **The "re-verify against 733 tests" instruction in the master plan was a
+> category error, and correcting it matters.** A Recipe B tree is `main`'s suite
+> plus what the two commits bring — **27 files / 579 tests**, which is exactly
+> what was recorded in 2026-08-03. The review line's 742 never enters this tree.
+> Expecting 733 here would have read as a catastrophic regression when nothing
+> was wrong.
+
+**One imprecision found in §6.2 and corrected there.** The claim *"Both gone in
+the cherry-picked tree"* is not quite right: `githubusercontent` is fully absent
+(0 matches), but the string `agent_rules_cache` survives **by design** as
+`LEGACY_CACHE_FILE`, annotated *"Legacy poisoning vector. Never read; detected
+only so it can be reported."* The network fetch and the blind trust are what were
+removed — not the filename.
 
 ---
 
@@ -173,9 +206,18 @@ $ git show main:src/services/agent-rules.service.ts | grep -n "githubusercontent
 16:const README_URL = `https://raw.githubusercontent.com/${GITHUB_REPO}/main/README.md`;
 ```
 
-Both gone in the cherry-picked tree; the only remaining `fetch(` in `src/` is the
-disclosed npm update check in `installer/index.ts:97`. This is a direct check of
-D11's premise that published v1.12.0 carries all four findings — **it does.**
+The only remaining `fetch(` in `src/` is the disclosed npm update check in
+`installer/index.ts:97`. This is a direct check of D11's premise that published
+v1.12.0 carries all four findings — **it does.**
+
+> **Corrected 2026-08-05.** This paragraph originally read *"Both gone in the
+> cherry-picked tree."* Re-measured: `githubusercontent` is gone (0 matches), but
+> `agent_rules_cache` **remains, deliberately** — `LEGACY_CACHE_FILE` at
+> `agent-rules.service.ts:38`, annotated *"Legacy poisoning vector. Never read;
+> detected only so it can be reported."* That is DEFERRED [D4](../DEFERRED-CHANGES.md)
+> working as designed: the file is surfaced, not silently deleted from a user's
+> tree. What `87712f4` removes is the fetch and the trust, not the name. Grepping
+> for the filename to confirm the fix would give the wrong answer.
 
 ---
 
