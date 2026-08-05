@@ -74,9 +74,65 @@ blocks a merge" — is currently satisfied by zero of the ten bindings.** They a
 local-run conventions with test files attached, which is precisely the artifact
 class §2 exists to reject.
 
-**This is sequencing item 0 and it costs one workflow merge.** Nothing else in
-this plan is worth doing first, because until it lands, every other item's
-"definition of done" is unenforceable by construction.
+### 2.1 — Why the existing binding could not see this *(added 2026-08-05)*
+
+Worth stating, because it is the mechanism and not just the symptom.
+[`tests/process/anti-drift.test.ts`](../tests/process/anti-drift.test.ts) already
+asserts that every GATED artifact "names a CI step that actually exists" — by
+reading `.github/workflows/ci.yml`. **That file is always the one on the branch
+running the test.** A suite can only ever read its own branch's workflow, so it
+is *structurally incapable* of detecting cross-branch workflow divergence. The
+gate was green on the branch where it did not matter, which is why 69 commits
+passed without anyone noticing.
+
+### 2.2 — "It costs one workflow merge" is wrong. PROVEN, 2026-08-05
+
+Checked with `git cat-file -e main:<path>` for each. On `main`, **every input the
+`surface` job needs is absent:**
+
+| Gate input | On `main`? | On `v2-foundations`? |
+|---|---|---|
+| `scripts/generate-capability-surface.mjs` | ❌ | ✅ |
+| `scripts/generate-http-surface.mjs` | ❌ | ✅ |
+| `knip.json` | ❌ | ✅ |
+| `docs/CAPABILITY-SURFACE.md` | ❌ | ✅ |
+| `docs/HTTP-SURFACE.md` | ❌ | ✅ |
+
+So porting the gates to `main` is a **five-file port plus a workflow edit**, not
+a workflow merge — and `knip` has never been run against `main`'s `src/` at all,
+so its first run there is an unknown, not a formality. This matters because item
+0 was sized as free and sequenced first *on that basis*.
+
+**And the second half of the definition of done needs a push.** GitHub Actions
+does not execute on unpushed refs. *"One of them has been observed failing"*
+cannot happen on `v2-foundations` while it has no upstream — which makes item 0
+partly dependent on §9 decision 2, a fact the original sequencing did not carry.
+
+### 2.3 — What actually landed, and why it is not a second CI job
+
+**Item 0's first half is done** — [`tests/process/ci-parity.test.ts`](../tests/process/ci-parity.test.ts),
+9 tests, green. The two generator `--check` gates now run inside **`npm test`**.
+
+Both workflows already run `npm test`. Putting the gates there means they execute
+on every branch under either workflow, locally before a push rather than only
+after one, and they **travel with a cherry-pick** — so Release A carries its own
+gates instead of inheriting `main`'s gate-free workflow.
+
+> **Rejected — add the `surface` job to `main`'s workflow.** It makes the gates
+> run on `main` today and re-creates the divergence class tomorrow: two workflow
+> files kept in step by hand, which is the mechanism that produced this finding.
+> The fix is to remove the divergence surface, not to police it. The `surface`
+> job stays in `ci.yml` — it isolates the failure, and D9's GATED registry
+> resolves against it.
+
+The file also carries a **ratchet**: a `run:` step in `ci.yml` that is neither
+mirrored into `npm test` nor classified as CI-only with a task fails the suite.
+One gate is classified CI-only — `knip`, because `npx -y knip@5` needs the
+network, and a gate that cannot pass offline is one a developer switches off
+(task **#95**). That residual is stated rather than hidden.
+
+**What remains of item 0** is the published line: the five-file port and the
+push. That half is sequencing item **0b** in §7.
 
 ---
 
@@ -301,9 +357,10 @@ of done is the binding, not the edit.
 
 | # | Item | Done when | Tasks |
 |---|---|---|---|
-| **0** | **Merge the CI job so the gates run** | `capability-surface --check`, `http-surface --check` and `knip` execute on push for `main` and the review line, and one of them has been observed failing | — |
-| **1** | **H1 — installer config clobber** | `addToConfig` rethrows; backup is blocking; `config-write-safety.test.ts` runs in CI | #46, #47 |
-| **2** | **Release A (`1.12.1`)** | Recipe B re-verified against 733 tests; H1/H2/H4 included; notes state why | #49 |
+| **0a** | ✅ **The gates run wherever `npm test` runs** — *done 2026-08-05* | `capability-surface --check` and `http-surface --check` fail `npm test` on any branch, under either workflow, with no push required. `knip` classified CI-only against a task | #93, #95 |
+| **0b** | **The published line gets the gates** | The five gate inputs (§2.2) exist on `main`, its workflow runs them, and one has been observed failing. **Needs a push — see §9 decision 2** | #93 |
+| **1** | ~~**H1 — installer config clobber**~~ **— code done; this is now delivery** | Nothing to build. See the correction below | #46 → #49 |
+| **2** | **Release A (`1.12.1`)** | Recipe B re-verified against the current suite; H1/H2/H4 included; notes state why | #49 |
 | **3** | **Advisory decision** | Published, or the extension recorded as a decision, by **2026-09-16** | #87 |
 | **4** | **Reject malformed records on write** | The one-regex acceptance test in task #91 rejects the convention-#7 signature; `update_observation` exists | #77, #91 |
 | **5** | **Provenance (D2 T1)** | Every memory row carries server-resolved author/route/trust tier | #38, #58 |
@@ -312,6 +369,34 @@ of done is the binding, not the edit.
 | **8** | **D7 T1 — per-action schemas** | **Blocked on 7** by D14. This dependency is stated in D8 and appears nowhere in D7 — a plan read from D7 alone would ship it early | #71 |
 | **9** | **Storage integrity** | FTS triggers exist; freshness cannot be laundered by a partial write | #35, #64 |
 | **10** | **Release B (`2.0.0`)** | Golden fixture migrates v1 → head in CI | #34, #49 |
+
+### 7.0a H1 was already fixed, and this table described the wrong fix *(added 2026-08-05)*
+
+**VERIFIED**, both trees read personally:
+
+| | |
+|---|---|
+| `v2-foundations` | [`src/installer/config-writer.ts:186-197`](../src/installer/config-writer.ts) rethrows `ConfigParseError` unconditionally and **writes nothing**. `writeJson` is temp-file-plus-rename |
+| `main` | `copyFileSync` inside `try{…}catch{/* best-effort */}`, then `config = {}`, then writes. Unchanged |
+
+The fix is commit **`dd3841d`** — a clean four-file commit (the D5 domain doc,
+`docs/STATE.md`, the fix, and `tests/installer/config-write-safety.test.ts` with
+**9 tests, all asserting safe behaviour, none pinning the defect**). It
+cherry-picks with the same docs-only `DU` conflict shape the runbook already
+documents.
+
+> **The definition of done in the row above was wrong and is corrected rather
+> than deleted.** It read *"`addToConfig` rethrows; backup is blocking."* The
+> second half describes a fix **D5 rejected in favour of a better one**: there is
+> no backup any more, because nothing is overwritten. A reader implementing from
+> this plan alone would have re-added a backup the domain deliberately removed —
+> which is §1's shape arriving inside the synthesis document, one level up.
+
+**Consequence for sequencing.** Item 1 is not development work. The hazard is
+live on published v1.12.0 and the only thing between users and the fix is
+delivery, so **item 1 collapses into item 2**. Task #46 is now `blocked` on #49
+rather than `backlog`, because "fixed on a branch nobody can install from" is not
+fixed.
 
 ### 7.1 Conflicts this plan resolves
 

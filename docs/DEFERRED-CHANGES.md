@@ -506,6 +506,31 @@ unpushed.** The residual risk is independent discovery on an unwatched repo.
 > watchers are irrelevant to a bug that fires on a malformed file. Engram task
 > **#46**; [`ENGRAM-MASTER-PLAN.md`](ENGRAM-MASTER-PLAN.md) §4.1 hazard **H1**.
 
+> ### 💰 And the hold's cost is now measured, not estimated *(added 2026-08-05)*
+>
+> The entry above argues the hazard is larger than D11 assumed. This adds the
+> other half of the trade: **the fix already exists and shipping it is small.**
+> VERIFIED by reading both trees:
+>
+> | | |
+> |---|---|
+> | `v2-foundations` | `src/installer/config-writer.ts:186-197` rethrows `ConfigParseError` and **writes nothing**; `writeJson` is temp-file-plus-rename |
+> | `main` | `copyFileSync` inside `try{…}catch{/* best-effort */}`, then `config = {}`, then writes. **Unchanged** |
+>
+> Commit **`dd3841d`** — four files: the D5 domain doc, `docs/STATE.md`, the fix,
+> and 9 tests that all assert *safe* behaviour with none pinning the defect. Its
+> only cherry-pick friction is the same docs-only `DU` shape
+> [`foundations/tripwire-patch-runbook.md`](foundations/tripwire-patch-runbook.md) §3
+> already documents.
+>
+> **This changes the shape of the decision, not the decision itself.** The hold
+> was reasoned as *"releasing costs a migration users pay twice for."* That
+> argument is about **Release B**. For H1 the cost is one cherry-pick onto a
+> branch that is already releasable, and the thing being held is a data-loss fix
+> for a bug in someone else's product's config file. Whether to ship remains the
+> maintainer's call — but it should be made against the measured cost, not an
+> assumed one.
+
 > The earlier framing of this as urgent applied settled input 1 (*public product,
 > wide adoption*) as a **current** state. It is the **target** state. The threat
 > model has to be calibrated to actual exposure.
