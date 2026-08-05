@@ -236,7 +236,46 @@ release until the master plan is drafted and solidified" — this document is th
 condition being met, and it does not require all 68 open tasks to land first
 (charter kill switch 2 exists to prevent exactly that).
 
-**Release A — `1.12.1`, a patch off `main`. Non-breaking. Ships first.**
+> ### ✅ Assembled and verified 2026-08-05 — **and it is `1.13.0`, not `1.12.1`**
+>
+> Branch **`release/1.13.0`** (`c4fac06`), cut from `main`. **Not pushed, not
+> published.** Five cherry-picks in review-line chronological order — `53eba90`,
+> `87712f4`, `e310269` (H2), `dd3841d` (H1), `19e9274` (H4) — with only the
+> known docs-only `DU` conflicts, plus item **0b**: both generators, `knip.json`,
+> the two surfaces **regenerated from that tree**, the `surface` job in `ci.yml`,
+> and `ci-parity.test.ts`. VERIFIED there: build exit 0 · **617/617 across 31
+> files** · all three gates exit 0 · `npm pack` 342.8 kB / 363 files.
+> **`knip` is green on `main`'s source** — measured, not assumed; §2.2 flagged it
+> as the one unknown and it is now closed.
+>
+> **Why the version changed.** H4's commit is **not isolable**. The same commit
+> turns `POST /api/v1/import` from `200 {"ok":true,"status":"staged"}` — which
+> wrote nothing — into `501 NOT_IMPLEMENTED`, and also makes `/health` return
+> 503 and `compact` abort when its safety backup fails. The `/import` change is a
+> response-shape change, so **"non-breaking patch" would have been a false claim
+> in the one release whose purpose is removing false claims.** D6's domain doc
+> pairs the two fixes as a single designed target, so splitting them would mean
+> shipping a hand-edited variant of a reviewed commit and losing the
+> byte-identical property the runbook relies on. A minor costs nothing and states
+> the truth. No required parameter was added; no migration runs.
+>
+> This is the **second** independent instance of *"the version we planned is
+> wrong for the contents"* — the runbook found the first (Recipe A is a minor
+> because `f234052` requires `agent_name`). Both were found by attempting the
+> release rather than by reading the plan.
+>
+> **One inherited test broke, and it was invisible until run.** `mcp-wire`'s
+> error-envelope pin probed `end` with `session_id: 999999` and depended on a
+> rejection that only `f234052` — the excluded breaking commit — introduces. On
+> the release tree it returned *success*. The probe now uses
+> `acknowledge_handoff`, which errors on both trees, and the underlying truth is
+> pinned as a new DEFECT against 2.0.0: **`end` ignores `session_id` entirely and
+> closes the newest open session.** A test suite cherry-picked out of its own
+> history does not necessarily test what its name says.
+>
+> **What is left is `npm publish` and a push — both the maintainer's.**
+
+**Release A — ~~`1.12.1`, a patch~~ `1.13.0`, a minor off `main`. Ships first.**
 
 Contents: H1, H2, H3, H4. The [tripwire runbook](foundations/tripwire-patch-runbook.md)
 already verified **Recipe B** (N1 + N2) cherry-picks onto `main` with zero code
@@ -377,9 +416,9 @@ of done is the binding, not the edit.
 | # | Item | Done when | Tasks |
 |---|---|---|---|
 | **0a** | ✅ **The gates run wherever `npm test` runs** — *done 2026-08-05* | `capability-surface --check` and `http-surface --check` fail `npm test` on any branch, under either workflow, with no push required. `knip` classified CI-only against a task | #93, #95 |
-| **0b** | **The published line gets the gates** | The five gate inputs (§2.2) exist on `main`, its workflow runs them, and one has been observed failing. **Needs a push — see §9 decision 2** | #93 |
-| **1** | ~~**H1 — installer config clobber**~~ **— code done; this is now delivery** | Nothing to build. See the correction below | #46 → #49 |
-| **2** | **Release A (`1.12.1`)** | Recipe B re-verified against the current suite; H1/H2/H4 included; notes state why | #49 |
+| **0b** | ✅ **The published line gets the gates** — *prepared 2026-08-05* | Done on `release/1.13.0`: five gate inputs ported, `surface` job added, `knip` measured **green** on `main`'s source. Ships with Release A | #93 |
+| **1** | ~~**H1 — installer config clobber**~~ **— code done; this is now delivery** | Nothing to build. See §7.0a | #46 → #49 |
+| **2** | ✅ **Release A (`1.13.0`)** — *assembled and verified, awaiting publish* | `release/1.13.0` @ `c4fac06`: all four hazards, 617/617, three gates at exit 0, notes state why. **Remaining: `npm publish` + push — the maintainer's** | #49 |
 | **3** | **Advisory decision** | Published, or the extension recorded as a decision, by **2026-09-16** | #87 |
 | **4** | **Reject malformed records on write** | The one-regex acceptance test in task #91 rejects the convention-#7 signature; `update_observation` exists | #77, #91 |
 | **5** | **Provenance (D2 T1)** | Every memory row carries server-resolved author/route/trust tier | #38, #58 |
