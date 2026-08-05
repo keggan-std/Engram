@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `18dad68`
+**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `e35cedb`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `18dad68` — chore(FR-D10): regenerate STATE.md — handoff #12 and session 37 both present |
+| **Working branch** | `v2-foundations` @ `e35cedb` — merge(Phase 2): master plan — Phase 1 synthesised, release strategy owned |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **7 file(s)** — `SECURITY.md`, `docs/DEFERRED-CHANGES.md`, `docs/README.md`, `docs/STATE.md` … |
-| **Store** | schema V25 · 38 sessions · 29 decisions · 112 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V25 · 38 sessions · 30 decisions · 114 observations · 96 file notes |
 
-**Latest active decision — #29:** FR-D10 ADOPTED — bind the public surface with referential-integrity tests, and split the false denial in SECURITY.md from the disclosure decision it was accidentally bundled with.
+**Latest active decision — #30:** PHASE 2 ADOPTED — master plan written. One finding organises all ten domains: an advertised capability that does not execute. Release splits in two (1.12.1 patch off main, 2.0.0 later from the review line). Tripwire gets a 45-day clock, 20…
 
 **In progress:** #84 FR-D10 T1 — remove the false network-access denial from main's SECURITY.md (documentation only, NOT a release)
 
@@ -36,7 +36,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **38** | `FR-Phase2-MasterPlan` | _(in progress)_ |
+| **38** | `FR-Phase2-MasterPlan` | Phase 2 complete — docs/ENGRAM-MASTER-PLAN.md written, decision #30, merged to v2-foundations at e35cedb. |
 | **37** | `FR-D10-PublicSurface` | FR-D10 Public Surface complete and merged into v2-foundations — ALL 10 DOMAINS DONE, Phase 1 finished. |
 | **36** | `FR-D8-CodebaseMaintainability` | FR-D8 Codebase and Maintainability complete and merged into v2-foundations — 9 of 10 domains done. |
 
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #12** — from `FR-D10-PublicSurface`, 2026-08-05 (already acknowledged).
-FR-D10 complete and merged. All 10 domains done — Phase 1 is finished. Next is Phase 2, the master plan (task #11).
+**Read #13** — from `FR-Phase2-MasterPlan`, 2026-08-05 — **not yet acknowledged**.
+Phase 2 master plan drafted and merged. Next is item 0 — make the gates run in CI — then the sequencing table.
 
 ---
 
