@@ -344,7 +344,28 @@ drift again.
 
 ## D8 — `RELEASE_NOTES.md` has no Unreleased section; four P0 fixes are unrecorded
 
-**Status:** ACTIVE · **Raised:** 2026-08-02
+**Status:** ACTIVE — **the recommended format is now in question** · **Raised:** 2026-08-02
+
+> **FR-D9 update, 2026-08-05.** §3b changed this entry's recommendation, which is
+> the point of §3b. **Do not adopt Keep a Changelog unexamined.**
+>
+> 1. **Its own maintainers say the generated form is insufficient** — *"a generated
+>    changelog is raw material at best… machines can draft, but humans curate"*
+>    ([keepachangelog.com 1.1.0](https://keepachangelog.com/en/1.1.0/), read
+>    directly). This project's whole strategy is generation plus a diff gate, so
+>    that caveat lands squarely on it.
+> 2. **A rival spec exists specifically because of a failure mode we would
+>    inherit.** [Common Changelog](https://common-changelog.org/) was created in
+>    part because Keep a Changelog's `[Unreleased]` section creates merge-conflict
+>    friction that discourages upkeep. That friction is the exact mechanism by
+>    which this project's other hand-maintained registers died — finding F5, and
+>    `project-state-tracking-design.md` §1.
+>
+> **Action added:** evaluate Common Changelog against Keep a Changelog in the
+> master plan. Whichever wins **must** record removals — the `lock_file` incident
+> is why the `Removed` section matters here. Not decided by FR-D9; flagged so the
+> master plan does not inherit an unexamined choice. See
+> [`foundations/09-process.md`](foundations/09-process.md) §4 T6.
 
 **What.** `RELEASE_NOTES.md` is a single-release document, currently v1.11.0. It
 has no `[Unreleased]` section, so the four P0 fixes on this branch — two of them
