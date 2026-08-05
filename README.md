@@ -226,9 +226,16 @@ Starting with v1.7.0, the main server itself can expose a **single `engram` tool
 
 Or set `ENGRAM_MODE=universal` as an environment variable instead of using the flag.
 
-### Option 4: Universal Thin Client Package (Legacy — v1.6.x)
+### Option 4: Universal Thin Client Package (Legacy — v1.6.x) — **UNPUBLISHED, does not install**
 
-The original separate proxy package for maximum token efficiency. Still works; prefer Option 3 for v1.7+ installs.
+> **This option does not work and never has.** `engram-universal-client` and
+> `engram-thin-client` have **never been published to npm** — both return
+> `E404`. The configuration below is kept for reference because the source
+> lives in `packages/`, but any `npx` line naming these packages will fail.
+> **Use Option 3 (`--mode=universal`), which is built in and needs no extra
+> package.** See [`docs/foundations/10-public-surface.md`](docs/foundations/10-public-surface.md) §2.4.
+
+The original separate proxy package design, for maximum token efficiency.
 
 **Cursor** (`~/.cursor/mcp.json`):
 

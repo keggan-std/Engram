@@ -19,17 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-## Third-Party Dependencies
-
-Engram bundles or depends on the following open-source packages, all MIT-licensed:
-
-| Package                     | Copyright                | Source                                                                   |
-| --------------------------- | ------------------------ | ------------------------------------------------------------------------ |
-| `better-sqlite3`            | (c) 2016 Joshua Wise     | https://github.com/WiseLibs/better-sqlite3/blob/master/LICENSE           |
-| `@modelcontextprotocol/sdk` | (c) 2024 Anthropic, PBC  | https://github.com/modelcontextprotocol/typescript-sdk/blob/main/LICENSE |
-| `zod`                       | (c) 2020 Colin McDonnell | https://github.com/colinhacks/zod/blob/master/LICENSE                    |
-
-Full license texts are available inside `node_modules/` after installation.

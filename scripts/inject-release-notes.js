@@ -64,4 +64,8 @@ pkg.releaseNotes = releaseNotes;
 
 fs.writeFileSync(PACKAGE_JSON_PATH, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 
-console.log(`✅ inject-release-notes: injected ${releaseNotes.length} chars into package.json (v${pkg.version})`);
+// stderr, not stdout: this script runs inside `prepack`, so anything it writes
+// to stdout lands in the middle of `npm pack --json` / `npm publish --json`
+// output and makes it unparseable (FR-D10 §2.7). Progress messages are
+// diagnostics, and diagnostics go to stderr.
+console.error(`✅ inject-release-notes: injected ${releaseNotes.length} chars into package.json (v${pkg.version})`);
