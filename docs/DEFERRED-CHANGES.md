@@ -565,6 +565,40 @@ are what get quoted.
 
 ---
 
+## D14 — FR-D7's T1 reshapes the advertised MCP schema, and no gate reports what that breaks
+
+**Status:** ACTIVE · **Raised:** 2026-08-05 · **Owner:** FR-D7 target T1, task #71
+
+**What.** `engram_memory` advertises **79 optional top-level parameters** for 38
+actions, and `engram_admin` 32 for 37, with nothing marking which apply to the
+action being called. T1 replaces that with per-action schemas. That is the right
+fix and it is a **consumer-visible change to the tool contract.**
+
+**Why it matters.** Charter §11b.1 already names this gap and it is still open:
+`CAPABILITY-SURFACE.md` covers the MCP tool contract, but **the HTTP API and
+`packages/*` have no equivalent**, so a schema reshape can break the dashboard
+and both thin clients with nothing reporting it. This is the same hazard that
+section flagged for FR-D6's response envelope, arriving from a second direction —
+which is itself the argument that the gap is structural rather than specific to
+D6.
+
+Note what is *not* deferred: nothing here licenses **cutting actions**. Charter
+kill switch 3 forbade that on the FR-0c distinctness result, and FR-D7 §3b added
+a second independent reason ([TxAgent](https://arxiv.org/abs/2503.10970): adding
+211 curated tools *improved* reasoning). T1 changes how parameters are
+*advertised*, not how many actions exist.
+
+**Trigger.** When `packages/*` and the HTTP API have a generated surface with a
+CI diff gate, the way the MCP contract already does. Owned by **FR-D6**, flagged
+to **FR-D8**. Until then T1 can be designed and tested but must not merge.
+
+**Would it be caught otherwise?** **No.** That is precisely the finding: the
+dashboard and thin clients are built separately, and `knip`'s zero-config run
+flags them as unused entry points rather than as consumers — so the one tool that
+might notice is the one that has already been configured to look away.
+
+---
+
 ## DONE
 
 *(Entries move here when resolved, with the commit that closed them. Nothing yet.)*

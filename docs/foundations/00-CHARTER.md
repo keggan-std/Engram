@@ -296,6 +296,24 @@ no-recall runs are *not* a valid control, because tasks where nothing was recall
 systematically different from tasks where something was. A confounded baseline is worse
 than none.
 
+> **The pair, fixed in advance: FR-D8 and FR-D10.** Decided 2026-08-05 by the
+> maintainer — Engram **decision #25**, whose row timestamp is what makes "in advance"
+> checkable, and before either document exists.
+>
+> This is a correction, and recording it as one matters more than the choice. **Six
+> domains completed with neither arm running suppressed**, and D7 was already
+> contaminated by a full-recall session start before the gap was noticed — so the pair
+> could only be drawn from D9, D8 and D10, which is a narrower field than §10.4
+> intended. D8 and D10 were chosen because both are judgeable from the artifact itself
+> (the source tree; README and SECURITY.md), so withholding recall tests the instrument
+> rather than handicapping the domain. **D9 was deliberately left running normally:** it
+> owns the anti-drift machinery and leans hardest on the stored record, so suppressing it
+> would measure the domain instead of the instrument.
+>
+> Choosing afterwards which completed docs "felt like" controls is exactly the selection
+> bias this section exists to prevent. It was very nearly what happened. See observation
+> **#90** for the state of instrument 1, which is also behind.
+
 ### 10.5 Retirement criteria — written before the data exists
 
 These are commitments, not guidelines. If one fires, the feature goes.
