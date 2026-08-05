@@ -198,6 +198,13 @@ let m = `# Project State — read this first
 > If you find yourself editing this file, the answer is to fix the record it came from.
 > A register kept by discipline is audit finding F5 repeating (observation #30).
 
+> ⚠️ **This file IS Engram recall.** It is generated *from* the store, so reading it
+> delivers decisions, sessions, tasks and observations into your context — even if you
+> never call a recall action. **If you are running a suppressed arm of the charter §10
+> experiment, you have just been contaminated; record it.** Both pre-registered arms
+> leaked through this file before anyone noticed. See
+> [\`foundations/00-CHARTER.md\`](foundations/00-CHARTER.md) §10.4a.
+
 ---
 
 ## Where we are

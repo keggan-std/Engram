@@ -185,7 +185,8 @@ The `agent_rules` returned by `engram_session(action:"start")` ship inside the
 npm package. They are versioned with the release, and **no file on disk and no
 network response can influence them.**
 
-Up to and including v1.11.0 this was not true. Engram fetched rules from the
+Up to and including **v1.12.0 — which is the current published release** — this
+was not true. Engram fetched rules from the
 GitHub README at session start — an undisclosed outbound call this section
 previously denied — and cached them at `.engram/agent_rules_cache.json`, which
 was read back with a cast rather than a validation. Because `.gitignore` does
