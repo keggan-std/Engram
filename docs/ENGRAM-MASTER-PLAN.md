@@ -1,8 +1,20 @@
 # Engram — Master Plan
 
-**Date:** 2026-08-05 · **Status:** Draft for adoption · **Engram task:** #11
+**Date:** 2026-08-05 · **Status:** **Adopted, except §9** · **Engram task:** #11
 **Produced by:** the foundations review — [`foundations/00-CHARTER.md`](foundations/00-CHARTER.md) Phase 2
 **Inputs:** ten domain documents, [`foundations/01`](foundations/01-durability.md)…[`10`](foundations/10-public-surface.md) · [`DEFERRED-CHANGES.md`](DEFERRED-CHANGES.md) · [`foundations/measurements/`](foundations/measurements/README.md)
+
+> **Status, settled 2026-08-05 by the maintainer.** §§1–8 and §10 are **adopted**
+> and binding: the direction, the cut list and the sequencing are decided, and a
+> change to them needs a new decision rather than a re-reading of this file. The
+> four items in **§9 remain open and are the maintainer's alone** — nothing in
+> this document may be read as having settled them.
+>
+> Recorded because the record and the document disagreed: Engram decision **#30**
+> was titled *"PHASE 2 ADOPTED"* while this header still read *"Draft for
+> adoption."* Two readers would have reached two different answers about whether
+> the plan was binding, which is §1's shape arriving in the synthesis document
+> itself. Decision **#32** resolves it.
 
 > **This document does not carry status.** Progress lives in the Engram task board.
 > It is deliberately **thin**: index, direction, cut list, sequencing, release strategy.
@@ -231,9 +243,16 @@ already verified **Recipe B** (N1 + N2) cherry-picks onto `main` with zero code
 conflicts. H1's fix is small and non-breaking (rethrow instead of `config = {}`;
 make the backup blocking). H2 is already fixed on the review line.
 
-> **Re-verify before use.** The runbook's "builds and passes 603/603" was measured
-> at 603 tests. The suite is now **733 across 41 files**. The cherry-pick result
-> must be re-run, not assumed.
+> **Re-verified 2026-08-05 — still valid, zero drift.** Recipe B cherry-picks
+> with zero code conflicts, builds at exit 0, and passes **579/579 across 27
+> files**. `main` has not moved since the original measurement.
+>
+> **And this paragraph's own instruction was wrong.** It read *"the suite is now
+> 733 across 41 files, the cherry-pick result must be re-run"* — implying the
+> result should show 733. A Recipe B tree is `main`'s suite plus what the two
+> commits bring; the review line's 742 never enters it. 579 is the correct
+> figure and it is unchanged. Expecting 733 would have read as a catastrophic
+> regression when nothing was wrong. See the runbook's §0.
 
 **Release B — `2.0.0`, from the review line. Breaking. Ships when its targets land.**
 
