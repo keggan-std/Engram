@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `bfba852`
+**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `6777b5a`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `bfba852` — chore(Phase 2): regenerate STATE.md — handoff #14, session 39, decision #33 |
+| **Working branch** | `v2-foundations` @ `6777b5a` — feat(Phase 3): CLAUDE.md, bound — and it is recall channel 4 |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **5 file(s)** — `docs/ENGRAM-MASTER-PLAN.md`, `docs/README.md`, `docs/foundations/00-CHARTER.md`, `CLAUDE.md` … |
+| **Uncommitted** | clean |
 | **Store** | schema V25 · 41 sessions · 34 decisions · 123 observations · 96 file notes |
 
 **Latest active decision — #34:** CLAUDE.md now exists at the repo root, is bound by tests/process/claude-md.test.ts, and is registered as a FOURTH recall channel under charter §10.4a.
@@ -36,7 +36,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **41** | `claude-opus-5-session-40` | _(in progress)_ |
+| **41** | `claude-opus-5-session-40` | CHARTER PHASE 3 OPENED — CLAUDE.md exists at the repo root, is bound by a test, and is registered as recall channel 4. |
 | **40** | `claude-opus-5-session-40` | (auto-closed: new session started) |
 | **39** | `FR-Phase2-Item0` | ITEM 0 LANDED AND RELEASE A IS ASSEMBLED AND VERIFIED, unpushed and unpublished. |
 
