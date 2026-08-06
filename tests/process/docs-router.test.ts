@@ -43,13 +43,25 @@
 //      agent reads nothing and believes it read the map. Same reasoning as
 //      `claude-md.test.ts` assertion 2.
 //
-//   3. NO LIVE STORE COUNT. The honest binding here is the ABSENCE form, and the
-//      reason is the one that makes `STATE.md` UNGATED in `anti-drift.test.ts`:
-//      the store lives in `.engram/`, which `.gitignore` excludes, so CI cannot
-//      read it and cannot check whether a quoted number is right. Asserting the
-//      numbers match is therefore impossible in principle. Asserting no number is
-//      quoted is checkable everywhere, and it is also the better rule — a correct
-//      count in a hand-maintained file buys exactly one session.
+//   3. NO LIVE COUNT — OF THE STORE OR OF THE TREE. One rule, stated once: the
+//      router ROUTES; it does not RESTATE. It exists to say which document owns
+//      a number, and every number it quotes instead is one more copy to keep in
+//      step by hand.
+//
+//      For STORE counts the ABSENCE form is the only one possible, for the
+//      reason that makes `STATE.md` UNGATED in `anti-drift.test.ts`: the store
+//      lives in `.engram/`, which `.gitignore` excludes, so CI cannot read the
+//      source and cannot know whether a quoted number is right.
+//
+//      For TREE counts a MATCHING form *would* be possible — `src/` is
+//      committed and CI can count it. It is still rejected, and this is the
+//      part worth carrying forward: the router said "All 90 `src/` files" while
+//      `ENGRAM_CONSTITUTION.md` §13 — the document that sentence describes —
+//      had been re-measured to **91** the day before, and says of itself
+//      "nothing recomputes this table; treat every number here as of its stamp
+//      date" (task #81). A matching assertion would have kept the copy correct
+//      and left the deeper defect intact: two documents owning one fact. The
+//      fix is for the router to name the owner and stop carrying the value.
 //
 //   4. BOTH ENTRY POINTS POINT AT EACH OTHER. `STATE.md` and `CLAUDE.md` must be
 //      named. A one-directional pointer between entry points is how a generated
@@ -120,19 +132,31 @@ describe("docs/README.md — the router's binding", () => {
     ).toEqual([]);
   });
 
-  it("quotes no live store count — charter §2", () => {
-    // The defect signature, verbatim: a digit, then a store noun. `STATE.md` is
-    // regenerated from the store and is the only file permitted to carry these;
-    // this one is hand-maintained and is not.
-    const NOUNS = "file notes|open tasks|decisions|observations|conventions|sessions";
-    const offences = [...body.matchAll(new RegExp(`\\b\\d[\\d,]*\\+?\\s+(?:${NOUNS})\\b`, "gi"))]
+  it("quotes no live count of the store or the tree — it routes, it does not restate", () => {
+    // The defect signature, verbatim: a digit, then a noun naming something that
+    // changes underneath the sentence. The first six are store facts and belong
+    // to `docs/STATE.md`, which is regenerated. `files` is a tree fact and
+    // belongs to `ENGRAM_CONSTITUTION.md` §13, which stamps its own date.
+    //
+    // Up to two intervening word-shaped tokens are allowed between the number
+    // and the noun, and that allowance is not decoration: the real sentence was
+    // "All 90 `src/` files", and the first version of this assertion — which
+    // required the noun to follow the digit directly — passed on it. Found by
+    // tampering rather than by reading, which is the whole reason charter §5
+    // requires a binding be PROVEN able to fail before it is believed.
+    const NOUNS = "file notes|open tasks|decisions|observations|conventions|sessions|files";
+    const GAP = "(?:[`'\"*_A-Za-z0-9./-]{1,16}\\s+){0,2}";
+    const offences = [
+      ...body.matchAll(new RegExp(`\\b\\d[\\d,]*\\+?\\s+${GAP}(?:${NOUNS})\\b`, "gi")),
+    ]
       .map((m) => m[0])
       .sort();
 
     expect(
       offences,
-      "a live store count reappeared in the router. It will be wrong within a session — " +
-        "link to docs/STATE.md, which is regenerated from the store, instead.",
+      "a live count reappeared in the router. It will be wrong within a session (store) or " +
+        "within a commit (tree) — name the document that owns the number instead: " +
+        "docs/STATE.md for the store, ENGRAM_CONSTITUTION.md §13 for the tree.",
     ).toEqual([]);
   });
 
