@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `6777b5a`
+**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `1128a1c`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `6777b5a` — feat(Phase 3): CLAUDE.md, bound — and it is recall channel 4 |
+| **Working branch** | `v2-foundations` @ `1128a1c` — fix(Phase 3): the router's own binding was blind to the sentence it was written for |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
 | **Uncommitted** | clean |
-| **Store** | schema V25 · 41 sessions · 34 decisions · 123 observations · 96 file notes |
+| **Store** | schema V25 · 42 sessions · 35 decisions · 125 observations · 96 file notes |
 
-**Latest active decision — #34:** CLAUDE.md now exists at the repo root, is bound by tests/process/claude-md.test.ts, and is registered as a FOURTH recall channel under charter §10.4a.
+**Latest active decision — #35:** docs/README.md is now bound by tests/process/docs-router.test.ts.
 
 **In progress:** #49 FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **42** | `claude-opus-5-session-42` | THE DOCUMENTATION ROUTER IS BOUND — AND FIVE OF TEN COMPLETED DOMAIN DOCS WERE UNREACHABLE FROM IT. |
 | **41** | `claude-opus-5-session-40` | CHARTER PHASE 3 OPENED — CLAUDE.md exists at the repo root, is bound by a test, and is registered as recall channel 4. |
 | **40** | `claude-opus-5-session-40` | (auto-closed: new session started) |
-| **39** | `FR-Phase2-Item0` | ITEM 0 LANDED AND RELEASE A IS ASSEMBLED AND VERIFIED, unpushed and unpublished. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**70 open tasks.** The ones that gate everything else:
+**71 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #15** — from `claude-opus-5-session-40`, 2026-08-06 — **not yet acknowledged**.
-Charter Phase 3 opened: CLAUDE.md exists at the repo root, is bound, and is registered as recall channel 4.
+**Read #16** — from `claude-opus-5-session-42`, 2026-08-06 — **not yet acknowledged**.
+Phase 3 second artifact: docs/README.md is bound.
 
 ---
 
