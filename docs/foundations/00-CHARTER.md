@@ -337,6 +337,35 @@ three, and only one of them is session start:
 > context — including generated re-exports of the store, and stored content
 > returned by write calls.** Calling no recall *action* is not suppression.
 
+##### Channel 4 — `CLAUDE.md` *(added 2026-08-06, Engram decision #34)*
+
+| # | Channel | What it carries |
+|---|---|---|
+| 4 | **`CLAUDE.md`** — the repo-root instruction file, auto-loaded into every session before the first tool call | One stored convention: **#7's write-order rule**. Nothing else; the rest of the file is pointers |
+
+**This channel did not exist when the arms ran, so it did not leak into them** —
+the three above are the historical record of D8 and D10 and are unchanged. It is
+registered here because the pair is complete and any *future* suppressed run
+would be contaminated by a file it is told to read first.
+
+**Why the leak was accepted rather than removed.** Convention #7's rule must be
+known *before* a session's first write, and every other route to it is itself a
+write — so the one channel that cannot be closed by ordering is this one.
+Malformed writes have already cost 31 records 34 fields, and the server-side
+rejection is still open (task #91). A declared channel is cheaper than a
+corrupted row.
+
+**The mitigation is §10.4a's own**, applied unchanged: the file *declares itself*
+at the point of reading rather than instructing agents not to read it, because
+"an instruction contradicting the entry-point document will lose." Unlike
+`STATE.md`, whose declaration lives in its generator, this one is enforced —
+[`tests/process/claude-md.test.ts`](../../tests/process/claude-md.test.ts)
+asserts the declaration is present, so a later edit cannot quietly drop it.
+
+**Consequence for R1, restated because the count changed.** §10.5's R1 retires
+*"auto-loading memory at session start."* Three of the four channels are not
+session start. R1 as written closes one of four.
+
 **This is a finding about R1, not only about the arms.** R1 (§10.5) defines
 retirement as *"stop auto-loading memory at session start."* Two of the three
 channels above are not session start, so **R1 as written would not achieve what

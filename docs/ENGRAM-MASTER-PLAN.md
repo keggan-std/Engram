@@ -15,6 +15,12 @@
 > adoption."* Two readers would have reached two different answers about whether
 > the plan was binding, which is §1's shape arriving in the synthesis document
 > itself. Decision **#32** resolves it.
+>
+> **Corrected 2026-08-06 — the third source outlived the fix.** The header and
+> the Engram record were both put right, and the machine-readable marker at the
+> foot of this file still read `:DRAFT` for another session. It now reads
+> `:ADOPTED-EXCEPT-S9`. Worth noting rather than silently editing: the fix for a
+> two-source disagreement was applied to two sources, and the count was three.
 
 > **This document does not carry status.** Progress lives in the Engram task board.
 > It is deliberately **thin**: index, direction, cut list, sequencing, release strategy.
@@ -534,4 +540,4 @@ Written before attachment forms.
 
 ---
 
-<!-- ENGRAM_MASTER_PLAN:DRAFT -->
+<!-- ENGRAM_MASTER_PLAN:ADOPTED-EXCEPT-S9 -->

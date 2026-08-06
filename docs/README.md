@@ -8,6 +8,23 @@
 
 ---
 
+## Read these two before anything below
+
+Neither is part of the working set — they tell you *where the project is* and *how to work in it*,
+which is a different question from *what the design says*.
+
+| Document | What it is | Note |
+|---|---|---|
+| **[STATE.md](STATE.md)** | **Where the project actually is right now** — branch, latest decision, open and blocked tasks, the pending handoff. Generated from Engram's own store by [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) | **Never hand-edit.** It is also a *recall channel* — reading it delivers stored memory into your context. Charter §10.4a |
+| **[../CLAUDE.md](../CLAUDE.md)** | Working instructions, auto-loaded into every session: read order, the Engram write-order rule, evidence grading, what the branch hook enforces | Bound by [`tests/process/claude-md.test.ts`](../tests/process/claude-md.test.ts). Recall channel 4 |
+
+*Added 2026-08-06. `STATE.md` had told every agent to read it first since it was created, and this
+router — the file agents are told to start from — never mentioned it. An entry point that does not
+name the other entry point is how a generated register goes unread while everyone follows the
+process correctly.*
+
+---
+
 ## The current working set
 
 Read in this order. This is the whole active set — eleven files.

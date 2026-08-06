@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-05 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `5cd4a20`
+**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `bfba852`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `5cd4a20` — merge(Phase 2): item 0 landed, Release A assembled and verified |
+| **Working branch** | `v2-foundations` @ `bfba852` — chore(Phase 2): regenerate STATE.md — handoff #14, session 39, decision #33 |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | clean |
-| **Store** | schema V25 · 39 sessions · 33 decisions · 119 observations · 96 file notes |
+| **Uncommitted** | **5 file(s)** — `docs/ENGRAM-MASTER-PLAN.md`, `docs/README.md`, `docs/foundations/00-CHARTER.md`, `CLAUDE.md` … |
+| **Store** | schema V25 · 41 sessions · 34 decisions · 123 observations · 96 file notes |
 
-**Latest active decision — #33:** RELEASE A IS 1.13.0, NOT 1.12.1 — assembled, verified, not published.
+**Latest active decision — #34:** CLAUDE.md now exists at the repo root, is bound by tests/process/claude-md.test.ts, and is registered as a FOURTH recall channel under charter §10.4a.
 
 **In progress:** #49 FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **41** | `claude-opus-5-session-40` | _(in progress)_ |
+| **40** | `claude-opus-5-session-40` | (auto-closed: new session started) |
 | **39** | `FR-Phase2-Item0` | ITEM 0 LANDED AND RELEASE A IS ASSEMBLED AND VERIFIED, unpushed and unpublished. |
-| **38** | `FR-Phase2-MasterPlan` | Phase 2 complete — docs/ENGRAM-MASTER-PLAN.md written, decision #30, merged to v2-foundations at e35cedb. |
-| **37** | `FR-D10-PublicSurface` | FR-D10 Public Surface complete and merged into v2-foundations — ALL 10 DOMAINS DONE, Phase 1 finished. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #14** — from `FR-Phase2-Item0`, 2026-08-05 — **not yet acknowledged**.
-Item 0 landed and Release A is assembled and verified on release/1.13.0.
+**Read #15** — from `claude-opus-5-session-40`, 2026-08-06 — **not yet acknowledged**.
+Charter Phase 3 opened: CLAUDE.md exists at the repo root, is bound, and is registered as recall channel 4.
 
 ---
 
@@ -71,14 +71,14 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
+| **#121** | friction | MEASURED — two of Engram's most-called read surfaces overflow a tool result, and one of them does it in its documented "compact" mode. |
 | **#116** | friction | THIRD RECURRENCE OF THE CLOSING-DISCIPLINE GAP, and this one was load-bearing. |
 | **#108** | concern | SUPPRESSION ARM 2 LEAKED THROUGH THREE CHANNELS, not one. |
 | **#107** | concern | WHY SO MUCH RECALL WAS REPLACEABLE — the judges' own reason, and it is a limit on the whole experiment. |
 | **#101** | friction | TENTH OCCURRENCE of the convention #7 tool-call syntax corruption — committed by me, FR-D10, on my second Engram write, in the session whose domain doc is about records that lie to readers. |
 | **#100** | idea | FR-D10 PRE-REGISTERED PREDICTIONS — five, with a fixed scoring rule, written before any public-surface file was opened and before either delegate was launched. |
 | **#99** | concern | FR-D8 SUPPRESSION ARM — the control leaked, in two ways neither charter §10.4 nor decision #25 anticipated. |
-| **#97** | idea | FR-D8 PRE-REGISTERED PREDICTIONS — written before any dead-code run, any delegation, and before opening src/tools/dispatcher-memory.ts. |
-| **#89** | concern | FR-D7 T7, handed to FR-D9 which owns the anti-drift machinery. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
