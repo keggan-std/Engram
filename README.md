@@ -226,9 +226,18 @@ Starting with v1.7.0, the main server itself can expose a **single `engram` tool
 
 Or set `ENGRAM_MODE=universal` as an environment variable instead of using the flag.
 
-### Option 4: Universal Thin Client Package (Legacy — v1.6.x)
+### Option 4: Universal Thin Client Package (Legacy — v1.6.x) — **UNPUBLISHED, does not install**
 
-The original separate proxy package for maximum token efficiency. Still works; prefer Option 3 for v1.7+ installs.
+> **This option does not work, and never has.** `engram-universal-client` and
+> `engram-thin-client` have **never been published to npm** — both return
+> `E404 Not Found`. The configuration below is kept for reference only, because
+> the source still lives in `packages/`; any `npx` line naming either package
+> will fail.
+>
+> **Use Option 3 (`--mode=universal`) instead.** It is built into this package,
+> gives the same single-tool surface, and needs nothing extra installed.
+
+The original separate proxy package design, for maximum token efficiency.
 
 **Cursor** (`~/.cursor/mcp.json`):
 
@@ -957,7 +966,7 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 | `backup`        | Create a database backup.                                  |
 | `restore`       | Restore from a backup.                                     |
 | `list_backups`  | List available backup files.                               |
-| `export`        | Export all memory to JSON.                                 |
+| `export`        | Export memory to JSON. **Not everything:** covers sessions, changes, decisions, file notes, conventions, tasks, milestones and scheduled events. Observations, handoffs, agent registrations and the audit log are **not** included — use `backup` for a complete copy. |
 | `import`        | Import from exported JSON.                                 |
 | `compact`       | Compress old session data.                                 |
 | `clear`         | Clear memory tables (destructive — requires confirmation). |
