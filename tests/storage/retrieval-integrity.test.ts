@@ -5,12 +5,18 @@
 // sound here; RETRIEVAL is where it fails. Two defects motivated this suite and
 // both are silent, so nothing in the product reports them:
 //
-//   1. fts_file_notes has no triggers and no writer anywhere in src/. All 96
-//      file notes are unsearchable. `search` returns zero and cannot distinguish
-//      that from "nothing matched".
+//   1. fts_file_notes had no triggers and no writer anywhere in src/. All 96
+//      file notes were unsearchable, and `search` returned zero without being
+//      able to distinguish that from "nothing matched".
+//      FIXED — migration V26, 2026-08-07. The three pinned assertions in the
+//      first describe block were tightened to the correct values in the same
+//      commit, exactly as the PINNED DEFECTS note below requires. Lifecycle
+//      coverage (sync on edit/delete, soft delete, backfill, idempotency) lives
+//      in tests/storage/fts-file-notes.test.ts; the parity binding stays here.
 //   2. set_file_notes re-stats the file on EVERY write (dispatcher-memory.ts:367),
 //      so a one-field drive-by flips a correctly-`stale` note to confidence
 //      "high" while leaving another agent's now-false summary in place.
+//      STILL OPEN — task #60.
 //
 // WHY THESE ASSERTIONS ARE SHAPED THIS WAY. A schema-shape check ("file_notes
 // has three triggers") would pass against triggers that are present and WRONG —
@@ -116,13 +122,14 @@ describe("FTS parity — a row written to a base table must be findable by MATCH
             if (hits === 0) unindexed.push(fts);
         }
 
-        // DEFECT (task #35): fts_file_notes has no triggers and no writer in src/.
-        // When #35 is fixed this array becomes empty and THIS ASSERTION MUST CHANGE
-        // to `expect(unindexed).toEqual([])`. Do not relax it — tighten it.
-        expect(unindexed).toEqual(["fts_file_notes"]);
+        // FIXED by V26 (task #35). This was pinned to `["fts_file_notes"]` while
+        // that table had no triggers; it is now empty, as this suite's header
+        // required the fix to make it. Tightened, not relaxed — every
+        // external-content FTS table must index what its base table receives.
+        expect(unindexed).toEqual([]);
     });
 
-    it("DEFECT (task #35): a file note written through the real repo is unsearchable", () => {
+    it("a file note written through the real repo is searchable (task #35, fixed in V26)", () => {
         const repo = new FileNotesRepo(db);
         repo.upsert("src/canary.ts", new Date().toISOString(), 1, {
             purpose: "UNIQUETOKEN42 distinctive text",
@@ -137,17 +144,19 @@ describe("FTS parity — a row written to a base table must be findable by MATCH
         ).get() as { c: number }).c;
 
         expect(inBase).toBe(1);          // the write succeeds
-        expect(viaMatch).toBe(0);        // DEFECT: the index does not. Becomes toBe(1) on fix.
+        expect(viaMatch).toBe(1);        // and so does the index, since V26
     });
 
-    it("executive_summary is not indexed, so fixing the triggers alone will not surface it", () => {
+    it("executive_summary is indexed (task #35, second half)", () => {
         const ddl = (db.prepare(
             "SELECT sql FROM sqlite_master WHERE name='fts_file_notes'"
         ).get() as { sql: string }).sql;
 
-        // DEFECT (task #35, second half): AR-06 mandates executive_summary as the
-        // "fast future read" field, and it is absent from the indexed columns.
-        expect(ddl).not.toContain("executive_summary");
+        // AR-06 mandates executive_summary as the "fast future read" field. It
+        // was absent from V2's column list, so restoring the triggers alone
+        // would have left the one required field unsearchable. V26 recreates
+        // the table with it — fts5 columns cannot be ALTERed.
+        expect(ddl).toContain("executive_summary");
     });
 });
 
@@ -291,7 +300,13 @@ describe("Bounds and match semantics", () => {
         expect(cached!.value).toBe("ORIGINAL");
     });
 
-    it("DEFECT: deleted_at exists on four tables and nothing reads or writes it", () => {
+    it("DEFECT: deleted_at exists on four tables and no src/ code path writes it", () => {
+        // Narrowed from "nothing reads or writes it" — V26's fts_file_notes
+        // triggers now READ the column, so soft-deleted notes stay out of the
+        // search index if the feature is ever wired up. Nothing WRITES it: the
+        // column was added by V19 for "soft-delete support" that was never
+        // implemented, and a grep of src/ for an assignment finds none. The
+        // read paths below are still unfiltered, which is the live defect.
         for (const t of ["decisions", "file_notes", "tasks", "sessions"]) {
             const cols = (db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>)
                 .map(c => c.name);

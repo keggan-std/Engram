@@ -798,6 +798,142 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 26,
+    description: "Populate fts_file_notes — it has never had triggers, so file-note search always returned nothing",
+    up: (db) => {
+      // V2 created fts_file_notes and then omitted file_notes from BOTH the
+      // trigger block and the backfill that every other content table got.
+      // Nothing in src/ has ever written to it either, so the inverted index
+      // has been empty since the table was created and both read paths
+      // (intelligence.ts, dispatcher-memory.ts `search`) returned no file-note
+      // hits and reported no error.
+      //
+      // PROVEN on a real store before this migration was written: fts5 keeps
+      // its baseline 2 rows in fts_file_notes_data where the six working
+      // shadows hold 13 to 64, and `MATCH 'the'` returned 0 against 96 base
+      // rows of which 70 contain the word.
+      //
+      // DO NOT verify this by comparing row counts or column values between
+      // file_notes and fts_file_notes. For an external-content table those
+      // reads are served THROUGH the base table by rowid, so they agree
+      // perfectly whether or not an index exists — 96 vs 96 and zero drift
+      // across 288 field comparisons, all of it tautological. Only a MATCH
+      // query or the _data row count touches the actual index.
+      //
+      // Three things differ from a straight copy of the other six:
+      //
+      // 1. No content_rowid. file_notes is keyed `file_path TEXT PRIMARY KEY`
+      //    and has no `id` column, so the implicit rowid is correct here.
+      //    Adding content_rowid='id' to match the others would not compile.
+      //
+      // 2. executive_summary joins the indexed columns. Agent rule AR-06
+      //    requires every agent to write it, and it was the one required field
+      //    that restoring the triggers alone would have left unsearchable.
+      //    fts5 columns cannot be ALTERed, hence the drop and recreate — which
+      //    costs nothing, the table being empty.
+      //
+      // 3. Soft-deleted rows are kept OUT of the index rather than filtered at
+      //    read time. file_notes.deleted_at exists (V19) and is currently
+      //    written by nothing in src/, so this is precautionary: if soft delete
+      //    is ever wired up, search must not resurrect deleted notes. REJECTED
+      //    the alternative of indexing everything and adding
+      //    `AND deleted_at IS NULL` to each reader — that is the rule copied to
+      //    N call sites with nothing to catch site N+1, the exact shape FR-D5
+      //    found in the installer and #127 found again in addToConfig. One
+      //    trigger enforces it for every reader, present and future.
+      //
+      // The UPDATE trigger uses `INSERT ... SELECT ... WHERE` rather than two
+      // WHEN-guarded triggers. SQLite does not define the firing order of two
+      // triggers of the same kind on the same table, so a WHEN pair could run
+      // insert-before-delete on an ordinary edit and silently unindex the row —
+      // reintroducing this very bug, intermittently. One trigger, ordered
+      // statements, each self-guarding.
+      //
+      // Idempotent by construction: the drop precedes every create.
+      db.exec(`
+        DROP TRIGGER IF EXISTS trg_file_notes_ai;
+        DROP TRIGGER IF EXISTS trg_file_notes_au;
+        DROP TRIGGER IF EXISTS trg_file_notes_ad;
+        DROP TABLE IF EXISTS fts_file_notes;
+
+        CREATE VIRTUAL TABLE fts_file_notes USING fts5(
+          file_path,
+          purpose,
+          notes,
+          executive_summary,
+          content='file_notes'
+        );
+
+        CREATE TRIGGER trg_file_notes_ai AFTER INSERT ON file_notes BEGIN
+          INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+            SELECT new.rowid, new.file_path, new.purpose, new.notes, new.executive_summary
+             WHERE new.deleted_at IS NULL;
+        END;
+
+        CREATE TRIGGER trg_file_notes_au AFTER UPDATE ON file_notes BEGIN
+          INSERT INTO fts_file_notes(fts_file_notes, rowid, file_path, purpose, notes, executive_summary)
+            SELECT 'delete', old.rowid, old.file_path, old.purpose, old.notes, old.executive_summary
+             WHERE old.deleted_at IS NULL;
+          INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+            SELECT new.rowid, new.file_path, new.purpose, new.notes, new.executive_summary
+             WHERE new.deleted_at IS NULL;
+        END;
+
+        CREATE TRIGGER trg_file_notes_ad AFTER DELETE ON file_notes BEGIN
+          INSERT INTO fts_file_notes(fts_file_notes, rowid, file_path, purpose, notes, executive_summary)
+            SELECT 'delete', old.rowid, old.file_path, old.purpose, old.notes, old.executive_summary
+             WHERE old.deleted_at IS NULL;
+        END;
+
+        INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+          SELECT rowid, file_path, purpose, notes, executive_summary
+            FROM file_notes
+           WHERE deleted_at IS NULL;
+      `);
+
+      // ── The same defect, one table over ────────────────────────────────
+      //
+      // Found by the derived assertion in tests/storage/fts-file-notes.test.ts,
+      // not by looking: fts_events (V4, content='scheduled_events') has exactly
+      // one trigger, fts_events_insert. It indexes on INSERT and then never
+      // hears about an UPDATE or a DELETE.
+      //
+      // That is worse than an index that is merely stale. For an external-
+      // content table the index holds rowids and the COLUMNS are read back
+      // through the base table, so after an edit the terms point at a row whose
+      // text no longer contains them, and after a delete they point at a row
+      // that is gone. `update_scheduled_event` and `acknowledge_event` are both
+      // live actions, so both happen in normal use.
+      //
+      // Fixed here rather than filed, because it is the same finding: the
+      // trigger set is the thing nobody checks, and the test that now checks it
+      // is in this commit.
+      db.exec(`
+        DROP TRIGGER IF EXISTS fts_events_update;
+        DROP TRIGGER IF EXISTS fts_events_delete;
+
+        CREATE TRIGGER fts_events_update AFTER UPDATE ON scheduled_events BEGIN
+          INSERT INTO fts_events(fts_events, rowid, title, description, action_summary)
+            VALUES('delete', old.id, old.title, old.description, old.action_summary);
+          INSERT INTO fts_events(rowid, title, description, action_summary)
+            VALUES (new.id, new.title, new.description, new.action_summary);
+        END;
+
+        CREATE TRIGGER fts_events_delete AFTER DELETE ON scheduled_events BEGIN
+          INSERT INTO fts_events(fts_events, rowid, title, description, action_summary)
+            VALUES('delete', old.id, old.title, old.description, old.action_summary);
+        END;
+      `);
+
+      // Rebuild rather than backfill: unlike file_notes this index is not
+      // empty, it is WRONG — every row edited or deleted since V4 left terms
+      // behind. 'rebuild' discards and regenerates from the content table,
+      // which is the only way to drop entries whose original values are no
+      // longer recoverable.
+      db.exec(`INSERT INTO fts_events(fts_events) VALUES('rebuild');`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
