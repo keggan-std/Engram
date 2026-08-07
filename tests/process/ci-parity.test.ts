@@ -197,34 +197,42 @@ describe("item 0 — every CI gate is either mirrored here or classified", () =>
   });
 });
 
-// ─── 4. The published line, pinned until item 0's other half lands ──────────
+// ─── 4. The published line — the pin that was here is discharged ───────────
 
 describe("item 0 — the published line's half", () => {
-  it("DEFECT: main carries none of the gate inputs — task #93", () => {
-    // PROVEN 2026-08-05 by `git cat-file -e main:<path>` for each: on `main`,
-    // scripts/generate-capability-surface.mjs, scripts/generate-http-surface.mjs,
-    // knip.json, docs/CAPABILITY-SURFACE.md and docs/HTTP-SURFACE.md are ALL
-    // ABSENT. The master plan's "it costs one workflow merge" is therefore
-    // wrong: porting the gates to main is a five-file port plus a workflow edit,
-    // and knip has never been run against main's `src/` at all.
+  it("this branch carries every gate input — the DEFECT pin is discharged", () => {
+    // WHAT THE PIN USED TO SAY, edited here rather than deleted.
     //
-    // This assertion pins the CAUSE that is checkable without git: the gate
-    // inputs are review-line artifacts. When they ship to main — Release A —
-    // this pin must be edited in the same commit.
-    const gateInputs = [
+    // On the review line this was a DEFECT pin against task #93: PROVEN by
+    // `git cat-file -e main:<path>`, the published branch carried NONE of the
+    // five inputs the surface gates need. `main` ran build + test only, so
+    // every gate the Foundations Review built had never once executed on the
+    // branch users install from, and the survival criterion those bindings
+    // were written against was satisfied by none of them.
+    //
+    // v1.13.0 is the release that changes it. The pin is edited in the same
+    // commit that discharges it, which is the discipline it existed to force.
+    for (const f of [
       "scripts/generate-capability-surface.mjs",
       "scripts/generate-http-surface.mjs",
       "knip.json",
       "docs/CAPABILITY-SURFACE.md",
       "docs/HTTP-SURFACE.md",
-    ];
-    for (const f of gateInputs) {
+    ]) {
       expect(existsSync(path.join(ROOT, f)), `${f} is a gate input and must exist`).toBe(true);
     }
+  });
 
-    // The published line's workflow is not readable from here (a test sees only
-    // its own branch's tree), which is precisely why this half needs a human
-    // and a push rather than an assertion. Recorded as task #93.
-    expect(gateInputs.length).toBe(5);
+  it("the workflow on this branch actually runs the gates", () => {
+    // The review line could not assert this about the published line: a test
+    // reads only its own branch's tree. Here they are the same branch.
+    const ci = read(".github/workflows/ci.yml");
+    for (const step of [
+      "node scripts/generate-capability-surface.mjs --check",
+      "node scripts/generate-http-surface.mjs --check",
+      "npx -y knip@5 --no-progress",
+    ]) {
+      expect(ci, "ci.yml no longer runs: " + step).toContain(step);
+    }
   });
 });

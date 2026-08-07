@@ -64,13 +64,17 @@ jobs:
       - name: Run tests
         run: npm test
 
-  # NOTE — this job is no longer the only place these gates run, and must not
-  # become so again. `main` and this branch carried different workflows for 69
-  # commits, so every gate below existed only where it was never needed. The two
-  # generator --check gates now also run inside `npm test`
+  # Reached the published line in v1.13.0. Until that release `main` ran build
+  # + test only, so every gate below existed solely on an unpushed review
+  # branch and had never executed where it was needed. The two workflows
+  # diverged for 69 commits and nothing compared them.
+  #
+  # This job is no longer the only place these gates run, and must not become
+  # so again. The two generator --check gates ALSO run inside `npm test`
   # (tests/process/ci-parity.test.ts), which BOTH workflows invoke, so deleting
   # this job cannot silence them. That test also fails if a `run:` step is added
   # here without being mirrored or classified. See ENGRAM-MASTER-PLAN.md §2.3.
+  # This job exists to isolate the failure and to give knip a home.
   surface:
     name: Capability surface
     runs-on: ubuntu-latest

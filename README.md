@@ -228,12 +228,15 @@ Or set `ENGRAM_MODE=universal` as an environment variable instead of using the f
 
 ### Option 4: Universal Thin Client Package (Legacy — v1.6.x) — **UNPUBLISHED, does not install**
 
-> **This option does not work and never has.** `engram-universal-client` and
+> **This option does not work, and never has.** `engram-universal-client` and
 > `engram-thin-client` have **never been published to npm** — both return
-> `E404`. The configuration below is kept for reference because the source
-> lives in `packages/`, but any `npx` line naming these packages will fail.
-> **Use Option 3 (`--mode=universal`), which is built in and needs no extra
-> package.** See [`docs/foundations/10-public-surface.md`](docs/foundations/10-public-surface.md) §2.4.
+> `E404 Not Found`. The configuration below is kept for reference only, because
+> the source still lives in `packages/`; any `npx` line naming either package
+> will fail.
+>
+> **Use Option 3 (`--mode=universal`) instead.** It is built into this package,
+> gives the same single-tool surface, and needs nothing extra installed.
+> See [`docs/foundations/10-public-surface.md`](docs/foundations/10-public-surface.md) §2.4.
 
 The original separate proxy package design, for maximum token efficiency.
 
@@ -1001,7 +1004,7 @@ engram_session({ action: "end", session_id, summary: "..." });
 | `backup`        | Create a database backup.                                  |
 | `restore`       | Restore from a backup.                                     |
 | `list_backups`  | List available backup files.                               |
-| `export`        | Export all memory to JSON.                                 |
+| `export`        | Export memory to JSON. **Not everything:** covers sessions, changes, decisions, file notes, conventions, tasks, milestones and scheduled events. Observations, handoffs, agent registrations and the audit log are **not** included — use `backup` for a complete copy. |
 | `import`        | Import from exported JSON.                                 |
 | `compact`       | Compress old session data.                                 |
 | `clear`         | Clear memory tables (destructive — requires confirmation). |

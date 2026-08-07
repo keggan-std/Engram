@@ -217,8 +217,8 @@ The `agent_rules` returned by `engram_session(action:"start")` ship inside the
 npm package. They are versioned with the release, and **no file on disk and no
 network response can influence them.**
 
-Up to and including **v1.12.0 — which is the current published release** — this
-was not true. Engram fetched rules from the
+Up to and including **v1.12.0** this was not true, and **v1.13.0 is the release
+that fixes it.** Engram fetched rules from the
 GitHub README at session start — an undisclosed outbound call this section
 previously denied — and cached them at `.engram/agent_rules_cache.json`, which
 was read back with a cast rather than a validation. Because `.gitignore` does
@@ -226,7 +226,7 @@ not stop a repository from *shipping* a file, any repository could commit that
 cache and hand every agent that opened the project a set of attacker-authored
 instructions labelled CRITICAL and binding, permanently and offline.
 
-That entire mechanism has been removed rather than hardened, which is the fix
+That entire mechanism has been **removed in v1.13.0** rather than hardened, which is the fix
 Anthropic shipped for the structurally identical CVE-2026-21852 ("MemoryTrap")
 in Claude Code v2.1.50. Validating untrusted instructions harder still leaves
 you loading untrusted instructions.
