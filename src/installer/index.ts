@@ -9,6 +9,7 @@ import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError } from "./config-writer.js";
 import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths } from "./ide-detector.js";
+import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -463,14 +464,35 @@ Examples:
         }
         const hookPath = path.join(hookDir, "post-commit");
         const hookScript = [
-            "#!/bin/bash",
-            "# Engram auto-recording hook — installed by engram install --install-hooks",
+            "",
+            `# ${ENGRAM_HOOK_MARKER}`,
             "# Automatically records changed files to Engram memory after each commit.",
+            "# Remove with: engram install --remove-hooks",
             "npx -y engram-mcp-server record-commit 2>/dev/null || true",
             "",
         ].join("\n");
-        fs.writeFileSync(hookPath, hookScript, { encoding: "utf-8", mode: 0o755 });
-        console.log(`✅ Engram git hook installed at ${hookPath}`);
+
+        // A post-commit hook is the user's file, and it is frequently NOT ours —
+        // husky, lint-staged and deploy triggers all live here. Overwriting it
+        // is the same defect class as the installer config clobber (H1): another
+        // tool's state destroyed, with no backup and no undo.
+        //
+        // This mirrors engram_admin(install_hooks) in dispatcher-admin.ts, which
+        // already did the right thing. The two paths had drifted; they now agree.
+        if (fs.existsSync(hookPath)) {
+            const existing = fs.readFileSync(hookPath, "utf-8");
+            if (isEngramHook(existing)) {
+                console.log(`ℹ️  Engram git hook already installed at ${hookPath} — nothing to do.`);
+                process.exit(0);
+            }
+            fs.appendFileSync(hookPath, hookScript, { encoding: "utf-8" });
+            fs.chmodSync(hookPath, 0o755);
+            console.log(`✅ Engram appended its hook to your existing post-commit hook at ${hookPath}`);
+            console.log("   Your existing hook was preserved and still runs first.");
+        } else {
+            fs.writeFileSync(hookPath, `#!/bin/bash${hookScript}`, { encoding: "utf-8", mode: 0o755 });
+            console.log(`✅ Engram git hook installed at ${hookPath}`);
+        }
         console.log("   After each commit, Engram will automatically record the changed files.");
         console.log("   To remove it later: engram install --remove-hooks");
         process.exit(0);
@@ -483,12 +505,21 @@ Examples:
             process.exit(0);
         }
         const content = fs.readFileSync(hookPath, "utf-8");
-        if (!content.includes("engram-mcp-server")) {
+        if (!isEngramHook(content)) {
             console.log("ℹ️  The post-commit hook was not installed by Engram. Not removing it.");
             process.exit(0);
         }
-        fs.unlinkSync(hookPath);
-        console.log("✅ Engram git hook removed from .git/hooks/post-commit");
+        // Strip only Engram's own block. Deleting the file would take a
+        // co-resident hook with it — the mirror image of the install-side bug.
+        const cleaned = stripEngramHookBlock(content);
+        if (cleaned.replace(/^#!.*$/m, "").trim() === "") {
+            fs.unlinkSync(hookPath);
+            console.log("✅ Engram git hook removed from .git/hooks/post-commit");
+        } else {
+            fs.writeFileSync(hookPath, cleaned.endsWith("\n") ? cleaned : cleaned + "\n", { encoding: "utf-8" });
+            fs.chmodSync(hookPath, 0o755);
+            console.log("✅ Engram's block removed from .git/hooks/post-commit — your other hook logic was kept.");
+        }
         process.exit(0);
     }
 
