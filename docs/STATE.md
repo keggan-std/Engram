@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `1fbda4b`
+**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `7dddf70`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,15 +20,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `1fbda4b` — feat(FR-D9): the store now refuses a write the decoder corrupted |
-| **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
+| **Working branch** | `v2-foundations` @ `7dddf70` — docs: three status-bearing docs stopped being true when the fixes landed |
+| **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **6 file(s)** — `CLAUDE.md`, `docs/STATE.md`, `.claude/skills/`, `docs/reports/2026-08-07-integration-research-and-recommendations.md` … |
-| **Store** | schema V25 · 43 sessions · 36 decisions · 128 observations · 96 file notes |
+| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
+| **Store** | schema V25 · 44 sessions · 38 decisions · 131 observations · 96 file notes |
 
-**Latest active decision — #36:** Stale figures in the master plan are DELETED AND REPLACED WITH THE MECHANISM THAT OWNS THEM, not corrected — extending decision #35's rule (the router routes; it does not restate) from docs/README.md to the synthesis document.
+**Latest active decision — #38:** Audit F4 closed by moving QUERYABLE_TABLES to constants.ts and enforcing it at BOTH ends — searchAll delegates authorization to checkPermission, and setSharing refuses to store a type no reader will serve.
 
-**In progress:** #49 FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first
+**Nothing is marked in progress.**
 
 ---
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **44** | `claude-opus-5-session-44` | Published v1.13.0 to npm and cleared three open defects off v2-foundations so the branch could push clean. |
 | **43** | `task-sensitivity-reviewer` | _(in progress)_ |
 | **42** | `claude-opus-5-session-42` | THE DOCUMENTATION ROUTER IS BOUND — AND FIVE OF TEN COMPLETED DOMAIN DOCS WERE UNREACHABLE FROM IT. |
-| **41** | `claude-opus-5-session-40` | CHARTER PHASE 3 OPENED — CLAUDE.md exists at the repo root, is bound by a test, and is registered as recall channel 4. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -51,17 +51,16 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 | # | Task | State |
 |---|---|---|
-| **49** | FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
-| **35** | FR-D3 — fts_file_notes has no triggers: 94 file notes are unsearchable and nothing reports it | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
+| **39** | FR-D2 T4 — delete the false sensitive-data claims; the feature does not execute | critical · backlog |
 
 ### Handoff
 
-**Read #16** — from `claude-opus-5-session-42`, 2026-08-06 — **not yet acknowledged**.
-Phase 3 second artifact: docs/README.md is bound.
+**Read #18** — from `claude-opus-5-session-44`, 2026-08-07 — **not yet acknowledged**.
+Session complete: v1.13.0 published, three open defects fixed and pushed clean.
 
 ---
 
