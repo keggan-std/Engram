@@ -803,6 +803,25 @@ const migrations: Migration[] = [
 // ─── Migration Runner ────────────────────────────────────────────────
 
 export function runMigrations(db: DatabaseType): void {
+  runMigrationsTo(db, Number.POSITIVE_INFINITY);
+}
+
+/**
+ * Run the chain up to and including `targetVersion`, then stop.
+ *
+ * `runMigrations` is this function with no ceiling, so there is exactly one
+ * implementation of the chain and a partial run cannot drift from a full one.
+ *
+ * This exists for ONE reason: building a database that is genuinely at an
+ * historical schema version, so a test can migrate REAL data forward through
+ * the real chain. Every other suite starts from an empty database at head,
+ * which is why V2, V23, V24 and V25 — the four migrations that mutate
+ * pre-existing rows — had never executed against a row they were written to
+ * touch. See tests/migrations/upgrade-path.test.ts.
+ *
+ * Not for production use: the server always migrates to head.
+ */
+export function runMigrationsTo(db: DatabaseType, targetVersion: number): void {
   // Ensure schema_meta table exists
   db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 
@@ -811,7 +830,7 @@ export function runMigrations(db: DatabaseType): void {
   const currentVersion = row ? parseInt(row.value, 10) : 0;
 
   // Filter migrations that need to run
-  const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+  const pendingMigrations = migrations.filter(m => m.version > currentVersion && m.version <= targetVersion);
 
   if (pendingMigrations.length === 0) {
     return; // Already up to date
