@@ -1,10 +1,32 @@
 // ============================================================================
 // Engram MCP Server — Sensitive Data Protection Service
 // ============================================================================
-// Manages data sensitivity locks. Owners can mark specific decisions,
-// conventions, or other records as "sensitive." Cross-instance queries
-// automatically filter out sensitive items unless access is approved.
-// Access requests require human approval.
+// Records data sensitivity MARKERS. Owners can mark specific decisions,
+// conventions, or other records as "sensitive."
+//
+// ⚠️ THE MARKERS ARE NOT ENFORCED. FR-D2 T4, task #39.
+//
+// This header used to read "Cross-instance queries automatically filter out
+// sensitive items unless access is approved. Access requests require human
+// approval." Both sentences were false. VERIFIED: filterSensitive() below and
+// isAccessApproved() below have ZERO callers in src/ — they appear only in
+// their own definitions and in tests/services/sensitive-data.test.ts, which
+// exercises them in isolation and therefore PASSES while the feature is
+// unwired. cross-instance.service.ts contains no occurrence of "sensitive" or
+// "locked" anywhere and reads with plain SELECT.
+//
+// Nor is approval human-gated: approveRequest is an ordinary MCP action any
+// agent can call, with resolved_by as a free-text parameter it supplies itself.
+// Since approvals are never consulted, the gate is inert in both directions.
+//
+// The claim was the harm, not the gap — a user who locks a record and then
+// shares an instance has changed their behaviour on the strength of something
+// that never runs. A security feature that does not execute is worse than one
+// that does not exist. The claims are corrected here; WHETHER TO WIRE OR DELETE
+// the code is domain 4's call, since cross-instance is domain 4's surface, and
+// charter section 8 forbids solving it inside the threat-model domain.
+//
+// tests/security/no-inert-surface.test.ts is the gate for this class.
 // ============================================================================
 
 import type { Database as DatabaseType } from "better-sqlite3";
@@ -72,8 +94,11 @@ export class SensitiveDataService {
   }
 
   /**
-   * Lock specific records as sensitive (requires human/owner action).
-   * Locked items are not visible to cross-instance queries.
+   * Record a local sensitivity marker on specific records.
+   *
+   * ⚠️ This used to say "Locked items are not visible to cross-instance
+   * queries." They are visible. Nothing consults these markers on any read
+   * path — see the file header and task #39.
    */
   lockRecords(type: string, ids: number[]): { locked: number } {
     const map = this.getLockedKeys();

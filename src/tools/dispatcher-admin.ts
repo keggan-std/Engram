@@ -713,11 +713,21 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           if (!params.type) return error("type is required (e.g. decisions, conventions, file_notes).");
           if (!params.ids || params.ids.length === 0) return error("ids array is required.");
           const lockResult = services.sensitiveData.lockRecords(params.type, params.ids);
+          // FR-D2 T4, task #39. The caveat is on the RESPONSE and not only in
+          // the catalog description, because this is the moment the caller
+          // decides whether the record is now safe to leave in a shared
+          // instance. The old message said "Marked ... as sensitive" and
+          // stopped there, which reads as an enforcement that does not exist.
           return success({
             type: params.type,
             ids: params.ids,
             newly_locked: lockResult.locked,
-            message: `Marked ${lockResult.locked} ${params.type} record(s) as sensitive.`,
+            enforced: false,
+            message:
+              `Marked ${lockResult.locked} ${params.type} record(s) as sensitive. ` +
+              `NOT ENFORCED: this marker is local bookkeeping only. It does NOT hide these ` +
+              `records from cross-instance queries — no read path consults it. If this data ` +
+              `must not leave the machine, set sharing_mode to 'none' instead.`,
           });
         }
 

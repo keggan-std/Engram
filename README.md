@@ -830,12 +830,18 @@ This builds the server, installs dashboard dependencies, and starts both the API
 [api]  Engram HTTP server running on port 7432
 [ui]   VITE ready in 320ms
 
-  ➜  Local:   http://localhost:5173?token=<token>
+  ➜  Local:   http://localhost:5173#token=<token>
 ```
 
-Open the printed URL directly — the token is embedded in the link and required for access.
+Open the printed URL directly — the token is embedded in the link and required for access. It is carried in the URL **fragment** (`#token=`), which browsers never transmit: it does not reach the server's access log and is stripped from the `Referer` header of every request the page makes. The dashboard moves it into `sessionStorage` on load and clears it from the address bar, so a copied link is inert.
 
-> **Security note:** The dashboard is intended for local development. The token prevents other local processes from reading your memory data. Do not expose ports `5173` or `7432` to a network.
+> **Security note.** The dashboard is intended for local development, and the accurate statement of what the token does is narrower than it sounds:
+>
+> - It stops a **web page you visit** from reading your memory. That is the real threat here — any site you browse can issue requests to `localhost`, and without the token those requests would succeed. Requests are additionally rejected unless addressed to `localhost` by name, which is what blocks DNS rebinding.
+> - It does **not** stop another process running as **you**. `.engram/token` is `chmod 600`, which excludes other *users*, not other *processes under your own account* — and file modes are a no-op on Windows. Any program you can run can read that file.
+> - There is **no encryption at rest or in transit**. The database and the token are plain files; dashboard traffic is plain HTTP over loopback.
+>
+> Do not expose ports `5173` or `7432` to a network.
 
 ### Pages
 
@@ -860,7 +866,7 @@ Open the printed URL directly — the token is embedded in the link and required
 - **Theme toggle** — dark/light mode, persisted to `localStorage`.
 - **Toast notifications** — non-blocking feedback for actions and live events.
 - **Detail panel** — click any table row to expand full content in a side panel.
-- **Token auth** — every HTTP request and WebSocket connection is validated against the `?token=<value>` query parameter.
+- **Token auth** — every request is validated, but the two transports carry the token differently: HTTP uses an `Authorization: Bearer <token>` header, while the WebSocket upgrade accepts it via `Sec-WebSocket-Protocol` or, for older dashboard bundles, a `?token=` query parameter. Comparison is constant-time. Every request must also be addressed to `localhost` by name; a foreign `Host` header is refused with `403`, which is what closes DNS rebinding.
 
 ### Requirements
 

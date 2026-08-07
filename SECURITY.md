@@ -135,11 +135,24 @@ runtime. The dashboard mode below is the one exception, and it is opt-in.
 Started only by `--mode=dashboard` / `ENGRAM_MODE=dashboard`
 (`src/index.ts:140-142`). When started it:
 
-- binds `127.0.0.1` only — never `0.0.0.0` (`src/index.ts:244`)
-- generates a per-project token and rejects WebSocket upgrades that do not
-  present it (`src/index.ts:157`, `:218`)
+- binds `127.0.0.1` only — never `0.0.0.0`
+- refuses any request whose `Host` header is not a loopback **name**, with
+  `403 FORBIDDEN_HOST`, before CORS and before any route including `/health`
+  (`src/http-auth.ts` → `isLocalHostHeader`, mounted in `src/http-server.ts`
+  and repeated in the raw WebSocket upgrade handler, which does not pass
+  through Express). This is the DNS-rebinding guard: a rebound request is
+  same-origin from the browser's point of view, so it carries no `Origin` and
+  CORS cannot see it — only `Host` can.
+- generates a per-project token, requires `Authorization: Bearer <token>` on
+  every `/api` route, and rejects WebSocket upgrades that do not present it.
+  Comparison is constant-time (`src/http-auth.ts`).
 - redacts secrets from `GET /api/v1/settings` and refuses writes to
   security-relevant config keys (`src/http-routes/settings.routes.ts`)
+
+The token is passed to the browser in the URL **fragment**, which is never
+transmitted to a server and is stripped from `Referer`. It is **not** encrypted
+at rest: `.engram/token` is a plain file, mode `0600` on POSIX and unprotected
+on Windows.
 
 Reports against this surface **are in scope**, including any path that reaches
 it without the token, any bind to a non-loopback interface, and any secret that
@@ -154,8 +167,27 @@ Engram reads and writes:
   (`src/global-db.ts:18`)
 - `~/.engram/global/memory.db` — fallback project database, used only when no
   project root is detected (`src/utils.ts:251`)
-- `.engram/agent_rules_cache.json` — cached agent rules (7-day TTL)
 - `.engram/backups/` — user-triggered backup files
+- `.engram/token` — dashboard bearer token, written mode `0600` on POSIX and
+  with no mode protection on Windows. Created only in dashboard mode.
+- `.engram/.gitignore` — written on init (`src/database.ts:412-416`) containing
+  `*`, so the database cannot be committed by accident. The repository root
+  `.gitignore` is also appended to when present.
+- `.engram/git-changes.log` — written by the optional post-commit hook
+- `~/.engram/instances.json` — **machine-wide**, and the one entry here that is
+  not project-local. Every Engram instance on the machine registers its
+  absolute project path, label, machine id and record counts. Any local process
+  running as you can read it, and it is how cross-instance discovery works.
+  Sharing is `none` by default, so registration alone exposes no memory
+  *content* — but the list of project paths is disclosed to anything that can
+  read the file.
+
+It also reads `/etc/machine-id` on Linux and the Windows registry
+(`src/utils.ts`) to derive a stable machine identifier.
+
+`.engram/agent_rules_cache.json` is **no longer read or written**. It was the
+cache-poisoning vector fixed in v1.13.0; the current code names it only to
+detect and report a leftover file. If one exists on your machine it is inert.
 
 It does **not** read arbitrary project files. File notes store only metadata
 provided by the agent — not raw file content.
@@ -209,6 +241,47 @@ Engram is distributed and executed via `npx -y engram-mcp-server`. The `-y`
 flag bypasses the interactive prompt. Users who are concerned about this
 pattern can install globally (`npm install -g engram-mcp-server`) and pin to a
 specific version.
+
+---
+
+## What Engram Does Not Promise
+
+Stated plainly, because a limitation nobody wrote down is one the user finds out
+about at the worst moment. These are refusals, not roadmap items.
+
+**We do not promise stored memory is TRUE.** Provenance answers *who wrote this*.
+Nothing answers *is this correct*. A decision, convention or file note is a claim
+made by whoever wrote it, and agents write confidently about things they are
+wrong about. Treat memory as testimony, not as fact.
+
+**We do not defend against a process running as you.** The threat model draws
+its line at other *users* and at content arriving from outside — hostile repos,
+hostile pull requests, web pages you visit. Anything running under your own
+account can read `.engram/memory.db` and `.engram/token` directly. File modes do
+not stop it and are a no-op on Windows.
+
+**There is no encryption, at rest or in transit.** The database, the global
+knowledge base and the token are plain files. Dashboard traffic is plain HTTP
+over loopback. If the disk is not encrypted, neither is your memory.
+
+**Prompt-injection defence raises cost; it does not prevent.** Engram removes
+the paths it can — agent rules ship in the package rather than being fetched,
+and untrusted text is not loaded into a trusted context — but no filter reliably
+stops injection in a model's input. The Microsoft LLMail-Inject challenge
+(https://arxiv.org/abs/2506.09956) had every published defence bypassed by at
+least one team. The security property we claim against injection is **zero**.
+Anything an agent can do with your memory, text that reaches that agent can
+attempt to do.
+
+**Denial of service is out of scope.** Oversized inputs, pathological queries
+and disk exhaustion are not treated as vulnerabilities. Engram is a local
+single-user process; the party who can DoS it is the party running it.
+
+**Cross-instance sensitivity markers do not enforce anything.**
+`mark_sensitive` records a local marker. It does **not** hide records from
+cross-instance queries — no read path consults it, and the tool now says so at
+the point of use. If data must not leave the machine, set `sharing_mode` to
+`none`, which is the default.
 
 ---
 
