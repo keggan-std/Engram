@@ -3,6 +3,39 @@
 **Charter:** [`00-CHARTER.md`](00-CHARTER.md) · **Owns:** *"can we get it back, and is it the right thing"*
 **Status lives in the Engram task board.** `FR-D3` tasks, not here.
 
+> ### ⚠️ T2 has shipped — findings below are the state at review time
+>
+> **Migration V26, 2026-08-07, commit `10b860d`.** The rows recording the
+> unsearchable-file-notes defect — **D3-C1, D3-C3, D3-C8, D3-C15**, failure mode
+> **F2**, and target **T2** — describe a defect that no longer exists. They are
+> left unedited on purpose: this is a dated review artifact, and rewriting its
+> findings would destroy the record of what was found. Read them as history.
+>
+> Measured after the fix, on a copy of this project's real store:
+> `fts_file_notes_data` 2 → 16 rows, `MATCH 'the'` 0 → 94 hits against 96 base
+> rows, fts5 `integrity-check` passes. `executive_summary` is now indexed.
+>
+> **Two departures from T2 as written, both forced:**
+>
+> 1. **Not `rebuild`.** T2 specified a one-time
+>    `INSERT INTO fts_file_notes(fts_file_notes) VALUES('rebuild')`. That command
+>    repopulates from *every* base row, which would defeat the soft-delete
+>    exclusion the same target asks for. V26 uses an explicit
+>    `INSERT … SELECT … WHERE deleted_at IS NULL` instead. (`rebuild` *is* used
+>    for `fts_events` below, where the existing entries are wrong rather than
+>    absent and there is no soft-delete column.)
+> 2. **A second table.** The derived assertion written for T2 found that
+>    `fts_events` (V4) has only an INSERT trigger — it never hears about UPDATE or
+>    DELETE while `update_scheduled_event` and `acknowledge_event` are both live,
+>    so its index points at rows whose text has changed or which are gone. Fixed
+>    in the same migration. Not in this review because nobody looked at it; found
+>    because the binding derives the trigger set from `sqlite_master` instead of
+>    checking the one table under suspicion.
+>
+> **Still open in this domain:** D3-C9/C7 and F1 (the freshness-laundering
+> headline, task #60), D3-C10/F4, D3-C11 (`deleted_at` written by nothing —
+> V26 now *reads* it, nothing writes it), D3-C12, F5, F6.
+
 > **The one-line finding.** Engram's freshness signal can be **refreshed by a write
 > that did not read the file.** A one-field drive-by flips a correctly-`stale` note
 > to `confidence: "high"` while leaving another agent's now-false summary in place —

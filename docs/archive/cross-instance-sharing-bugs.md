@@ -8,8 +8,12 @@
 > motivating case study in [project-state-tracking-design.md](../project-state-tracking-design.md) —
 > a hand-maintained register that lied with confidence. Kept, banner and all, as evidence.
 >
-> One residual gap from this area is still open: `searchAll()` skips `checkPermission()`
-> (audit finding F4 / task #6). Everything else described below is done.
+> The last residual gap from this area is now closed too: `searchAll()` skipping
+> `checkPermission()` (audit finding F4) was fixed on 2026-08-07, commit `cc138b6`.
+> Nothing described below or above remains open.
+>
+> Noted deliberately, on the one document in this repo that exists as evidence of
+> what a stale status line costs.
 
 ---
 
