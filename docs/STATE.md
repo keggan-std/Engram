@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `d354172`
+**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `ffdc205`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `d354172` — fix(S4,S5,S8): the install path was serving a version from April |
+| **Working branch** | `v2-foundations` @ `ffdc205` — fix(S11, task #34): the small items, and one that was cheaper than its own record |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **2 file(s)** — `scripts/check-state-freshness.mjs`, `docs/reports/2026-08-07-senior-review.md` |
+| **Uncommitted** | **3 file(s)** — `RELEASE_NOTES.md`, `docs/reports/2026-08-07-senior-review-response.md`, `docs/reports/2026-08-07-senior-review.md` |
 | **Store** | schema V26 · 44 sessions · 39 decisions · 132 observations · 96 file notes |
 
 **Latest active decision — #39:** gitCommand now takes an argv array and uses execFileSync — the string signature is DELETED, not merely unused, so the shell-injection landmine is unrepresentable rather than unarmed.
@@ -47,16 +47,16 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**70 open tasks.** The ones that gate everything else:
+**69 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
 | **42** | FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
-| **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 | **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
+| **46** | FR-D5 CRITICAL — installer clobbers another product's entire user state on a JSON parse failure | blocked by #49 |
 
 ### Handoff
 
