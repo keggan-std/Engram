@@ -23,10 +23,10 @@ produces a diff. The surface is the contract; the version is not part of it.
 | Tool | Actions | Parameters |
 |---|---|---|
 | `engram_session` | 5 | 18 |
-| `engram_memory` | 38 | 78 |
+| `engram_memory` | 39 | 78 |
 | `engram_admin` | 37 | 31 |
 | `engram_find` | 3 | 4 |
-| **total** | **83** | **131** |
+| **total** | **84** | **131** |
 
 ## `engram_admin`
 
@@ -87,13 +87,13 @@ produces a diff. The surface is the contract; the version is not part of it.
 
 ## `engram_memory`
 
-**Actions (38):**
+**Actions (39):**
 
-`get_file_notes` · `set_file_notes` · `set_file_notes_batch` · `record_change` · `get_file_history` · `begin_work` · `record_decision` · `record_decisions_batch` · `get_decisions` · `update_decision` · `add_convention` · `get_conventions` · `toggle_convention` · `create_task` · `update_task` · `get_tasks` · `checkpoint` · `get_checkpoint` · `search` · `what_changed` · `get_dependency_map` · `record_milestone` · `get_milestones` · `schedule_event` · `get_scheduled_events` · `update_scheduled_event` · `acknowledge_event` · `check_events` · `dump` · `claim_task` · `release_task` · `agent_sync` · `get_agents` · `broadcast` · `route_task` · `record_observation` · `get_observations` · `get_knowledge`
+`get_file_notes` · `set_file_notes` · `set_file_notes_batch` · `record_change` · `get_file_history` · `begin_work` · `record_decision` · `record_decisions_batch` · `get_decisions` · `update_decision` · `add_convention` · `get_conventions` · `toggle_convention` · `create_task` · `update_task` · `get_tasks` · `checkpoint` · `get_checkpoint` · `search` · `what_changed` · `get_dependency_map` · `record_milestone` · `get_milestones` · `schedule_event` · `get_scheduled_events` · `update_scheduled_event` · `acknowledge_event` · `check_events` · `dump` · `claim_task` · `release_task` · `agent_sync` · `get_agents` · `broadcast` · `route_task` · `record_observation` · `get_observations` · `update_observation` · `get_knowledge`
 
 | Parameter | Type | Required | Constraints |
 |---|---|---|---|
-| `action` | enum | **yes** | values: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history, begin_work, record_decision, record_decisions_batch, get_decisions, update_decision, add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks, checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone, get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event, check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task, record_observation, get_observations, get_knowledge |
+| `action` | enum | **yes** | values: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history, begin_work, record_decision, record_decisions_batch, get_decisions, update_decision, add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks, checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone, get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event, check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task, record_observation, get_observations, update_observation, get_knowledge |
 | `action_data` | string | no | — |
 | `action_summary` | string | no | — |
 | `add_blocked_by` | array<number> | no | coerced |

@@ -60,6 +60,7 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
   // Observations
   record_observation:   { desc: "Record a lightweight observation — findings, patterns, concerns, ideas, friction.", params: "{ content: string, observation_category?: 'finding'|'pattern'|'concern'|'idea'|'friction'|'behavior'|'other', file_path?: string, tags?: string[] }" },
+  update_observation:   { desc: "Repair an existing observation — the only fix for a record corrupted on write.", params: "{ id: number, content?: string, observation_category?: string, file_path?: string, tags?: string[] }" },
   get_observations:     { desc: "Retrieve stored observations, optionally filtered.", params: "{ query?: string, observation_category?: string, file_path?: string, session_id?: number, limit?: number }" },
 };
 

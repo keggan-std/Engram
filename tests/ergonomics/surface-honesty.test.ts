@@ -196,7 +196,14 @@ describe("FR-D7 §5 — the schema must not advertise parameters an action canno
         // level and all ignored — the handler requires a `changes` ARRAY and
         // rejects everything else. FR-D7 hit this on its first write of the
         // session, having just read a warning about the surface.
-        const schema = memorySrc.slice(memorySrc.indexOf("inputSchema: {"));
+        // DERIVATION UPDATED 2026-08-07, and it is a derivation change only —
+        // the assertions below are untouched and still pin the defect. The
+        // schema object was given a name (`MEMORY_INPUT_SCHEMA`) so the
+        // malformed-write detector can derive valid parameter names from it
+        // rather than restating them; `inputSchema:` is now a reference, so
+        // slicing from it finds no fields. Task #71 is NOT implemented and
+        // this test must still fail the day it is.
+        const schema = memorySrc.slice(memorySrc.indexOf("const MEMORY_INPUT_SCHEMA = {"));
         const topLevel = [...schema.matchAll(/^ {8}([a-z_][a-zA-Z0-9_]*):/gm)].map((m) => m[1]);
         expect(topLevel).toContain("file_path");
         expect(topLevel).toContain("description");

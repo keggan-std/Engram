@@ -13,6 +13,8 @@ import {
   safeJsonParse, detectLayer, isGitRepo, getGitLogSince, getGitFilesChanged, minutesSince,
 } from "../utils.js";
 import { success, error } from "../response.js";
+import { log } from "../logger.js";
+import { detectMalformedWrite } from "../write-integrity.js";
 import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
@@ -174,29 +176,17 @@ const MEMORY_ACTIONS = [
   "record_milestone", "get_milestones",
   "schedule_event", "get_scheduled_events", "update_scheduled_event", "acknowledge_event", "check_events",
   "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast", "route_task",
-  "record_observation", "get_observations",
+  "record_observation", "get_observations", "update_observation",
   "get_knowledge",
 ] as const;
 
 // ─── Dispatcher ────────────────────────────────────────────────────────────
 
 export function registerMemoryDispatcher(server: McpServer): void {
-  server.registerTool(
-    "engram_memory",
-    {
-      title: "Memory Operations",
-      description: `All Engram memory operations. Pass action + relevant params.
-
-Actions: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history,
-begin_work, record_decision, record_decisions_batch, get_decisions, update_decision,
-add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
-checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
-get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
-check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task,
-record_observation, get_observations.
-
-Use engram_find(query: "...") to look up exact param schemas.`,
-      inputSchema: {
+  // Named so the write-integrity check can DERIVE the valid parameter names
+  // for this tool instead of restating them. A parameter added below is
+  // covered by the malformed-write detector on the same commit.
+  const MEMORY_INPUT_SCHEMA = {
         action: z.enum(MEMORY_ACTIONS).describe("Memory operation to perform."),
         // File notes
         file_path: z.string().optional(),
@@ -308,10 +298,48 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         phase: z.number().int().optional().describe("Phase number 1-6 for phase_info, checklist, or instructions."),
         knowledge_type: z.enum(["principles", "phase_info", "checklist", "instructions", "estimation", "conventions", "all"]).optional(),
         compact: z.boolean().optional().describe("Return compact forms only (default: true)."),
-      },
+  } as const;
+
+  server.registerTool(
+    "engram_memory",
+    {
+      title: "Memory Operations",
+      description: `All Engram memory operations. Pass action + relevant params.
+
+Actions: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history,
+begin_work, record_decision, record_decisions_batch, get_decisions, update_decision,
+add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
+checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
+get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
+check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task,
+record_observation, get_observations, update_observation.
+
+Use engram_find(query: "...") to look up exact param schemas.`,
+      inputSchema: MEMORY_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // Upstream bug anthropics/claude-code#49747, open and unfixed, folds a
+      // trailing parameter into the tail of the preceding string and its own
+      // column never arrives. 51 records in this store already carry it, 31
+      // with a field outright NULL. Convention #7 is a prompt-layer mitigation
+      // and the issue states plainly that the prompt layer cannot fix it — the
+      // server is the only layer downstream of the decoder.
+      //
+      // Siblings are DERIVED from the registered schema, never restated, so a
+      // new parameter is covered the day it is added.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(MEMORY_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       // ── PM Advisor: record this action (best-effort) ─────────────────────
       pmSafe(() => getServices().advisor.recordAction(String(params.action), params as Record<string, unknown>), undefined, 'advisor.recordAction');
 
@@ -1014,6 +1042,27 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         // ─── OBSERVATIONS ─────────────────────────────────────────────────
+        case "update_observation": {
+          // The repair path. Task #91: decisions had update_decision and
+          // observations had nothing, so a corrupted observation could only be
+          // superseded — leaving the wrong text in the store, retrievable
+          // forever. This must exist BEFORE the malformed-write rejection
+          // above is trusted, or a rejected write has no remedy for what is
+          // already broken.
+          if (!params.id) return error("id required for update_observation.");
+          const existing = repos.observations.getById(params.id);
+          if (!existing) return error(`Observation #${params.id} not found.`);
+
+          const changed = repos.observations.update(params.id, {
+            content: params.content,
+            category: params.observation_category,
+            filePath: params.file_path ? normalizePath(params.file_path, projectRoot) : undefined,
+            tags: params.tags,
+          });
+          if (!changed) return error("Nothing to update — supply at least one of content, observation_category, file_path or tags.");
+          return success({ id: params.id, message: `Observation #${params.id} updated.` });
+        }
+
         case "record_observation": {
           if (!params.content) return error("content required for record_observation.");
           const timestamp = now();
