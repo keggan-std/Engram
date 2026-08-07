@@ -5,6 +5,32 @@
 Concurrent-agent trust → domain 4. Durability of the data → [domain 1](01-durability.md).
 **Status is not carried here.** It lives in the Engram task board.
 
+> ### ⚠️ T4 and T6 have shipped; T5 is half done — findings below are the state at review time
+>
+> **2026-08-07, commits `e9cc88d` and `ad56060`.** Fixed ahead of publishing this
+> branch, because these pages describe weaknesses in the line released as
+> v1.13.0 and pushing the description before the fix is disclosure.
+>
+> - **T6 — DONE.** Host allow-list on every request (`403 FORBIDDEN_HOST`, before
+>   CORS and before `/health`, repeated in the raw WS upgrade which inherits no
+>   middleware); constant-time token compare; token moved to the URL fragment.
+>   Item 3 of that target, `/health` reporting a hardcoded `1.9.0`, had already
+>   been fixed under FR-D6 — the task row was stale on it.
+> - **T4 — DONE.** The three false sensitivity claims are corrected, plus a
+>   fourth the target did not name: `mark_sensitive`'s **response**, which said
+>   "Marked N record(s) as sensitive" and stopped. It now returns
+>   `enforced: false`. The code is still unwired on purpose — whether to
+>   implement or delete it is domain 4's call (charter §8).
+> - **T5 — PARTIAL.** Every claim that was outright FALSE is corrected, and the
+>   refusals section exists in `SECURITY.md`. One correction this review missed:
+>   `SECURITY.md` listed `agent_rules_cache.json` among files Engram reads and
+>   writes, and it reads and writes no such file — the inventory predates the N1
+>   fix that removed it. Still open: the three duplicated README claims, the
+>   backup.ts/README "No cloud" contradiction, and the claims-manifest gate.
+>
+> Everything else on this page — T1 provenance, T2 trust tier, T3 normalisation,
+> and failure modes F1–F4 — remains open. Task board is authoritative.
+
 > The deep audit already named this domain's central sentence, and nothing found
 > since has displaced it:
 >
