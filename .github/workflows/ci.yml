@@ -13,13 +13,38 @@ on:
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
 
+    # PLATFORM COVERAGE — added 2026-08-07, task #101.
+    #
+    # This job ran `ubuntu-latest` only, so `IS_WINDOWS` and `IS_MAC` in
+    # src/installer/ide-configs.ts were ALWAYS false in CI. Every Windows
+    # %APPDATA% path, every macOS ~/Library/Application Support path, and the
+    # `cmd /c` npx wrapper were dead in CI — for a tool whose first act on a
+    # user's machine is writing platform-specific config paths. The area has
+    # already shipped a wrong macOS value once (ide-configs.ts:20-24).
+    #
+    # Deliberately NOT the full cross product. os × node-version would be six
+    # jobs to answer two independent questions, and the Node question does not
+    # become more interesting on a second OS. Ubuntu carries the version matrix;
+    # Windows and macOS each run once on the version we publish against.
+    #
+    # No new `run:` step is introduced here on purpose:
+    # tests/process/ci-parity.test.ts fails the suite if a gate exists only in a
+    # workflow file, and it exempts exactly `npm ci`, `npm run build`, `npm test`.
+    # Running the whole suite per platform keeps this job inside that contract
+    # and costs less than carving out a platform-only subset would.
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node-version: [20.x, 22.x]
+        include:
+          - os: windows-latest
+            node-version: 22.x
+          - os: macos-latest
+            node-version: 22.x
 
     steps:
       - uses: actions/checkout@v4

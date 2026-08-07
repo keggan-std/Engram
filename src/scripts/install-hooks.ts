@@ -9,10 +9,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { ENGRAM_HOOK_MARKER, isEngramHook } from "../git-hook.js";
 
 const HOOK_CONTENT = `#!/bin/bash
 # ─────────────────────────────────────────────────────────────
-# Engram Post-Commit Hook
+# ${ENGRAM_HOOK_MARKER}
 # Records commit info into .engram/git-changes.log
 # The Engram MCP server reads this on session start.
 # ─────────────────────────────────────────────────────────────
@@ -73,10 +74,13 @@ function installHooks(): void {
 
   const hookPath = path.join(hooksDir, "post-commit");
 
-  // Check for existing hook
+  // Check for existing hook. Recognition comes from the shared contract in
+  // src/git-hook.ts — this is the THIRD path that installs this hook, and the
+  // three had drifted into different markers with different safety. This one
+  // was always the careful one; it now cannot drift away from the others.
   if (fs.existsSync(hookPath)) {
     const existing = fs.readFileSync(hookPath, "utf-8");
-    if (existing.includes("Engram Post-Commit Hook")) {
+    if (isEngramHook(existing)) {
       console.log("Engram post-commit hook is already installed.");
       return;
     }

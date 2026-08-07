@@ -266,12 +266,16 @@ Supports **14 IDEs**: vscode, cursor, windsurf, antigravity, claudecode, clauded
 | **Two versions installed** | No detection, no warning. Each config tracks its own stamp independently. At runtime `--ide=<key>` shards the DB per IDE to avoid write contention |
 | **Uninstall** | `--remove --ide <name>`, **one IDE at a time**. No global uninstall |
 | **Never cleaned up** | `.engram/` (DB, caches, token, backups); the `~/.engram/instances.json` entry (only pruned after 7 days of no heartbeat); the git hook (needs a separate `--remove-hooks`) |
-| **Git hook** | `installer/index.ts:472` writes `.git/hooks/post-commit` **with no existence check — unconditionally overwriting any pre-existing hook.** `src/scripts/install-hooks.ts` (the `npm run install-hooks` path) checks and *appends* instead. **Two code paths, different content, different safety, no coordination** |
+| **Git hook** | ~~`installer/index.ts:472` writes `.git/hooks/post-commit` **with no existence check — unconditionally overwriting any pre-existing hook.**~~ **FIXED 2026-08-07 (`e039fdc`).** There were in fact **three** installing paths, not two — the CLI, `engram_admin(install_hooks)`, and `src/scripts/install-hooks.ts` — writing different markers, and PROVEN: neither remover recognised the other's hook, so each reported "not installed by Engram" about Engram's own. All three now share [`src/git-hook.ts`](../src/git-hook.ts); install appends to a foreign hook, removal strips only Engram's lines. Bound by `tests/installer/git-hook-safety.test.ts` |
 | **Coverage** | `installer/index.ts` **0%**, `ide-detector.ts` **0%**, `config-writer.ts` 73% |
 
-**Also in-tree, both unsafe duplicates of `config-writer.ts`:**
-- `scripts/install-mcp.js` (175) — no backup, no version stamping; treats a parse failure as "file doesn't exist" and overwrites.
-- `scripts/fix-mcp-config.js` (23) — hardcodes the original maintainer's personal path (`~/Documents/MCP Builder/Engram/dist/index.js`), no try/catch, unconditionally overwrites `~/.claude.json`. **Should be deleted.**
+**~~Also in-tree, both unsafe duplicates of `config-writer.ts`:~~ DELETED 2026-08-07.**
+Both are gone, and the `install-mcp` / `install-mcp:list` npm scripts with them.
+
+- ~~`scripts/install-mcp.js` (175)~~ — it treated a parse failure as "file doesn't exist" and overwrote, which **is hazard H1** — the defect that makes Release A urgent — still executing in a second copy. Its `APPDATA` line was also the verbatim expression this document's own §10 records as the macOS bug that was fixed in `ide-configs.ts`. A fixed defect surviving in a parallel implementation.
+- ~~`scripts/fix-mcp-config.js` (23)~~ — hardcoded the original maintainer's personal path and unconditionally rewrote `~/.claude.json` with no `try`/`catch`. This document said "**Should be deleted**" and it was not, for the length of the review.
+
+Neither was reachable from npm (`files` is `dist/` only), so this did not ship — it reached anyone who cloned. Recorded because the shape is the finding: **the cut list is only real when something executes it.**
 
 ---
 

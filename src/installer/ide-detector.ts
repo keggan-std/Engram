@@ -90,6 +90,48 @@ export function resolveIdeGlobalPaths(ide: import("./ide-configs.js").IdeDefinit
 }
 
 /**
+ * The config filename for a project-local install in `dir`.
+ *
+ * This one-line rule was hand-copied at four call sites in index.ts, and
+ * `--remove` was written without a fifth copy — which is exactly why uninstall
+ * could not see project-local installs (task #99). It lives here now so there
+ * is one rule and one place to change it.
+ */
+function localFileName(ide: import("./ide-configs.js").IdeDefinition, dir: string): string {
+    return ide.scopes.localFile ?? (dir === "" ? ".mcp.json" : "mcp.json");
+}
+
+/**
+ * EVERY project-local config path this IDE could be installed at, relative to
+ * `rootDir`. Use this when SEARCHING — status, listing, removal.
+ *
+ * Returns paths whether or not they exist; the caller decides what absence
+ * means. An empty array means the IDE has no local scope at all, which is a
+ * different fact from "nothing was found there".
+ */
+export function resolveIdeLocalPaths(
+    ide: import("./ide-configs.js").IdeDefinition,
+    rootDir: string,
+): string[] {
+    return (ide.scopes.localDirs ?? []).map(dir => path.join(rootDir, dir, localFileName(ide, dir)));
+}
+
+/**
+ * The single path a local install WRITES to — the first declared localDir.
+ * Null when the IDE has no local scope. Searching uses resolveIdeLocalPaths;
+ * these are deliberately separate because writing to every candidate would
+ * install an IDE several times over.
+ */
+export function resolveIdeLocalInstallPath(
+    ide: import("./ide-configs.js").IdeDefinition,
+    rootDir: string,
+): string | null {
+    const dir = ide.scopes.localDirs?.[0];
+    if (dir === undefined) return null;
+    return path.join(rootDir, dir, localFileName(ide, dir));
+}
+
+/**
  * Scan all IDE_CONFIGS to find which IDEs appear to be installed on this machine.
  *
  * FLAW-9 FIX: The old code treated "parent dir exists" as a detection signal,

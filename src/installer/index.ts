@@ -8,7 +8,7 @@ import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError } from "./config-writer.js";
-import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths } from "./ide-detector.js";
+import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -140,10 +140,8 @@ function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
     }
     // Check local dirs
     const cwd = process.cwd();
-    if (ide.scopes.localDirs?.length) {
-        for (const dir of ide.scopes.localDirs) {
-            const localFile = ide.scopes.localFile ?? (dir === "" ? ".mcp.json" : "mcp.json");
-            const lp = path.join(cwd, dir, localFile);
+    {
+        for (const lp of resolveIdeLocalPaths(ide, cwd)) {
             if (!fs.existsSync(lp)) continue;
             let config: Record<string, unknown>;
             try { config = readJson(lp) as Record<string, unknown>; }
@@ -370,13 +368,9 @@ Examples:
             }
 
             // Local: scan each dir relative to CWD; add only files that actually exist.
-            if (ide.scopes.localDirs?.length) {
-                for (const dir of ide.scopes.localDirs) {
-                    const localFile = ide.scopes.localFile ?? (dir === "" ? ".mcp.json" : "mcp.json");
-                    const lp = path.join(cwd, dir, localFile);
-                    const e = resolveEntry(lp, "local", ide);
-                    if (e.state !== "not-found") entries.push(e);
-                }
+            for (const lp of resolveIdeLocalPaths(ide, cwd)) {
+                const e = resolveEntry(lp, "local", ide);
+                if (e.state !== "not-found") entries.push(e);
             }
 
             results.push({ name: ide.name, entries });
@@ -537,18 +531,42 @@ Examples:
         const ide = IDE_CONFIGS[targetIde];
         let removed = false;
 
-        const globalPaths = resolveIdeGlobalPaths(ide);
-        for (const configPath of globalPaths) {
-            if (fs.existsSync(configPath)) {
+        // BOTH scopes. Removal used to search only the global paths, while the
+        // interactive installer recommends and DEFAULTS TO local — so uninstall
+        // silently failed for the recommended install location and then printed
+        // "not found" about a place it had not looked. Task #99.
+        const searched = [
+            ...resolveIdeGlobalPaths(ide),
+            ...resolveIdeLocalPaths(ide, process.cwd()),
+        ];
+
+        for (const configPath of searched) {
+            if (!fs.existsSync(configPath)) continue;
+            try {
                 if (removeFromConfig(configPath, ide)) {
                     console.log(`✅ Removed Engram from ${configPath}`);
                     removed = true;
                 }
+            } catch (e) {
+                // One unreadable config must not abort removal from the others —
+                // the same per-path isolation the install side already has.
+                const why = e instanceof ConfigParseError ? "not valid JSON" : (e as Error).message;
+                console.error(`⚠️  Could not read ${configPath} (${why}) — left untouched.`);
             }
         }
 
         if (!removed) {
-            console.log(`ℹ️  Engram was not found in ${ide.name} configs.`);
+            // Name what was searched. "Not found" without the search path is the
+            // claim that caused this bug to go unnoticed: it reads as absence
+            // when it was only absence-of-looking.
+            console.log(`ℹ️  Engram was not found in any ${ide.name} config. Searched:`);
+            for (const p of searched) {
+                console.log(`     ${fs.existsSync(p) ? "·" : "×"} ${p}`);
+            }
+            if (searched.length === 0) {
+                console.log(`     (this IDE declares no config paths)`);
+            }
+            console.log(`   × = file does not exist. Local paths are relative to ${process.cwd()}`);
         }
         process.exit(0);
     }
@@ -883,16 +901,12 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
     } else if (targetScope === "local") {
         if (nonInteractive) {
             // Use cwd as the project root
-            const localDirPrefix = ide.scopes.localDirs![0];
-            const configFileName = ide.scopes.localFile ?? (localDirPrefix === "" ? ".mcp.json" : "mcp.json");
-            const configPath = path.join(process.cwd(), localDirPrefix, configFileName);
+            const configPath = resolveIdeLocalInstallPath(ide, process.cwd())!;
             await installToPath(configPath, ide, universal);
         } else {
             const cwd = process.cwd();
             const projectInfo = detectProjectRootForDisplay(cwd);
-            const localDirPrefix = ide.scopes.localDirs![0];
-            const configFileName = ide.scopes.localFile ?? (localDirPrefix === "" ? ".mcp.json" : "mcp.json");
-            const configPath = path.join(projectInfo.root, localDirPrefix, configFileName);
+            const configPath = resolveIdeLocalInstallPath(ide, projectInfo.root)!;
 
             if (projectInfo.confidence === "high") {
                 console.log(`\n  Detected project root: ${projectInfo.root}  (${projectInfo.evidence})`);
@@ -905,7 +919,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
                 } else if (trimmed && trimmed.toLowerCase() !== "y" && trimmed.toLowerCase() !== "yes") {
                     // User typed a custom path
                     const resolvedDir = path.resolve(trimmed);
-                    const customConfigPath = path.join(resolvedDir, localDirPrefix, configFileName);
+                    const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
                     await installToPath(customConfigPath, ide, universal);
                     return;
                 }
@@ -916,7 +930,7 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
                 console.log(`     (no .git, package.json, or other project markers found)\n`);
                 const solutionDir = await askQuestion(`  Enter the path to your ${ide.name} project directory:\n  [${cwd}]: `);
                 const resolvedDir = solutionDir.trim() || cwd;
-                const customConfigPath = path.join(resolvedDir, localDirPrefix, configFileName);
+                const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
                 await installToPath(customConfigPath, ide, universal);
             }
         }

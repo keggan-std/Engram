@@ -28,8 +28,6 @@
     "dev": "tsc --watch",
     "clean": "node -e \"const {rmSync,existsSync}=require('fs');if(existsSync('dist'))rmSync('dist',{recursive:true,force:true})\"",
     "install-hooks": "node dist/scripts/install-hooks.js",
-    "install-mcp": "node scripts/install-mcp.js",
-    "install-mcp:list": "node scripts/install-mcp.js --list",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "build:dashboard": "cd packages/engram-dashboard && npm install && npm run build",
     "dev:http": "node dist/index.js --mode=http",
