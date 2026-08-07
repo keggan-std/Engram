@@ -7,6 +7,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, now } from "../database.js";
 import { success, error } from "../response.js";
+import { detectMalformedWrite } from "../write-integrity.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
 import { log } from "../logger.js";
@@ -65,14 +66,10 @@ const ADMIN_ACTIONS = [
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
-  server.registerTool(
-    "engram_admin",
-    {
-      title: "Admin Operations",
-      description: `Engram admin and maintenance operations. Use only when needed.
-
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
-      inputSchema: {
+  // Named so the write-integrity check can DERIVE this tool's valid parameter
+  // names instead of restating them. A parameter added below is covered by the
+  // malformed-write detector on the same commit.
+  const ADMIN_INPUT_SCHEMA = {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
         input_path: z.string().optional(),
@@ -105,10 +102,41 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         resolved_by: z.string().optional().describe("Who approved/denied (default: human)."),
         requester_instance_id: z.string().optional().describe("Instance ID of the requester."),
         requester_label: z.string().optional().describe("Human-readable label of the requester."),
-      },
+  };
+
+  server.registerTool(
+    "engram_admin",
+    {
+      title: "Admin Operations",
+      description: `Engram admin and maintenance operations. Use only when needed.
+
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
+      inputSchema: ADMIN_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // Task #91's stated remainder: the check shipped wired into
+      // engram_memory's dispatch only. This surface stores `value` (config),
+      // `label`, `reason` and `query` — shorter than a session summary, so a
+      // lower-probability trigger, but `set_instance_label` and
+      // `request_access` reasons are persisted and unrepairable like every
+      // other row type except observations.
+      //
+      // Deliberately placed BEFORE the switch, so it cannot fire between a
+      // backup's file write and its response — a rejection here means nothing
+      // was attempted, which is the property the message promises.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(ADMIN_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { tool: "engram_admin", field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       const { action } = params;
       const repos = getRepos();
       const services = getServices();

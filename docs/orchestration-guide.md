@@ -1,6 +1,7 @@
 # Orchestration Guide — Delegating to Sub-Agents
 
-**Date:** 2026-08-02 · **Status:** Working guide, derived from a real multi-agent audit
+**Date:** 2026-08-02 · **Updated:** 2026-08-07 (§5b and §6b — the prompt cache as a shared resource)
+**Status:** Working guide, derived from a real multi-agent audit
 **Scope:** How a lead agent should delegate. Written after running eight sub-agents across ~1.1M delegated tokens on this repo, including the parts that went wrong.
 
 > Not registered in Engram. Not a tool. Read it, apply it, edit it when you learn better.
@@ -130,6 +131,27 @@ Practical rules:
 - **Per-agent statistics gathered during parallel work are suspect.** One agent reasoned confidently about a count that belonged to a different session.
 - **If a known concurrency bug exists, either fix it first or run serially.** Parallelism that corrupts bookkeeping is a false economy.
 
+### 5b. The other shared resource: the prompt cache
+
+Everything above is about shared **mutable state**. There is a second thing parallel agents share and nobody enumerates, because it is not mutable and not ours: **the prompt cache**.
+
+**VERIFIED** against Anthropic's current caching reference, 2026-08-07.
+
+**Fan-out defeats the cache.** A cache entry becomes readable only once the first response **begins streaming**. N agents launched simultaneously with the same prefix therefore all miss — none can read what the others are still writing, and every one of them pays the full write premium (1.25× base input on the 5-minute TTL, 2× on the 1-hour).
+
+> **Launch one, wait for its first token, then launch the rest.** They read the entry the first one just wrote.
+
+This costs one agent's latency and buys N−1 cache reads at ~0.1× base input. On a subscription the saving is not money — it is **usage-limit headroom and latency**, which is the budget that actually binds here.
+
+**The 20-block lookback is the one that bites an Engram-heavy session.** A breakpoint searches back **at most 20 content blocks** for a prior entry. Every tool call and every tool result is a block. A turn that emits more than 20 pushes the previous entry outside the window and the next request **silently misses** — no error, no warning, just a full re-read. Engram is a high-call-frequency tool, so a session leaning on it generates blocks fast. This is a mechanism, not a measurement: **nobody has instrumented a real session here to confirm it fires**, and we cannot — the cache fields are invisible from inside an MCP server.
+
+**What we control is not the cache; it is the payload.** Breakpoints, TTL and `usage.cache_read_input_tokens` all belong to the host client. Two things are ours:
+
+1. **Engram's tool schemas render at position 0**, ahead of system and messages. VERIFIED stable within a session — registration happens once at server start, and `--mode=universal` collapses the surface at startup rather than varying it mid-run. Worth protecting deliberately: a tool definition change is the **top tier** of the invalidation hierarchy — it invalidates tools, system *and* messages, for every session using Engram, on every change. By contrast `tool_choice`, images and toggling `thinking` invalidate only messages. **A feature that varied the advertised tool set at runtime would be the most expensive thing this project could ship, and it would be invisible.**
+2. **How many blocks we generate**, which is the lookback above.
+
+Do **not** build cache instrumentation into Engram. We cannot read the fields, and a metric that cannot measure its subject is the inert-surface defect this whole review exists to stop.
+
 ---
 
 ## 6. Cost model
@@ -147,6 +169,16 @@ Use a **cheaper model for breadth, the strong model for judgment.** Real figures
 | Deciding what the findings *mean* | **Lead** | The actual job |
 
 Running that breadth on the strong model would have cost multiples for no quality gain — the format, not the model, produced the quality.
+
+### 6b. The second, independent reason to delegate rather than switch
+
+The table above justifies sub-agents on **cost**. There is a separate argument that lands in the same place, and it is worth knowing because it holds even when cost does not.
+
+**Switching models mid-session invalidates the entire cache.** Caches are model-scoped, and a model switch is top-tier invalidation — tools, system and messages all rebuild. **A sub-agent keeps its own context and its own cache**, so spawning one on the cheaper model leaves the lead's cached prefix intact; changing the lead's own model does not. Anthropic's agent-design guidance names this explicitly as *the* workaround for model-scoped caches. VERIFIED 2026-08-07.
+
+So "cheaper model for breadth, strong model for judgment" is not only cheaper — it is **the only way to use two models without paying to rebuild the first one's context.** The practice was already right; this is a second reason it is right, and it survives if the cost argument ever stops applying.
+
+**The corollary is the one people miss: the lead is the advisor.** The API has a real advisor tool (`advisor_20260301`) that pairs a cheap executor with a stronger planner — and it is **API-only, so it is unavailable to us on a subscription.** Ruled out 2026-08-07; do not spend a session rediscovering it. What survives is the pattern, which is exactly §1: delegate breadth, keep judgment.
 
 ---
 

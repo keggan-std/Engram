@@ -12,6 +12,7 @@ import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP 
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
+import { detectMalformedWrite } from "../write-integrity.js";
 import type { SessionContext, ProjectSnapshot, ScheduledEventRow, ConventionRow } from "../types.js";
 import { getPMConventions, getPhaseOverview } from "../knowledge/index.js";
 import { pmSafe } from "../services/index.js";
@@ -95,19 +96,10 @@ function ambiguityNote(resolution: SessionResolution, action: string): string | 
 }
 
 export function registerSessionDispatcher(server: McpServer): void {
-  server.registerTool(
-    "engram_session",
-    {
-      title: "Session Management",
-      description: `Start or end an Engram memory session. On start, returns session context AND a full catalog of available engram_memory operations.
-
-Actions:
-  - start: Begin session, load context, receive tool_catalog + agent_rules.
-  - end: Close session with summary.
-  - get_history: Retrieve past session summaries.
-  - handoff: Create a handoff record for the next agent.
-  - acknowledge_handoff: Mark a handoff as read.`,
-      inputSchema: {
+  // Named so the write-integrity check can DERIVE this tool's valid parameter
+  // names instead of restating them. A parameter added below is covered by the
+  // malformed-write detector on the same commit.
+  const SESSION_INPUT_SCHEMA = {
         action: z.enum(["start", "end", "get_history", "handoff", "acknowledge_handoff"]).describe("Session operation to perform."),
         // start params
         agent_name: z.string().optional().describe("Your agent identifier. REQUIRED for: start — sessions are owned by an agent and an unnamed session cannot be told apart from anyone else's. Pass the same name on 'end'/'handoff' to operate on your own session."),
@@ -131,10 +123,52 @@ Actions:
         next_agent_instructions: z.string().optional(),
         // acknowledge_handoff params
         id: z.number().int().optional().describe("Handoff ID. For: acknowledge_handoff."),
-      },
+  };
+
+  server.registerTool(
+    "engram_session",
+    {
+      title: "Session Management",
+      description: `Start or end an Engram memory session. On start, returns session context AND a full catalog of available engram_memory operations.
+
+Actions:
+  - start: Begin session, load context, receive tool_catalog + agent_rules.
+  - end: Close session with summary.
+  - get_history: Retrieve past session summaries.
+  - handoff: Create a handoff record for the next agent.
+  - acknowledge_handoff: Mark a handoff as read.`,
+      inputSchema: SESSION_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // MEASURED on this store, 2026-08-07: 12 of 61 rows written through this
+      // dispatcher carry the corruption signature — 9 of 44 session summaries
+      // and 3 of 17 handoffs. Two handoffs, #8 and #9, arrived with
+      // next_agent_instructions EMPTY because the whole payload folded into
+      // `reason` (7,114 and 7,684 chars against 79-289 for every other row).
+      // Four sessions lost `tags` outright.
+      //
+      // This is the LONGEST free-text surface in the product — a handoff runs
+      // to ~8,000 characters — so it is the one the length-correlated trigger
+      // in anthropics/claude-code#49747 hits hardest, and it was the one left
+      // uncovered when the check shipped for engram_memory alone.
+      //
+      // It is also the surface whose corruption costs most: a handoff is the
+      // record the NEXT agent reads first, and unlike an observation it has no
+      // repair action. Rejecting the write is recoverable; storing an empty
+      // instruction field is not.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(SESSION_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { tool: "engram_session", field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       let repos = getRepos();
       let services = getServices();
       let projectRoot = getProjectRoot();
