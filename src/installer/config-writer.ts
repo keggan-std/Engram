@@ -54,8 +54,44 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
         entry.type = "stdio";
     }
 
-    // Build args
-    const baseArgs = ["-y", "engram-mcp-server"];
+    // Build args.
+    //
+    // THE SPEC IS PINNED, and that is the fix for a defect PROVEN on 2026-08-07.
+    //
+    // This used to be the bare `["-y", "engram-mcp-server"]`. npx caches per
+    // EXACT SPEC STRING, so the bare form resolves to whatever it first cached
+    // for that string and never re-checks the registry. Measured on the author's
+    // own machine the day after v1.13.0 shipped:
+    //
+    //   npx -y engram-mcp-server         --version  ->  v1.12.0   (cached 03/04)
+    //   npx -y engram-mcp-server@latest  --version  ->  v1.13.0
+    //
+    // Both answered with the network disabled, so both are cache reads — the
+    // bare spec is not "stale until it refreshes", it is pinned to an April
+    // snapshot indefinitely.
+    //
+    // The consequence was the worst kind: `_engram_version` was stamped 1.13.0
+    // into the config beside args that launched 1.12.0. The installer reported
+    // "upgraded" truthfully about the config and falsely about the software,
+    // and every status surface Engram has agreed with it. A version stamp that
+    // does not describe the running process is worse than no stamp.
+    //
+    // Pinning makes the stamp true: what was installed is what runs.
+    //
+    // REJECTED — "@latest" in the entry. It loses on three counts. It is still
+    // a cache read (proven above), so it does not actually guarantee freshness;
+    // it lets the running version change with no config change, which destroys
+    // both `_engram_version`'s meaning and any hope of a reproducible bug
+    // report; and it puts a registry round-trip in the spawn path of a server
+    // the IDE starts on every session.
+    //
+    // THE LIMIT, stated plainly: pinning means Engram does NOT self-upgrade.
+    // A user moves to a new version by re-running the installer, which is why
+    // `--check` compares the stamp against the registry and why README's
+    // install commands all say `@latest` — that is what makes the INSTALLER
+    // itself current. It also means a machine that has never fetched the pinned
+    // version needs one online run before the server will start.
+    const baseArgs = ["-y", `engram-mcp-server@${getInstallerVersion()}`];
     if (universal) {
         baseArgs.push("--mode=universal");
     }

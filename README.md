@@ -138,61 +138,127 @@ All data lives in a local SQLite WAL database. There is no telemetry, no externa
 
 ## Installation
 
-Engram is published to the npm registry. **You do not need to download or compile any code.** Your IDE will download and run the latest version automatically using `npx`.
+Engram is published to the npm registry. **You do not need to download or
+compile any code.** Your IDE launches it with `npx`.
+
+> **Always install with `@latest`.** Every command below says
+> `engram-mcp-server@latest`, and the `@latest` is not decoration — see
+> [Upgrading](#upgrading) for the measurement that made it mandatory. Without
+> it, `npx` can silently run a version it cached months ago.
 
 ### Prerequisites
 
-Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, which includes a native C++ addon. On most systems this is handled automatically via prebuilt binaries. However, if no prebuilt binary matches your platform, npm will attempt to compile from source — which requires:
+- **Node.js v20 or newer.** This is a hard floor, not a recommendation:
+  `better-sqlite3@12` declares `20.x || 22.x || 23.x || 24.x || 25.x` and
+  `open@11` declares `>=20`. On Node 18 you get `EBADENGINE` followed by a
+  native build failure in the dependency that *is* the database. Releases up
+  to and including v1.13.0 wrongly advertised v18+.
 
-- **Windows:** [Node.js](https://nodejs.org) (v18+) and [Windows Build Tools](https://github.com/nodejs/node-gyp#on-windows) (Visual C++ Build Tools + Python). Install them with:
-    ```bash
-    npm install -g windows-build-tools
-    ```
-    Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
+Engram stores data in **SQLite** via `better-sqlite3`, which ships a native
+C++ addon. Prebuilt binaries cover most platforms. If none matches yours, npm
+compiles from source, which needs:
+
+- **Windows:** [Node.js](https://nodejs.org) v20+ and Visual C++ Build Tools +
+  Python — install **"Desktop development with C++"** from the
+  [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
 - **Mac:** Xcode Command Line Tools (`xcode-select --install`)
-- **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
+- **Linux:** `build-essential` and `python3`
+  (`sudo apt install build-essential python3`)
 
 ### Option 1: The Magic Installer (Interactive)
 
-Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
+Detects your IDE and injects the configuration safely:
 
 ```bash
-npx -y engram-mcp-server --install
+npx -y engram-mcp-server@latest --install
 ```
 
-**Universal mode** (~80 token single-tool schema — recommended for token-conscious setups):
+**Universal mode** (~80 token single-tool schema — recommended for
+token-conscious setups):
 
 ```bash
-npx -y engram-mcp-server --install --universal
+npx -y engram-mcp-server@latest --install --universal
 ```
 
-**Non-interactive mode (CI/CD / Scripting):**
+**Non-interactive (CI/CD / scripting):**
 
 ```bash
-npx -y engram-mcp-server install --ide vscode --yes
-npx -y engram-mcp-server install --ide vscode --universal --yes
+npx -y engram-mcp-server@latest install --ide vscode --yes
+npx -y engram-mcp-server@latest install --ide vscode --universal --yes
 ```
 
 **Clean removal:**
 
 ```bash
-npx -y engram-mcp-server install --remove --ide claudecode
+npx -y engram-mcp-server@latest install --remove --ide claudecode
 ```
 
-**Check installed version vs npm latest:**
+**Check what is installed against what npm has:**
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
+```
+
+`--check` prints, per IDE, the version stamped in that IDE's config and the
+current `latest` on npm, so it is the command that tells you whether an
+upgrade is actually needed.
+
+<a id="upgrading"></a>
+### Upgrading
+
+**Re-run the installer with `@latest`:**
+
+```bash
+npx -y engram-mcp-server@latest --install
+npx -y engram-mcp-server@latest --check   # confirm
+```
+
+Engram does not upgrade itself. The entry the installer writes into your IDE
+config pins an exact version — `engram-mcp-server@1.13.0`, not a floating tag —
+so the version recorded in the config is the version that runs. Moving to a new
+release is a deliberate act: run the command above.
+
+> **Why `@latest` is mandatory, measured rather than assumed.** `npx` caches
+> per **exact spec string** and will reuse that cache instead of asking the
+> registry. On the author's machine the day after v1.13.0 was published:
+>
+> ```
+> npx -y engram-mcp-server         --version   ->  v1.12.0   (cached in April)
+> npx -y engram-mcp-server@latest  --version   ->  v1.13.0
+> ```
+>
+> Both answer with the network disabled, so both are cache reads — the bare
+> spec is not "stale until it refreshes", it is pinned to an old snapshot
+> indefinitely. A user who ran the old README's bare command would keep
+> installing the version they first cached, forever, while the installer
+> cheerfully reported success.
+>
+> Releases up to v1.13.0 also wrote that bare spec into the IDE config itself,
+> so the config could record `_engram_version: "1.13.0"` beside arguments that
+> launched 1.12.0. Re-running the installer with `@latest` repairs such an
+> entry.
+
+**If `--check` still reports an old version after upgrading**, you have a
+stale `npx` cache or a global install shadowing it. Clear both:
+
+```bash
+npm cache clean --force
+npm install -g engram-mcp-server@latest   # only if you use the global install
 ```
 
 ### Option 2: Global Install (Windows Fallback)
 
-If `npx -y engram-mcp-server --install` fails on Windows, install globally first then run the installer:
+If `npx -y engram-mcp-server@latest --install` fails on Windows, install globally first, then run the installer from the global copy:
 
 ```bash
-npm install -g engram-mcp-server
+npm install -g engram-mcp-server@latest
 engram install --ide <your-ide>
 ```
+
+`@latest` matters here too: `npm install -g engram-mcp-server` on a machine
+that already has an older global copy is not guaranteed to move you forward,
+and `engram --version` will keep reporting the old number. To upgrade a global
+install later, re-run `npm install -g engram-mcp-server@latest`.
 
 Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`, `androidstudio`
 
@@ -700,13 +766,13 @@ The installer automatically discovers all installed Android Studio versions and 
 After installing, verify Engram is working by running:
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
 ```
 
 Or use the MCP Inspector for a full interactive test:
 
 ```bash
-npx @modelcontextprotocol/inspector npx -y engram-mcp-server
+npx @modelcontextprotocol/inspector npx -y engram-mcp-server@latest
 ```
 
 In your IDE, open the AI chat and ask the agent to call `engram_session(action:"start")`. If it returns a session ID and tool catalog, Engram is running correctly.
@@ -817,17 +883,41 @@ No cloud. No telemetry. No authentication surface. Memory lives in a local SQLit
 
 ---
 
-## Dashboard
+## Dashboard — repository-only, not part of the npm package
 
-Engram ships with a built-in **visual dashboard** — a React SPA that gives you a live window into your agent's memory without touching the CLI.
+> **This is a development tool for people working on Engram itself, and it is
+> not finished.** It is documented here so the `packages/` directory is not a
+> mystery, not because it is a feature you are meant to use.
+>
+> **It does not ship to npm.** `package.json`'s `files` field is
+> `["dist/", "SECURITY.md", "THIRD-PARTY-NOTICES.md"]`; `packages/` is not in
+> it, and `npm pack` produces no dashboard files. If you installed Engram with
+> `npx` or `npm install -g`, **you do not have the dashboard and no command in
+> this section will work for you.** Running the server with `--mode=dashboard`
+> in that case serves an API-only stub page, because `http-server.ts` resolves
+> `../packages/engram-dashboard/dist` relative to `dist/` and that path does
+> not exist in an installed package.
+>
+> Until v1.13.0 this section claimed the opposite — "Engram **ships with** a
+> built-in visual dashboard" and "the dashboard **is included in the
+> package**". Both were false for every user who did not clone the repository.
+> They are corrected rather than quietly deleted, and
+> `tests/public-surface/public-surface.test.ts` now fails the build if the
+> README claims the dashboard ships while `npm pack` disagrees.
 
-### Starting the Dashboard
+### Running it from a clone
 
 ```bash
+git clone https://github.com/keggan-std/Engram.git
+cd Engram
+npm install
 npm run dashboard
 ```
 
-This builds the server, installs dashboard dependencies, and starts both the API and the Vite dev server concurrently. The terminal prints the full URL including the auth token:
+`npm run dashboard` is a **repository script**. It builds the server, installs
+the dashboard's own frontend dependencies, and runs the API and the Vite dev
+server together. The terminal prints a URL with the auth token in the
+fragment:
 
 ```
 [api]  Engram HTTP server running on port 7432
@@ -836,44 +926,57 @@ This builds the server, installs dashboard dependencies, and starts both the API
   ➜  Local:   http://localhost:5173#token=<token>
 ```
 
-Open the printed URL directly — the token is embedded in the link and required for access. It is carried in the URL **fragment** (`#token=`), which browsers never transmit: it does not reach the server's access log and is stripped from the `Referer` header of every request the page makes. The dashboard moves it into `sessionStorage` on load and clears it from the address bar, so a copied link is inert.
+Open that URL as printed — the token is required. It travels in the URL
+**fragment** (`#token=`), which browsers never transmit, so it does not reach
+an access log and is stripped from `Referer`. The page moves it into
+`sessionStorage` and clears the address bar, so a copied link is inert.
 
-> **Security note.** The dashboard is intended for local development, and the accurate statement of what the token does is narrower than it sounds:
->
-> - It stops a **web page you visit** from reading your memory. That is the real threat here — any site you browse can issue requests to `localhost`, and without the token those requests would succeed. Requests are additionally rejected unless addressed to `localhost` by name, which is what blocks DNS rebinding.
-> - It does **not** stop another process running as **you**. `.engram/token` is `chmod 600`, which excludes other *users*, not other *processes under your own account* — and file modes are a no-op on Windows. Any program you can run can read that file.
-> - There is **no encryption at rest or in transit**. The database and the token are plain files; dashboard traffic is plain HTTP over loopback.
->
-> Do not expose ports `5173` or `7432` to a network.
+### What the token does and does not do
 
-### Pages
+- It stops **a web page you visit** from reading your memory. That is the real
+  threat: any site you browse can issue requests to `localhost`, and without
+  the token they would succeed. Requests are also refused unless addressed to
+  `localhost` by name, which is what closes DNS rebinding.
+- It does **not** stop another process running as **you**. `.engram/token` is
+  mode `0600`, which excludes other *users*, not other *processes under your
+  own account* — and file modes are a no-op on Windows.
+- There is **no encryption at rest or in transit**. The database and the token
+  are plain files; dashboard traffic is plain HTTP over loopback.
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** | Overview — session count, task totals, decisions, and change volume at a glance. Clickable stat cards navigate to the relevant page. Instance cards show per-database stats with expand/collapse. Activity chart displays recent change volume. |
-| **Tasks** | All persistent work items with status, priority, and tags. |
-| **Decisions** | Architectural decisions with rationale, affected files, and dependency chains. |
-| **Changes** | Full change history — every file edit recorded by agents and git hooks. |
-| **Conventions** | Project standards enforced every session. |
-| **File Notes** | Agent-generated file intelligence — purpose, layer, complexity, and executive summary. |
-| **Sessions** | Past session summaries with agent names and timestamps. |
-| **Events** | Scheduled and triggered events, including context-pressure warnings. |
-| **Milestones** | Named project milestones. |
-| **Audit** | Raw event log for debugging and auditing. |
-| **Settings** | Runtime config management — view and update config keys live. |
+Do not expose ports `5173` or `7432` to a network.
 
-### Dashboard Features
+### State of the implementation
 
-- **Live updates** — WebSocket connection delivers real-time pushes when any memory record changes. A live badge in the header shows connection status.
-- **Cmd+K palette** — keyboard-driven quick navigation to any page.
-- **Theme toggle** — dark/light mode, persisted to `localStorage`.
-- **Toast notifications** — non-blocking feedback for actions and live events.
-- **Detail panel** — click any table row to expand full content in a side panel.
-- **Token auth** — every request is validated, but the two transports carry the token differently: HTTP uses an `Authorization: Bearer <token>` header, while the WebSocket upgrade accepts it via `Sec-WebSocket-Protocol` or, for older dashboard bundles, a `?token=` query parameter. Comparison is constant-time. Every request must also be addressed to `localhost` by name; a foreign `Host` header is refused with `403`, which is what closes DNS rebinding.
+The pages below exist and render. The dashboard is nonetheless **not
+considered complete**, it is outside the `knip` dead-code gate (`knip.json` is
+scoped to `src/**`), its dependencies are not covered by this project's
+dependency auditing, and its correctness has never been reviewed. Treat
+anything it displays as informational.
+
+| Page | Shows |
+|------|-------|
+| **Dashboard** | Session, task, decision and change counts; per-database instance cards; recent change volume |
+| **Tasks** | Work items with status, priority, tags |
+| **Decisions** | Architectural decisions with rationale and affected files |
+| **Changes** | File-edit history recorded by agents and git hooks |
+| **Conventions** | Project standards |
+| **File Notes** | Per-file purpose, layer, complexity, summary |
+| **Sessions** | Past session summaries |
+| **Events** | Scheduled and triggered events |
+| **Milestones** | Named milestones |
+| **Audit** | Raw event log |
+| **Settings** | Runtime config keys |
+
+Live updates arrive over a WebSocket. HTTP requests authenticate with
+`Authorization: Bearer <token>`; the WebSocket upgrade accepts the token via
+`Sec-WebSocket-Protocol` or, for older bundles, a `?token=` query parameter.
+Comparison is constant-time, and a foreign `Host` header is refused with `403`.
 
 ### Requirements
 
-The dashboard is included in the package but its frontend dependencies are installed on first run. Node.js v18+ and an internet connection for the initial `npm install` are required. Subsequent runs use the cached install.
+Node.js **v20+** and, for the first run only, an internet connection so the
+dashboard's frontend dependencies can be installed. A working clone of this
+repository is required — see the banner above.
 
 ---
 
@@ -1271,7 +1374,7 @@ operable program or batch file.
 **Fix — use a global install instead of `npx`:**
 
 ```bash
-npm install -g engram-mcp-server
+npm install -g engram-mcp-server@latest
 ```
 
 Then update your MCP config to use the binary directly:

@@ -158,6 +158,13 @@ describe("FR-D10 §5 — every name in the public surface resolves to something 
     // one pointed backwards, this one points forwards.
     const PUBLISHED = ["engram-mcp-server"];
     const KNOWN_UNPUBLISHED = ["engram-universal-client", "engram-thin-client"];
+    // A third category, added by the senior review's S4. These are workspace
+    // DIRECTORIES under packages/, not packages anyone can install — naming
+    // one in the README is fine, but only alongside a statement that it does
+    // not ship, which is asserted in (c) below. Without this distinction the
+    // ratchet forces a choice between two wrong answers: claim it is published
+    // or delete an accurate mention.
+    const REPO_ONLY = ["engram-dashboard"];
 
     // (a) Every unpublished package that still appears must carry the warning.
     for (const p of KNOWN_UNPUBLISHED) {
@@ -177,14 +184,33 @@ describe("FR-D10 §5 — every name in the public surface resolves to something 
       [...README.matchAll(/(?<![\w-])engram-[a-z][a-z0-9-]*/g)].map((m) => m[0]),
     );
     const unaccounted = [...named].filter(
-      (n) => !PUBLISHED.includes(n) && !KNOWN_UNPUBLISHED.includes(n),
+      (n) =>
+        !PUBLISHED.includes(n) &&
+        !KNOWN_UNPUBLISHED.includes(n) &&
+        !REPO_ONLY.includes(n),
     );
     expect(
       unaccounted,
-      `README names an engram-* package that is neither known-published nor ` +
-        `known-unpublished. If it is real, add it to PUBLISHED here; if it is ` +
-        `aspirational, say so in the README before shipping it.`,
+      `README names an engram-* package that is neither known-published, ` +
+        `known-unpublished, nor known repo-only. If it is real, add it to ` +
+        `PUBLISHED here; if it only exists under packages/, add it to ` +
+        `REPO_ONLY; if it is aspirational, say so in the README.`,
     ).toEqual([]);
+
+    // (c) A repo-only name may appear, but never without saying it does not
+    // ship. This is the assertion that keeps S4 from recurring: the README
+    // claimed for two releases that the dashboard "is included in the package"
+    // while `npm pack` carried none of it.
+    for (const p of REPO_ONLY) {
+      if (!README.includes(p)) continue;
+      expect(
+        README,
+        `README mentions ${p}, which lives under packages/ and is NOT in ` +
+          `package.json's files[]. State plainly that it does not ship to ` +
+          `npm, or the reader will reasonably assume installing Engram gets ` +
+          `them it — which is exactly what happened through v1.13.0.`,
+      ).toMatch(/does not ship to npm|not part of the npm package|repository-only/i);
+    }
   });
 });
 
@@ -253,6 +279,120 @@ describe("FR-D10 §5 — the tarball carries the policy it promises", () => {
       "Do not commit a releaseNotes value — scripts/inject-release-notes.js " +
         "generates it during prepack. A committed copy can only drift.",
     ).toBeUndefined();
+  });
+
+  // ── Senior review S4 — the README advertised a dashboard the tarball has ──
+  //
+  // README said "Engram **ships with** a built-in visual dashboard" and "the
+  // dashboard **is included in the package**". PROVEN false by `npm pack
+  // --dry-run --json`: 377 files, 1,668 KB, zero dashboard entries, because
+  // `files` does not list `packages/`. The entire Dashboard section documented
+  // a workflow available only from a git clone, and `http-server.ts` resolves
+  // `../packages/engram-dashboard/dist` relative to `dist/`, so an installed
+  // package silently serves an API-only stub instead.
+  //
+  // The fix is a claim assertion, which is what this whole domain exists for:
+  // the README and package.json are no longer allowed to disagree about this,
+  // in EITHER direction. Ship the dashboard and the README may say so; do not
+  // ship it and the README must not.
+  it("README's dashboard claim matches what package.json actually ships", () => {
+    const readme = read("README.md");
+    const shipsDashboard = (PKG.files as string[]).some((f) =>
+      f.startsWith("packages/") || f === "packages",
+    );
+
+    const claimsItShips = [
+      /ships with a built-in \*\*visual dashboard\*\*/i,
+      /dashboard \*\*is included in the package\*\*/i,
+      /dashboard is included in the package/i,
+    ].filter((re) => re.test(readme));
+
+    if (!shipsDashboard) {
+      expect(
+        claimsItShips,
+        "package.json's files[] does not include packages/, so `npm pack` " +
+          "carries no dashboard — but README claims it ships. Either add " +
+          "packages/ to files[] or correct the README. This exact pair was " +
+          "false through v1.13.0.",
+      ).toEqual([]);
+      expect(
+        readme,
+        "When the dashboard does not ship, the README must say so plainly " +
+          "where a user will see it.",
+      ).toMatch(/does not ship to npm|not part of the npm package|repository-only/i);
+    }
+  });
+
+  // ── Senior review, install path — `npx` caches per exact spec string ──────
+  //
+  // PROVEN 2026-08-07, the day after v1.13.0 published:
+  //     npx -y engram-mcp-server        --version -> v1.12.0  (cached in April)
+  //     npx -y engram-mcp-server@latest --version -> v1.13.0
+  // Both answered offline, so both are cache reads. A README telling users to
+  // run the bare spec tells them to reinstall the version they first cached,
+  // forever, while the installer reports success.
+  it("every README install command pins @latest", () => {
+    const readme = read("README.md");
+
+    // Only lines inside a fenced code block are commands a user will COPY.
+    // Prose may name the bare spec — the Upgrading section has to, in order to
+    // explain the hazard — and flagging that would push the next author to
+    // delete the explanation to get the build green.
+    const bare: string[] = [];
+    let fenced = false;
+    readme.split("\n").forEach((line, i) => {
+      if (/^\s*```/.test(line)) { fenced = !fenced; return; }
+      if (!fenced) return;
+      if (
+        /\bnpx\s+(-y\s+)?engram-mcp-server(?!@)/.test(line) ||
+        /\bnpm\s+install\s+-g\s+engram-mcp-server(?!@)/.test(line)
+      ) {
+        bare.push(`${i + 1}: ${line.trim()}`);
+      }
+    });
+
+    expect(
+      bare,
+      "These README lines run an unpinned spec. npx will serve whatever it " +
+        "cached for that exact string and never re-check the registry. Use " +
+        "engram-mcp-server@latest.",
+    ).toEqual([]);
+  });
+
+  it("the installer writes a PINNED spec into IDE configs", () => {
+    // The config used to launch `npx -y engram-mcp-server`, so `_engram_version`
+    // could read 1.13.0 beside args that started 1.12.0 — a version stamp that
+    // does not describe the running process. Pinning is what makes it true.
+    const writer = read("src/installer/config-writer.ts");
+    expect(
+      writer,
+      "makeEngramEntry must pin the npm spec to the installer's own version. " +
+        "A bare or @latest spec lets npx decide what runs, which makes " +
+        "_engram_version a lie and bug reports irreproducible.",
+    ).toMatch(/engram-mcp-server@\$\{getInstallerVersion\(\)\}/);
+  });
+
+  it("the declared Node floor matches what the dependencies actually require", () => {
+    // engines said >=18.0.0 through v1.13.0 while better-sqlite3@12 declares
+    // "20.x || 22.x || …" and open@11 declares ">=20" — so a user on Node 18
+    // followed the support statement into EBADENGINE and a native build
+    // failure in the dependency that IS the database. CI cannot catch it: the
+    // matrix is 20.x and 22.x.
+    const floor = (PKG.engines as { node: string }).node;
+    const major = Number(/(\d+)/.exec(floor)?.[1]);
+    expect(
+      major,
+      `engines.node is "${floor}". better-sqlite3 and open both require Node ` +
+        `20 or newer, so anything below 20 advertises support this package ` +
+        `cannot deliver.`,
+    ).toBeGreaterThanOrEqual(20);
+
+    const readme = read("README.md");
+    expect(
+      readme,
+      "README must not advertise a Node floor below the one package.json " +
+        "declares — that is the pair that sent users to a build failure.",
+    ).not.toMatch(/Node\.js\s*\(?v?18\+?\)?\s*(and|is|or)/i);
   });
 
   it("the prepack script writes diagnostics to stderr, not stdout", () => {

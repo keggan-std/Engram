@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsc",
     "prepack": "node scripts/inject-release-notes.js && npm run clean && npm run build",
+    "postpack": "node scripts/restore-package-json.js",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",

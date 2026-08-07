@@ -306,7 +306,7 @@ If Engram is running correctly, the agent will respond with your session context
 
 ## Troubleshooting
 
-**`npx` not found** — Make sure Node.js (v18+) is installed and on your PATH. Download from [nodejs.org](https://nodejs.org).
+**`npx` not found** — Make sure Node.js (v20+) is installed and on your PATH. Download from [nodejs.org](https://nodejs.org).
 
 **Windows: `'engram' is not recognized` or install fails** — Engram uses `better-sqlite3`, a native SQLite library that requires C++ build tools. If no prebuilt binary matches your Node.js version, npm will try to compile it from source. Fix:
 ```bash
