@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `7dddf70`
+**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `34ab9e5`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,15 +20,15 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `7dddf70` — docs: three status-bearing docs stopped being true when the fixes landed |
+| **Working branch** | `v2-foundations` @ `34ab9e5` — docs(FR-D2): banner what shipped, leave the findings as the record |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
-| **Store** | schema V25 · 44 sessions · 38 decisions · 131 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V25 · 44 sessions · 38 decisions · 132 observations · 96 file notes |
 
 **Latest active decision — #38:** Audit F4 closed by moving QUERYABLE_TABLES to constants.ts and enforcing it at BOTH ends — searchAll delegates authorization to checkPermission, and setSharing refuses to store a type no reader will serve.
 
-**Nothing is marked in progress.**
+**In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
 ---
 
@@ -47,15 +47,16 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**72 open tasks.** The ones that gate everything else:
+**70 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
+| **42** | FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text | **in progress** |
 | **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **34** | FR-D1 T7 — bump better-sqlite3 past the SQLite WAL-reset fix (3.51.3+) | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
-| **39** | FR-D2 T4 — delete the false sensitive-data claims; the feature does not execute | critical · backlog |
+| **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
 
 ### Handoff
 
@@ -70,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#132** | concern | THE STATE.md FRESHNESS GATE CANNOT REACH EXIT 0 ONCE STATE.md IS COMMITTED, SO ITS ALARM IS PERMANENTLY ON. |
 | **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
 | **#121** | friction | MEASURED — two of Engram's most-called read surfaces overflow a tool result, and one of them does it in its documented "compact" mode. |
 | **#116** | friction | THIRD RECURRENCE OF THE CLOSING-DISCIPLINE GAP, and this one was load-bearing. |
@@ -77,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#107** | concern | WHY SO MUCH RECALL WAS REPLACEABLE — the judges' own reason, and it is a limit on the whole experiment. |
 | **#101** | friction | TENTH OCCURRENCE of the convention #7 tool-call syntax corruption — committed by me, FR-D10, on my second Engram write, in the session whose domain doc is about records that lie to readers. |
 | **#100** | idea | FR-D10 PRE-REGISTERED PREDICTIONS — five, with a fixed scoring rule, written before any public-surface file was opened and before either delegate was launched. |
-| **#99** | concern | FR-D8 SUPPRESSION ARM — the control leaked, in two ways neither charter §10.4 nor decision #25 anticipated. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
