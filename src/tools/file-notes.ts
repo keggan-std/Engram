@@ -142,7 +142,7 @@ Returns:
             const file_mtime = getFileMtime(fp, projectRoot);
 
             // F4: capture current git branch for branch-aware staleness detection
-            const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+            const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
 
             repos.fileNotes.upsert(fp, timestamp, sessionId, {
                 purpose, dependencies, dependents, layer, complexity, notes, file_mtime, git_branch,
@@ -204,7 +204,7 @@ Returns:
             const projectRoot = getProjectRoot();
 
             // Enrich each entry with the file's actual mtime and current git branch before saving
-            const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+            const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
             const enrichedFiles = files.map(f => ({
                 ...f,
                 file_mtime: getFileMtime(normalizePath(f.file_path), projectRoot),
@@ -250,7 +250,7 @@ Returns:
             const projectRoot = getProjectRoot();
 
             // F4: get current branch for branch-aware staleness check
-            const currentBranch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+            const currentBranch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
 
             if (file_path) {
                 const fp = normalizePath(file_path);

@@ -40,8 +40,13 @@ export class GitService {
         return getGitFilesChanged(this.projectRoot, since);
     }
 
-    runGitCommand(command: string): string {
-        return gitCommand(this.projectRoot, command);
+    /**
+     * SECURITY — argv array, not a command string. See gitCommand in
+     * src/utils.ts for why this signature is deliberate and must not grow a
+     * string-accepting overload.
+     */
+    runGitCommand(args: readonly string[]): string {
+        return gitCommand(this.projectRoot, args);
     }
 
     /**

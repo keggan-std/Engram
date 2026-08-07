@@ -157,7 +157,7 @@ produces a diff. The surface is the contract; the version is not part of it.
 | `rule` | string | no | — |
 | `scope` | string | no | — |
 | `session_id` | number | no | int |
-| `since` | string | no | — |
+| `since` | string | no | coerced |
 | `specializations` | array<string> | no | coerced |
 | `status` | string | no | — |
 | `supersedes` | number | no | int |

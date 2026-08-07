@@ -322,6 +322,38 @@ export const QUERYABLE_TABLES: ReadonlySet<string> = new Set([
   "milestones",
 ]);
 
+// ── `since`: the accepted forms, enforced at BOTH ends ─────────────────────
+//
+// Same shape as QUERYABLE_TABLES above, and for the same reason. `since` is
+// the parameter that carried the arbitrary-command-execution defect fixed in
+// 1.14.0 (see gitCommand in src/utils.ts). The sink is closed — execFileSync
+// spawns no shell — so this is defence in depth, not the fix. It exists
+// because the audit that missed the first bug missed it by reasoning about
+// call sites instead of about the parameter, and a bounded parameter survives
+// a future caller who reintroduces a shell.
+//
+// The three accepted forms are exactly the three the handler ever understood:
+//   "session_start"          — resolved against the sessions table
+//   /^\d+[hdm]$/             — a relative window: 24h, 7d, 30m
+//   an ISO-8601 timestamp    — compared directly against stored timestamps
+//
+// Anything else used to fall through an `else` and be passed along verbatim.
+// That fall-through is deleted; unmatched input is now an error, not a shrug.
+export const SINCE_LITERALS: ReadonlySet<string> = new Set(["session_start"]);
+export const SINCE_RELATIVE = /^\d+[hdm]$/;
+// Deliberately stricter than Date.parse, which accepts "now", "Dec 25" and a
+// great deal else. Engram stores ISO-8601 and compares as text, so anything
+// that is not ISO-8601 would silently compare wrong even with the shell gone.
+export const SINCE_ISO = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+export function isValidSince(value: string): boolean {
+  return SINCE_LITERALS.has(value) || SINCE_RELATIVE.test(value) || SINCE_ISO.test(value);
+}
+
+export const SINCE_REJECTION =
+  "since must be 'session_start', a relative window like '24h' / '7d' / '30m', " +
+  "or an ISO-8601 timestamp like '2026-08-07' or '2026-08-07T10:02:08Z'.";
+
 // Architecture layer detection patterns
 export const LAYER_PATTERNS: Record<string, RegExp[]> = {
   ui: [/\/(ui|views?|screens?|pages?|components?|widgets?)\//i, /\.(jsx|tsx|vue|svelte)$/],

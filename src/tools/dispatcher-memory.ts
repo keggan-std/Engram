@@ -19,6 +19,7 @@ import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
   MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
+  isValidSince, SINCE_RELATIVE, SINCE_ISO, SINCE_REJECTION,
 } from "../constants.js";
 import { pmSafe } from "../services/index.js";
 import { getKnowledge } from "../knowledge/index.js";
@@ -261,7 +262,9 @@ export function registerMemoryDispatcher(server: McpServer): void {
         query: z.string().optional(),
         scope: z.string().optional(),
         context_chars: z.number().int().optional(),
-        since: z.string().optional(),
+        // Constrained, not free text. See SINCE_* in constants.ts — this
+        // parameter carried the 1.14.0 command-execution defect.
+        since: z.string().refine(isValidSince, { message: SINCE_REJECTION }).optional(),
         include_git: z.boolean().optional(),
         depth: z.number().int().optional(),
         // Milestones
@@ -355,7 +358,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         // ── FILE NOTES ────────────────────────────────────────────────────────
 
         case "get_file_notes": {
-          const currentBranch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+          const currentBranch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           if (params.file_path) {
             const fp = normalizePath(params.file_path);
             const note = repos.fileNotes.getByPath(fp);
@@ -394,7 +397,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           purgeExpiredLocks();
           const file_mtime = getFileMtime(fp, projectRoot);
           const content_hash = getFileHash(fp, projectRoot);
-          const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+          const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           repos.fileNotes.upsert(fp, timestamp, sessionId, {
             purpose: params.purpose,
             dependencies: params.dependencies,
@@ -422,7 +425,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.files || !Array.isArray(params.files)) return error("files array required for set_file_notes_batch.");
           const timestamp = now();
           const sessionId = getCurrentSessionId();
-          const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+          const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => ({
             ...f,
             file_mtime: getFileMtime(normalizePath(String(f["file_path"] ?? "")), projectRoot),
@@ -841,12 +844,18 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             const sessionId = getCurrentSessionId();
             const session = sessionId ? db.prepare("SELECT started_at FROM sessions WHERE id = ? LIMIT 1").get(sessionId) as { started_at: string } | undefined : undefined;
             sinceTimestamp = session?.started_at || new Date(Date.now() - 3600000).toISOString();
-          } else if (/^\d+[hdm]$/.test(params.since)) {
+          } else if (SINCE_RELATIVE.test(params.since)) {
             const m = params.since.match(/^(\d+)([hdm])$/)!;
             const ms = m[2] === "h" ? +m[1] * 3600000 : m[2] === "d" ? +m[1] * 86400000 : +m[1] * 60000;
             sinceTimestamp = new Date(Date.now() - ms).toISOString();
-          } else {
+          } else if (SINCE_ISO.test(params.since)) {
             sinceTimestamp = params.since;
+          } else {
+            // The `else` that used to live here assigned params.since verbatim
+            // and was the entry point for the command-execution defect. Zod's
+            // refine already rejects this, so reaching here means the schema
+            // and this switch have drifted apart — fail rather than guess.
+            return error(SINCE_REJECTION);
           }
           const agentChanges = db.prepare("SELECT * FROM changes WHERE timestamp > ? ORDER BY timestamp DESC").all(sinceTimestamp);
           const newDecisions = db.prepare("SELECT * FROM decisions WHERE timestamp > ? ORDER BY timestamp DESC").all(sinceTimestamp);
