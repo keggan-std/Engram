@@ -178,9 +178,43 @@ export function writeJson(filePath: string, data: any): void {
     // Mirrors atomicWriteJson in services/instance-registry.service.ts, which had
     // the right shape all along and was module-private, so the installer could not
     // call it. See docs/foundations/05-distribution.md F2.
+    //
+    // SENIOR REVIEW S11 — atomic-replace SILENTLY WIDENS PERMISSIONS.
+    //
+    // temp-file-plus-rename does not inherit the target's mode: the temp file
+    // is created fresh under the process umask (typically 0644) and then
+    // REPLACES the original inode. A config the user had deliberately chmod'd
+    // to 0600 comes back world-readable, with no error and nothing in the
+    // output to notice.
+    //
+    // That matters because of WHAT these targets are. ~/.claude.json is not
+    // Engram's file — it is another product's entire user state, 53 top-level
+    // keys including oauthAccount, userID and machineID, of which mcpServers is
+    // one. Downgrading it to 0644 on a shared or multi-user machine exposes
+    // another vendor's credentials as a side effect of installing Engram.
+    //
+    // The review could only grade this VERIFIED, not PROVEN, because it was
+    // read on Windows where modes are a no-op — which is exactly the platform
+    // blind spot task #101 raised, and exactly why CI now runs ubuntu and macos.
+    //
+    // Preserve the mode when there is one to preserve. chmod before rename, so
+    // the file is never visible at the wrong mode even briefly.
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    let existingMode: number | undefined;
+    try {
+        existingMode = fs.statSync(filePath).mode & 0o777;
+    } catch {
+        // No existing file — a fresh write, so there is no prior mode to keep
+        // and the umask default is the correct answer.
+    }
+
     const tmpPath = `${filePath}.tmp.${process.pid}`;
     fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    if (existingMode !== undefined) {
+        // No-op on Windows, which is why this cannot be proven there.
+        try { fs.chmodSync(tmpPath, existingMode); } catch { /* best effort — never block the install */ }
+    }
     fs.renameSync(tmpPath, filePath);
 }
 
