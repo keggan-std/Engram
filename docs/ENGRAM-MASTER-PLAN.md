@@ -1,6 +1,6 @@
 # Engram — Master Plan
 
-**Date:** 2026-08-05 · **Status:** **Adopted, except §9** · **Engram task:** #11
+**Date:** 2026-08-05 · **Last verified:** 2026-08-06 · **Status:** **Adopted, except §9** · **Engram task:** #11
 **Produced by:** the foundations review — [`foundations/00-CHARTER.md`](foundations/00-CHARTER.md) Phase 2
 **Inputs:** ten domain documents, [`foundations/01`](foundations/01-durability.md)…[`10`](foundations/10-public-surface.md) · [`DEFERRED-CHANGES.md`](DEFERRED-CHANGES.md) · [`foundations/measurements/`](foundations/measurements/README.md)
 
@@ -21,6 +21,18 @@
 > foot of this file still read `:DRAFT` for another session. It now reads
 > `:ADOPTED-EXCEPT-S9`. Worth noting rather than silently editing: the fix for a
 > two-source disagreement was applied to two sources, and the count was three.
+>
+> **Staleness sweep 2026-08-06 (session 43).** Every checkable claim in this file
+> was re-verified against the tree, the store and the registry. Nine were wrong.
+> **Five of them were wrong because they were live counts written into prose** —
+> commits unpushed, open tasks, suite size, parameter count. Those are not
+> corrected; they are **deleted and replaced with the mechanism that owns them**,
+> per decision **#35** (*the router routes; it does not restate*), which was
+> adopted after this plan was and applies to it. Four were pointer or fact errors
+> and are corrected in place with a dated note. Each edit says what was wrong.
+> Historical measurements — `617/617` on the frozen release branch, `579/579` for
+> Recipe B, `21.1%`, `n=14`, byte sizes — are **kept**: they are dated
+> observations, not live state, and re-running them is not the reader's job.
 
 > **This document does not carry status.** Progress lives in the Engram task board.
 > It is deliberately **thin**: index, direction, cut list, sequencing, release strategy.
@@ -76,7 +88,13 @@ v2-foundations                    on: push/PR → [main, develop, v2-foundations
                                     knip
 ```
 
-`v2-foundations` is **69 commits unpushed**. So:
+`v2-foundations` has **no upstream — every commit on it is unpushed**. So:
+
+> **Live count deleted 2026-08-06.** This line read *"69 commits unpushed."* It
+> was 82 by the time anyone re-read it, and the number was never the point — the
+> point is that the branch has no upstream at all, which `git rev-parse
+> --abbrev-ref v2-foundations@{upstream}` answers and no prose can go stale about.
+> First of five live counts removed from this file; see the header.
 
 - CI *has* run — on `main`, and what it ran was build + test.
 - The three generator/dead-code gates exist **only** on the unpushed branch.
@@ -149,6 +167,18 @@ One gate is classified CI-only — `knip`, because `npx -y knip@5` needs the
 network, and a gate that cannot pass offline is one a developer switches off
 (task **#95**). That residual is stated rather than hidden.
 
+> **`knip` is now green, and its task row is empty — both found 2026-08-06.**
+> PROVEN: `npx -y knip@5 --no-progress` **exits 0** on `v2-foundations`. §1's D8
+> row records it as *red from the commit that introduced it*; that was true when
+> written and is no longer. `knip.json` now ignores the 15 deliberately-retained
+> dead files and demotes five rules to `warn` — FR-D8's work, whose remaining
+> debt is task **#82**. **Task #79 still says "make it green" and should be
+> closed.**
+>
+> Separately: task **#95**, cited above as carrying the CI-only residual, had
+> `description IS NULL` — the convention-#7 transport corruption, hitting a row
+> this plan depends on. Repaired 2026-08-06 from this section's own text.
+
 **What remains of item 0** is the published line: the five-file port and the
 push. That half is sequencing item **0b** in §7.
 
@@ -195,9 +225,22 @@ instinct to "simplify to 20 actions" will keep returning:
 | DEFERRED [D12](DEFERRED-CHANGES.md) | The never-called-action report cannot run yet; "ever" starts at `5ff7e2f`. **No action may be deleted until it exists** |
 
 **What is actually wrong is the parameter surface**, not the action count:
-`engram_memory` advertises **79 optional top-level parameters** across 38 actions
-with nothing marking which apply. That is FR-D7 T1 (task #71), and it is blocked —
-see §7.
+`engram_memory` advertises **one flat parameter list covering all of its actions,
+with nothing marking which parameter applies to which** — and `engram_admin` does
+the same. The live figures are in
+[`CAPABILITY-SURFACE.md`](CAPABILITY-SURFACE.md)'s summary table, which is
+generated from the Zod schemas and gated by `--check`. That is FR-D7 T1 (task
+#71), and it is blocked — see §7.
+
+> **Restated count deleted 2026-08-06, and it was also wrong.** This read *"79
+> optional top-level parameters across 38 actions."* The generated surface — the
+> artifact that owns this fact, unchanged since `307d2f2` on 2026-08-02, so it
+> already said this when the sentence was written — reports **78 parameters** for
+> `engram_memory` including `action` itself, and **31** for `engram_admin` against
+> the prose's 32. Both were hand-typed one-or-two high. This is finding F5
+> occurring *inside the synthesis document*, against a generated file sitting in
+> the same directory. Task **#71** carries the same two wrong numbers and needs
+> the same fix.
 
 > **Caution carried forward.** DEFERRED [D13](DEFERRED-CHANGES.md): the 97.5%
 > unanimity figure came from three samples of *one model* and measures routing
@@ -239,8 +282,13 @@ Download counts, stars and watchers are irrelevant to it.
 
 **Split the release in two.** The blocking condition on decision #19 was "no
 release until the master plan is drafted and solidified" — this document is that
-condition being met, and it does not require all 68 open tasks to land first
-(charter kill switch 2 exists to prevent exactly that).
+condition being met, and it does not require **the open task board to be empty**
+first (charter kill switch 2 exists to prevent exactly that).
+
+> **Live count deleted 2026-08-06.** This read *"all 68 open tasks."* The board
+> was at 71 within a day, and a release condition that moves every time someone
+> files a task is not a condition. The board is the register; `docs/STATE.md`
+> reports it.
 
 > ### ✅ Assembled and verified 2026-08-05 — **and it is `1.13.0`, not `1.12.1`**
 >
@@ -295,9 +343,16 @@ make the backup blocking). H2 is already fixed on the review line.
 > **And this paragraph's own instruction was wrong.** It read *"the suite is now
 > 733 across 41 files, the cherry-pick result must be re-run"* — implying the
 > result should show 733. A Recipe B tree is `main`'s suite plus what the two
-> commits bring; the review line's 742 never enters it. 579 is the correct
-> figure and it is unchanged. Expecting 733 would have read as a catastrophic
-> regression when nothing was wrong. See the runbook's §0.
+> commits bring; **the review line's own suite never enters it, whatever it
+> stands at.** 579 is the correct figure and it is unchanged. Expecting the
+> review line's number would have read as a catastrophic regression when nothing
+> was wrong. See the runbook's §0.
+>
+> **Live count deleted 2026-08-06.** This note named the review line's suite as
+> *742*; it is **752 across 44 files** today (PROVEN, `npm test` on `8609d62`) and
+> will move again. Naming it re-created, one line below the correction, exactly
+> the trap the correction exists to prevent. The figure that matters here — 579,
+> a frozen measurement of a `main`-based tree — is kept.
 
 **Release B — `2.0.0`, from the review line. Breaking. Ships when its targets land.**
 
@@ -330,7 +385,17 @@ public safety."*
 recorded) **→ 2026-09-16.** On that date, either the advisory is published or the
 reason for extending it is written down as a decision. The clock's purpose is not
 to force disclosure; it is to make continued silence a *decision* rather than a
-default.
+default. **It is task [#98](#), and Engram scheduled event #1 fires on the date.**
+
+> **Corrected 2026-08-06 — the clock had no row, and the clock is the whole
+> point.** §7 item 3 assigned this to task **#87**, which is `done` — it was
+> closed as *"DEFERRED D11 is stale in its first half"*, different work entirely.
+> PROVEN at the time of this edit: no open task mentioned *advisory*, *disclos* or
+> *2026-09-16*, and `scheduled_events` held **zero rows** — the deferred-action
+> mechanism this product ships had never been used for the one deadline the
+> project has. So the section written to stop silence being a default had itself
+> gone silent, by pointing at a closed row. Task **#98** and scheduled event **#1**
+> now carry it. **This remains §9 item 1 — the maintainer's alone.**
 
 ### 4.5 Migration path is a gate, not a step
 
@@ -425,7 +490,7 @@ of done is the binding, not the edit.
 | **0b** | ✅ **The published line gets the gates** — *prepared 2026-08-05* | Done on `release/1.13.0`: five gate inputs ported, `surface` job added, `knip` measured **green** on `main`'s source. Ships with Release A | #93 |
 | **1** | ~~**H1 — installer config clobber**~~ **— code done; this is now delivery** | Nothing to build. See §7.0a | #46 → #49 |
 | **2** | ✅ **Release A (`1.13.0`)** — *assembled and verified, awaiting publish* | `release/1.13.0` @ `c4fac06`: all four hazards, 617/617, three gates at exit 0, notes state why. **Remaining: `npm publish` + push — the maintainer's** | #49 |
-| **3** | **Advisory decision** | Published, or the extension recorded as a decision, by **2026-09-16** | #87 |
+| **3** | **Advisory decision** — *§9 item 1, the maintainer's alone* | Published, or the extension recorded as a decision, by **2026-09-16**. Scheduled event **#1** fires on the date | **#98** |
 | **4** | **Reject malformed records on write** | The one-regex acceptance test in task #91 rejects the convention-#7 signature; `update_observation` exists | #77, #91 |
 | **5** | **Provenance (D2 T1)** | Every memory row carries server-resolved author/route/trust tier | #38, #58 |
 | **6** | **Trust-tiered replay (D2 T2)** | Blocked on 5. *"The most important target in this document and currently the least bound"* | #40 |
@@ -433,6 +498,26 @@ of done is the binding, not the edit.
 | **8** | **D7 T1 — per-action schemas** | **Blocked on 7** by D14. This dependency is stated in D8 and appears nowhere in D7 — a plan read from D7 alone would ship it early | #71 |
 | **9** | **Storage integrity** | FTS triggers exist; freshness cannot be laundered by a partial write | #35, #64 |
 | **10** | **Release B (`2.0.0`)** | Golden fixture migrates v1 → head in CI | #34, #49 |
+
+### 7.0b Where the sequence actually stands *(added 2026-08-06)*
+
+The table above says what is *done*; it does not say what has happened since, and
+a reader would reasonably assume items 4 onward are in progress. They are not.
+
+| | |
+|---|---|
+| **Items 0a, 0b, 1, 2** | Landed or assembled. **Item 2 has not moved** — `release/1.13.0` @ `c4fac06` is still unpublished and unpushed, VERIFIED 2026-08-06 by `git log -1` |
+| **Item 3** | Now has a row (**#98**) and a scheduled event (**#1**). It had neither until 2026-08-06 |
+| **Items 4–10** | **None started.** No target after Release A has been implemented |
+| **Sessions 41–43** | Went to **charter Phase 3**, not to this table: `CLAUDE.md` bound (decision #34), `docs/README.md` bound (decision #35), this sweep. Phase 3's remaining half — the skills under `.claude/skills/` — is **unstarted**, and `.claude/skills/` does not exist |
+
+**This is not drift, and it is worth saying why.** §10 kill switch 1 says stop
+implementing targets if item 0 has not landed. Item 0a *has* landed, so the switch
+did not fire — but every §7 definition of done is a CI gate, and item 0b's gates
+still only exist on an unpushed branch, so *"one of them has been observed
+failing"* remains unproven. Phase 3 work is the entry-point half of the same
+problem. **The honest statement is that the programme is gated on §9 decision 2 —
+whether to push — which is the maintainer's and is unchanged.**
 
 ### 7.0a H1 was already fixed, and this table described the wrong fix *(added 2026-08-05)*
 
@@ -515,7 +600,16 @@ Stated explicitly so they are not absorbed silently. Each needs the maintainer.
 2. **Whether to push `v2-foundations`.** D11: pushing **is** disclosure and
    inverts the calculus. Unchanged by this plan.
 3. **Whether `packages/*` stay in this repo.** D8 kill switch 3: if they are cut,
-   task #83 and D14 both dissolve. Two of the three have never been published.
+   task #83 and D14 both dissolve. **None of the three has ever been published** —
+   and two of them are documented as installable.
+
+   > **Corrected 2026-08-06.** This read *"two of the three have never been
+   > published"*, which implies one has. PROVEN against the registry: `npm view`
+   > returns **404 for all three** — `engram-thin-client`, `engram-universal-client`
+   > and `engram-dashboard`. The distinction that matters is a different one:
+   > `engram-dashboard` is `"private": true`, so it was never meant to publish,
+   > while the two thin clients are **not** private and are documented as
+   > installable. §5.1's row is right; this line was not.
 4. **Whether the `SECURITY.md` SLA (48h/7d/30d) is one person can meet.** D10 F4
    is the review's only *unrecoverable* failure mode, because the SLA is already
    public.
