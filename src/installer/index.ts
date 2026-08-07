@@ -7,7 +7,7 @@ import path from "path";
 import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
-import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError } from "./config-writer.js";
+import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError, findEngramEntryKey } from "./config-writer.js";
 import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 
@@ -126,12 +126,7 @@ function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
             throw e;
         }
         const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
-        const instanceKey = Object.keys(serverMap).find(k => {
-            const en = serverMap[k];
-            return k === "engram"
-                || String(en?.command ?? "").includes("engram")
-                || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
-        });
+        const instanceKey = findEngramEntryKey(serverMap);
         if (instanceKey) {
             const entry = serverMap[instanceKey];
             return { state: "installed", configPath, installedVersion: String(entry?._engram_version ?? "?") };
@@ -150,12 +145,7 @@ function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
                 throw e;
             }
             const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
-            const instanceKey = Object.keys(serverMap).find(k => {
-                const en = serverMap[k];
-                return k === "engram"
-                    || String(en?.command ?? "").includes("engram")
-                    || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
-            });
+            const instanceKey = findEngramEntryKey(serverMap);
             if (instanceKey) {
                 const entry = serverMap[instanceKey];
                 return { state: "installed", configPath: lp, installedVersion: String(entry?._engram_version ?? "?") };
@@ -325,12 +315,7 @@ Examples:
                 throw e;
             }
             const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
-            const instanceKey = Object.keys(serverMap).find(k => {
-                const en = serverMap[k];
-                return k === "engram"
-                    || String(en?.command ?? "").includes("engram")
-                    || (Array.isArray(en?.args) && (en.args as string[]).some((a: string) => String(a).includes("engram")));
-            });
+            const instanceKey = findEngramEntryKey(serverMap);
             if (!instanceKey) return { state: "not-installed", scope, filePath };
             const entry = serverMap[instanceKey];
             const installedVersion = String(entry?._engram_version ?? "?");
@@ -955,6 +940,13 @@ async function installToPath(configPath: string, ide: IdeDefinition, universal =
             statusText = `Found existing install (version unknown — pre-tracking era). Stamped as v${currentVersion}`;
         } else if (result === "exists") {
             statusText = `Already installed at v${currentVersion} — nothing to do`;
+        } else if (result === "repaired") {
+            // Same version, different entry. Reported distinctly because the
+            // whole point is that the previous behaviour said "nothing to do"
+            // here and changed nothing. Observation #127.
+            statusText = `Repaired the v${currentVersion} entry (command or args had drifted)`;
+        } else if (result === "adopted") {
+            statusText = `Updated the existing entry to v${currentVersion} (it was not named "engram" — updated in place rather than adding a second server)`;
         }
 
         console.log(`      Status : ${statusText}`);

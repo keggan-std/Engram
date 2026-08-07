@@ -148,7 +148,59 @@ export function writeJson(filePath: string, data: any): void {
     fs.renameSync(tmpPath, filePath);
 }
 
-export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
+export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded" | "repaired" | "adopted";
+
+/**
+ * Find the key under which an Engram server entry lives in an MCP server map,
+ * whatever it is called.
+ *
+ * OBSERVATION #127. This predicate existed three times, hand-copied, in
+ * index.ts at the status, list and check sites — and `addToConfig` did not use
+ * it at all, testing only `config[key].engram`. The two disagreed, so a config
+ * holding a differently-named entry (`engram-memory`, `memory`, anything the
+ * user typed) reported "installed" from status and then got a SECOND entry from
+ * install. Two entries mean two servers launched against one database, which is
+ * the exact write-lock contention the `--ide=` shard flag exists to prevent, and
+ * `--remove` deleted only the one called `engram` and left the other live.
+ *
+ * Third recurrence of the shape FR-D5 found in the installer's filename rule and
+ * #127 found again here: a rule copied to N sites with nothing that can find
+ * site N+1. One definition, every caller derives from it.
+ */
+export function findEngramEntryKey(
+    serverMap: Record<string, Record<string, unknown>> | undefined | null,
+): string | undefined {
+    if (!serverMap) return undefined;
+    // Exact key wins, so a canonical entry is never passed over for a
+    // coincidental match elsewhere in the map.
+    if (serverMap.engram) return "engram";
+    return Object.keys(serverMap).find(k => {
+        const en = serverMap[k];
+        return String(en?.command ?? "").includes("engram")
+            || (Array.isArray(en?.args) && (en.args as string[]).some(a => String(a).includes("engram")));
+    });
+}
+
+/**
+ * Compare an installed entry against the one this version would write.
+ *
+ * OBSERVATION #127. `addToConfig` decided "already installed" on the
+ * `_engram_version` stamp alone and compared neither command nor args, so an
+ * entry that was corrupt but carried the current version made a reinstall a
+ * no-op that reported success. Running the installer again is the first thing
+ * anyone does when a server will not start; it was the one action guaranteed
+ * not to help.
+ *
+ * Only fields Engram writes are compared. Anything a user added by hand is
+ * ignored here and preserved by the caller.
+ */
+function entryMatches(existing: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+    const fields = new Set([...Object.keys(expected), "command", "args", "env"]);
+    for (const f of fields) {
+        if (JSON.stringify(existing?.[f]) !== JSON.stringify(expected[f])) return false;
+    }
+    return true;
+}
 
 /**
  * Add or update the Engram entry in a config file.
@@ -202,17 +254,30 @@ export function addToConfig(configPath: string, ide: IdeDefinition, universal = 
     const newEntry = makeEngramEntry(ide, universal, ideKey);
     const currentVersion = newEntry._engram_version as string;
 
-    if (config[key].engram) {
-        const existingVersion = config[key].engram._engram_version as string | undefined;
+    // Locate an existing entry under ANY key, not just "engram" — see
+    // findEngramEntryKey. Writing to the key we found it under preserves a name
+    // the user chose; writing to a fixed "engram" would leave theirs behind and
+    // launch two servers on one database.
+    const existingKey = findEngramEntryKey(config[key]);
 
-        // Same version already installed — nothing to do
+    if (existingKey) {
+        const existing = config[key][existingKey] as Record<string, unknown>;
+        const existingVersion = existing._engram_version as string | undefined;
+
         if (existingVersion === currentVersion) {
-            return "exists";
+            // Same version — but is it the same ENTRY? A corrupted command or a
+            // stale --ide shard carries the current stamp perfectly well.
+            if (entryMatches(existing, newEntry)) return "exists";
+            config[key][existingKey] = { ...existing, ...newEntry };
+            writeJson(configPath, config);
+            return "repaired";
         }
 
-        // Upgrade (known older version) or legacy adoption (no _engram_version)
-        config[key].engram = newEntry;
+        // Merge rather than replace so hand-added fields on the entry survive an
+        // upgrade; every field Engram owns is overwritten by newEntry.
+        config[key][existingKey] = { ...existing, ...newEntry };
         writeJson(configPath, config);
+        if (existingKey !== "engram") return "adopted";
         return existingVersion ? "upgraded" : "legacy-upgraded";
     }
 
@@ -231,9 +296,14 @@ export function removeFromConfig(configPath: string, ide: IdeDefinition): boolea
     if (!config) return false;
 
     const key = ide.configKey;
-    if (!config[key]?.engram) return false;
+    // Same finder as install and status. This used to delete only the entry
+    // literally named "engram", so an install that had adopted a differently
+    // named entry could not be uninstalled — `--remove` reported success having
+    // left a live server behind. Observation #127.
+    const existingKey = findEngramEntryKey(config[key]);
+    if (!existingKey) return false;
 
-    delete config[key].engram;
+    delete config[key][existingKey];
 
     // Clean up empty wrapper key
     if (Object.keys(config[key]).length === 0) {
