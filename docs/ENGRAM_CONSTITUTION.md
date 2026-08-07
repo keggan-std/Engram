@@ -1,6 +1,10 @@
 # Engram Constitution — What Is Here, Why, and Where
 
-**Version:** 1.0 · **Date:** 2026-08-02 · **Covers:** `engram-mcp-server` @ 1.11.0, schema V24
+**Version:** 1.1 · **Date:** 2026-08-02 · **Last verified:** 2026-08-07 · **Covers:** `engram-mcp-server` @ 1.14.0-dev (published `latest` is 1.13.0), schema V26
+
+> **Header corrected 2026-08-07.** It read "1.11.0, schema V24" — two releases and two
+> schema revisions behind — while being the document that tells a reader not to trust the
+> README. A version stamp on a status-bearing document is a claim like any other.
 **Purpose:** The single document a human or agent reads to understand this codebase without re-deriving it. What each file is, why it exists, what it holds, what it touches, and what will bite you.
 
 > **This document describes the code as it is, not as the README says it is.** Where the two disagree, this document follows the code and says so. See [`engram-deep-audit-2026-08-02.md`](engram-deep-audit-2026-08-02.md) §7 for the full list of divergences.
@@ -381,11 +385,27 @@ The v1.6 consolidation dropped one config whitelist, seven enums, and every nume
 #### 12.6 Universal mode bypasses Zod *(HIGH)*
 `HandlerCapturer` discards the schemas. Same action, different validation, depending on launch flags.
 
-#### 12.7 Shell interpolation in `gitCommand` *(MEDIUM)*
-`utils.ts:338` interpolates `command` unquoted into `execSync`. Not currently reachable with user input; `GitService.runGitCommand` exposes it as a general pass-through.
+#### 12.7 Shell interpolation in `gitCommand` — ~~MEDIUM~~ **WAS CRITICAL. FIXED 2026-08-07.**
+**This entry was wrong when it was written, and the error is instructive enough to keep.**
+
+It said "not currently reachable with user input". It was reachable, through an ordinary
+advertised action. `engram_memory(action:"what_changed", since:"…")` took a free-form
+`z.string()`, fell through an unguarded `else`, and reached `getGitLogSince`, which built
+`--since="${since}"` inside the shell string. **PROVEN 2026-08-07 with a working PoC** that
+created a file via an injected command.
+
+The assessment surveyed the call sites of `command`, correctly found every one to be a
+string literal, and missed that one of those literals is a *template with a user-controlled
+hole in it*. A call-site survey that stopped one level too shallow.
+
+Fixed: `gitCommand` takes an argv array over `execFileSync` — the string signature is
+deleted, so the shape is unrepresentable rather than merely unarmed — and `since` is
+constrained at the schema. The PoC is committed as
+`tests/security/git-command-injection.test.ts` and was verified to go red against the
+reverted code. See decision #39, task #105.
 
 #### 12.8 The cross-instance trust root is unsigned *(MEDIUM)*
-`~/.engram/instances.json` is machine-global and unsigned; `db_path` and `project_root` from it are used directly to open and scan files. `searchAll()` skips `checkPermission()` and reaches `` `SELECT * FROM ${scope}` `` gated only by the *foreign* instance's self-reported `sharing_types`.
+`~/.engram/instances.json` is machine-global and unsigned; `db_path` and `project_root` from it are used directly to open and scan files. **The `searchAll()` half of this is FIXED** — it no longer skips `checkPermission()`; `QUERYABLE_TABLES` moved to `constants.ts` and is enforced at both ends (`cross-instance.service.ts:465`, `instance-registry.service.ts:527`, decision #38, commit `cc138b6`). Separately unresolved — the trust root itself: the file is still unsigned and still self-reports `sharing_types`.
 
 #### 12.9 Destructive corruption recovery *(MEDIUM)*
 A corrupt main DB is renamed and replaced with an empty one. Warning to stderr only. 3% coverage on this path.
@@ -397,7 +417,12 @@ A corrupt main DB is renamed and replaced with an empty one. Warning to stderr o
 
 ### 13. Test posture
 
-**570/570 pass**, ~20s, zero skipped. Coverage **28.7% stmt / 20.2% branch** (measured at 557; the 13 added tests raise `sessions.ts` but the headline has not been re-measured).
+**899/899 pass** across 55 files, ~42s, zero skipped. Coverage **35.54% stmt / 25.55% branch / 53.24% func** — PROVEN by `npx vitest run --coverage` on 2026-08-07.
+
+> These figures were **570 tests / 28.7% / 20.2%** until 2026-08-07, which understated a
+> project that had grown by 329 tests. A stale number that flatters is a known trap; a
+> stale number that *understates* is still useless, because nobody can cite it. The
+> distribution below is the part that actually matters and it is still bimodal.
 
 | Surface | Cov | |
 |---|---|---|

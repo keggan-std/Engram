@@ -335,7 +335,32 @@
 <a name='L270'></a><a href='#L270'>270</a>
 <a name='L271'></a><a href='#L271'>271</a>
 <a name='L272'></a><a href='#L272'>272</a>
-<a name='L273'></a><a href='#L273'>273</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L273'></a><a href='#L273'>273</a>
+<a name='L274'></a><a href='#L274'>274</a>
+<a name='L275'></a><a href='#L275'>275</a>
+<a name='L276'></a><a href='#L276'>276</a>
+<a name='L277'></a><a href='#L277'>277</a>
+<a name='L278'></a><a href='#L278'>278</a>
+<a name='L279'></a><a href='#L279'>279</a>
+<a name='L280'></a><a href='#L280'>280</a>
+<a name='L281'></a><a href='#L281'>281</a>
+<a name='L282'></a><a href='#L282'>282</a>
+<a name='L283'></a><a href='#L283'>283</a>
+<a name='L284'></a><a href='#L284'>284</a>
+<a name='L285'></a><a href='#L285'>285</a>
+<a name='L286'></a><a href='#L286'>286</a>
+<a name='L287'></a><a href='#L287'>287</a>
+<a name='L288'></a><a href='#L288'>288</a>
+<a name='L289'></a><a href='#L289'>289</a>
+<a name='L290'></a><a href='#L290'>290</a>
+<a name='L291'></a><a href='#L291'>291</a>
+<a name='L292'></a><a href='#L292'>292</a>
+<a name='L293'></a><a href='#L293'>293</a>
+<a name='L294'></a><a href='#L294'>294</a>
+<a name='L295'></a><a href='#L295'>295</a>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a>
+<a name='L298'></a><a href='#L298'>298</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -368,8 +393,30 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">30x</span>
-<span class="cline-any cline-yes">30x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">43x</span>
+<span class="cline-any cline-yes">43x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -406,6 +453,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">13x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -610,10 +660,32 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">// ============================================================================
 // Engram MCP Server — Sensitive Data Protection Service
 // ============================================================================
-// Manages data sensitivity locks. Owners can mark specific decisions,
-// conventions, or other records as "sensitive." Cross-instance queries
-// automatically filter out sensitive items unless access is approved.
-// Access requests require human approval.
+// Records data sensitivity MARKERS. Owners can mark specific decisions,
+// conventions, or other records as "sensitive."
+//
+// ⚠️ THE MARKERS ARE NOT ENFORCED. FR-D2 T4, task #39.
+//
+// This header used to read "Cross-instance queries automatically filter out
+// sensitive items unless access is approved. Access requests require human
+// approval." Both sentences were false. VERIFIED: filterSensitive() below and
+// isAccessApproved() below have ZERO callers in src/ — they appear only in
+// their own definitions and in tests/services/sensitive-data.test.ts, which
+// exercises them in isolation and therefore PASSES while the feature is
+// unwired. cross-instance.service.ts contains no occurrence of "sensitive" or
+// "locked" anywhere and reads with plain SELECT.
+//
+// Nor is approval human-gated: approveRequest is an ordinary MCP action any
+// agent can call, with resolved_by as a free-text parameter it supplies itself.
+// Since approvals are never consulted, the gate is inert in both directions.
+//
+// The claim was the harm, not the gap — a user who locks a record and then
+// shares an instance has changed their behaviour on the strength of something
+// that never runs. A security feature that does not execute is worse than one
+// that does not exist. The claims are corrected here; WHETHER TO WIRE OR DELETE
+// the code is domain 4's call, since cross-instance is domain 4's surface, and
+// charter section 8 forbids solving it inside the threat-model domain.
+//
+// tests/security/no-inert-surface.test.ts is the gate for this class.
 // ============================================================================
 &nbsp;
 import type { Database as DatabaseType } from "better-sqlite3";
@@ -681,8 +753,11 @@ export class SensitiveDataService {
   }
 &nbsp;
   /**
-   * Lock specific records as sensitive (requires human/owner action).
-   * Locked items are not visible to cross-instance queries.
+   * Record a local sensitivity marker on specific records.
+   *
+   * ⚠️ This used to say "Locked items are not visible to cross-instance
+   * queries." They are visible. Nothing consults these markers on any read
+   * path — see the file header and task #39.
    */
   lockRecords(type: string, ids: number[]): { locked: number } {
     const map = this.getLockedKeys();
@@ -886,7 +961,7 @@ export class SensitiveDataService {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-04T00:38:44.151Z
+                at 2026-08-07T20:33:54.155Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

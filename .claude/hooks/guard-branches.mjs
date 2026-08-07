@@ -8,12 +8,23 @@
 //      `develop`. `main` is the published line and stays always-releasable;
 //      tripwire patch releases are cut from it.
 //
-//   2. Decision #19 — nothing is released until the master plan is solid, and
-//      DEFERRED-CHANGES D11 is explicit that **pushing IS disclosure** and
-//      inverts the entire risk calculus. Published v1.12.0 still carries four
-//      P0 security findings, and nothing is disclosed while the branch is
-//      unpushed. So a push must be a deliberate human decision, never a
-//      reflex.
+//   2. DEFERRED-CHANGES D11 is explicit that **pushing IS disclosure**, so a
+//      push must be a deliberate human decision, never a reflex.
+//
+//      CORRECTED 2026-08-07 (senior review S2). This block used to end with
+//      "nothing is disclosed while the branch is unpushed". THE BRANCH IS
+//      PUSHED — it has tracked `origin/v2-foundations` since before v1.13.0
+//      shipped — and v1.13.0 is live on npm as `latest`. That sentence was one
+//      of THREE registers still telling every agent the opposite; the other two
+//      were D11 itself and docs/STATE.md.
+//
+//      This matters more than ordinary staleness because it is a SAFETY claim.
+//      An agent reading "nothing is disclosed" reasons that a hazard is
+//      contained when it is already public. The premise inverted and the
+//      warning did not.
+//
+//      tests/process/register-truth.test.ts now fails if this file claims the
+//      branch is unpushed while git reports an upstream.
 //
 // WHY A HOOK AND NOT A RULE
 // -------------------------
@@ -74,11 +85,11 @@ process.stdin.on("end", () => {
     if (/\bgit\s+(-\S+\s+)*push\b/.test(cmd)) {
       decide(
         "ask",
-        "PUSH = DISCLOSURE. Decision #19 holds the release until the master plan is " +
-        "solid, and DEFERRED-CHANGES D11 states that pushing inverts the entire risk " +
-        "calculus: published v1.12.0 still carries four P0 security findings, and " +
-        "nothing is disclosed while this branch stays unpushed. Pushing also fires " +
-        "the D11 tripwire, which commits to cutting a release that week. This must " +
+        "PUSH = DISCLOSURE. DEFERRED-CHANGES D11 states that pushing inverts the " +
+        "entire risk calculus, and pushing also fires the D11 tripwire, which " +
+        "commits to cutting a release that week. NOTE: this branch is ALREADY " +
+        "pushed and v1.13.0 is already live on npm, so the question is not whether " +
+        "to disclose but what this specific push adds to what is public. This must " +
         "be a deliberate human decision — confirm only if that is genuinely intended."
       );
     }

@@ -47,7 +47,17 @@ jobs:
             node-version: 22.x
 
     steps:
+      # fetch-depth: 0 so `main` is a real ref in the checkout.
+      # tests/process/register-truth.test.ts asserts that the published line is
+      # an ancestor of this branch — senior review S2, where release/1.13.0 was
+      # cut from main, published, and never merged back, leaving a branch that
+      # would have REVERTED the release if merged. With the default shallow
+      # checkout that ref does not exist and the assertion cannot run; it fails
+      # loudly rather than skipping, so removing this line breaks the build
+      # instead of silently disarming the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -80,7 +90,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # fetch-depth: 0 so `main` is a real ref in the checkout.
+      # tests/process/register-truth.test.ts asserts that the published line is
+      # an ancestor of this branch — senior review S2, where release/1.13.0 was
+      # cut from main, published, and never merged back, leaving a branch that
+      # would have REVERTED the release if merged. With the default shallow
+      # checkout that ref does not exist and the assertion cannot run; it fails
+      # loudly rather than skipping, so removing this line breaks the build
+      # instead of silently disarming the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js
         uses: actions/setup-node@v4

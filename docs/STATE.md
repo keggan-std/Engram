@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `34ab9e5`
+**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `d354172`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `34ab9e5` — docs(FR-D2): banner what shipped, leave the findings as the record |
+| **Working branch** | `v2-foundations` @ `d354172` — fix(S4,S5,S8): the install path was serving a version from April |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
-| **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | clean |
-| **Store** | schema V25 · 44 sessions · 38 decisions · 132 observations · 96 file notes |
+| **Pushed?** | pushed — upstream `origin/v2-foundations` |
+| **Uncommitted** | **2 file(s)** — `scripts/check-state-freshness.mjs`, `docs/reports/2026-08-07-senior-review.md` |
+| **Store** | schema V26 · 44 sessions · 39 decisions · 132 observations · 96 file notes |
 
-**Latest active decision — #38:** Audit F4 closed by moving QUERYABLE_TABLES to constants.ts and enforcing it at BOTH ends — searchAll delegates authorization to checkPermission, and setSharing refuses to store a type no reader will serve.
+**Latest active decision — #39:** gitCommand now takes an argv array and uses execFileSync — the string signature is DELETED, not merely unused, so the shell-injection landmine is unrepresentable rather than unarmed.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 

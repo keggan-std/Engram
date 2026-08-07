@@ -62,16 +62,41 @@ const head = git("rev-parse --short HEAD");
 const branch = git("rev-parse --abbrev-ref HEAD");
 const problems = [];
 
+// THE SELF-REFERENCE BUG — observation #132, senior review S3.
+//
+// This used to be `if (stampedCommit !== head)`, which CANNOT REACH EXIT 0.
+// STATE.md stamps the commit it was generated at; committing the regenerated
+// file creates a NEW commit, so the stamp is always exactly one behind and the
+// alarm is permanently on. On 2026-08-07 it was stamped 34ab9e5 against HEAD
+// 80fa257 — and 80fa257 was "docs(STATE): regenerate after the FR-D2
+// hardening", the regeneration commit itself.
+//
+// An alarm that is always on carries no information and gets ignored, which is
+// the precise failure this script's own header warns about two paragraphs up.
+// It described the disease and then caught it.
+//
+// The fix: ask whether anything OTHER THAN STATE.md changed since the stamp.
+// A range containing only STATE.md edits means the register is current and the
+// last commit was the act of making it so. Any other file in the range means
+// the register describes a tree that has moved on.
 if (stampedCommit !== head) {
-    const behind = git(`rev-list --count ${stampedCommit}..HEAD`) || "?";
-    const srcTouched = git(`diff --name-only ${stampedCommit}..HEAD -- src/`)
-        .split("\n").filter(Boolean).length;
-    problems.push(
-        `BEHIND: generated at ${stampedCommit}, HEAD is ${head} — ${behind} commit(s) since.`,
-        srcTouched > 0
-            ? `  ${srcTouched} file(s) under src/ changed in that range. The register describes a tree that no longer exists.`
-            : `  No src/ changes in that range — the drift is documentation only.`,
-    );
+    const changed = git(`diff --name-only ${stampedCommit}..HEAD`)
+        .split("\n").map(s => s.trim()).filter(Boolean);
+    const substantive = changed.filter(f => f !== STATE);
+
+    if (substantive.length > 0) {
+        const behind = git(`rev-list --count ${stampedCommit}..HEAD`) || "?";
+        const srcTouched = substantive.filter(f => f.startsWith("src/")).length;
+        problems.push(
+            `BEHIND: generated at ${stampedCommit}, HEAD is ${head} — ${behind} commit(s) since.`,
+            `  ${substantive.length} file(s) other than ${STATE} changed in that range.`,
+            srcTouched > 0
+                ? `  ${srcTouched} of them under src/. The register describes a tree that no longer exists.`
+                : `  None under src/ — the drift is documentation only.`,
+        );
+    }
+    // else: the only thing that moved was STATE.md itself. That is what a
+    // regeneration commit looks like from the inside, and it is not staleness.
 }
 
 if (stampedBranch !== branch) {

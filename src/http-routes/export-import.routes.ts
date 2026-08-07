@@ -67,7 +67,11 @@ exportImportRouter.post("/import", (req, res) => {
     // and is cheaper than the feature; implementing staging is task #51.
     return notImplemented(
       res,
-      "Import over HTTP is not implemented — nothing was written. Use engram_admin(action:'import', input_path) over MCP, which does apply the data.",
+      // Corrected 2026-08-07 (senior review S6). This used to end "which does
+      // apply the data" — it applied decisions only, one of the four tables its
+      // own dry run counted. A correction that points at an uncorrected path is
+      // worse than silence, because it is read as a guarantee.
+      "Import over HTTP is not implemented — nothing was written. Use engram_admin(action:'import', input_path) over MCP, which merges decisions and reports every other table as not_imported (task #33).",
     );
   } catch (err) {
     return serverError(res, err);

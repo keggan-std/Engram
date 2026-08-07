@@ -211,22 +211,86 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           if (!fs.existsSync(params.input_path)) return error(`Import file not found: ${params.input_path}`);
           const data = JSON.parse(fs.readFileSync(params.input_path, "utf-8")) as Record<string, unknown>;
           const dryRun = params.dry_run ?? true;
-          const counts: Record<string, number> = {};
-          const importable = ["decisions", "conventions", "file_notes", "milestones"];
-          for (const table of importable) {
+
+          // ── SENIOR REVIEW S6 / task #33 — one registry, both halves ───────
+          //
+          // The dry run used to count FOUR tables — decisions, conventions,
+          // file_notes, milestones — from a local `importable` array, and the
+          // executor below then wrote exactly ONE of them. A user ran the
+          // preview, was told four categories would import, set dry_run:false,
+          // and three vanished with no warning. "Import complete. N decisions
+          // merged." is technically true and reads as total success.
+          //
+          // FR-D6 made this worse by pointing at it: export-import.routes.ts:70
+          // tells users to "use engram_admin(action:'import', input_path) over
+          // MCP, WHICH DOES APPLY THE DATA". It applied one quarter of it.
+          //
+          // The two lists are now ONE list. A table is importable if and only
+          // if it has an `apply` here, so the preview cannot describe work the
+          // executor will not do — adding a table fixes both halves at once,
+          // and there is no second place to forget.
+          //
+          // Task #33's definition of done is "honest dry run first, THEN
+          // implement", so the other three are deliberately still absent rather
+          // than filled in with three untested INSERT paths on a data-import
+          // route. What changed is that their absence is now REPORTED instead
+          // of silently swallowed — see `not_imported` below.
+          const IMPORTERS: Record<string, (row: Record<string, unknown>) => void> = {
+            decisions: (row) => {
+              db.prepare(
+                "INSERT OR IGNORE INTO decisions (id, session_id, timestamp, decision, rationale, affected_files, tags, status) VALUES (?,?,?,?,?,?,?,?)",
+              ).run(row.id, row.session_id, row.timestamp, row.decision, row.rationale, row.affected_files, row.tags, row.status);
+            },
+          };
+
+          // Every table the export format can carry. Anything here without an
+          // IMPORTERS entry is reported as not-imported rather than counted as
+          // if it were.
+          const KNOWN_TABLES = ["decisions", "conventions", "file_notes", "milestones"];
+
+          const wouldImport: Record<string, number> = {};
+          const notImported: Record<string, number> = {};
+          for (const table of KNOWN_TABLES) {
+            const count = (data[table] as unknown[] | undefined)?.length ?? 0;
+            if (IMPORTERS[table]) wouldImport[table] = count;
+            else if (count > 0) notImported[table] = count;
+          }
+
+          const skipped = Object.keys(notImported);
+          const skipNote = skipped.length > 0
+            ? ` NOT imported (no importer implemented — task #33): ${skipped.map(t => `${t} (${notImported[t]} row(s))`).join(", ")}.`
+            : "";
+
+          if (dryRun) {
+            return success({
+              dry_run: true,
+              would_import: wouldImport,
+              not_imported: notImported,
+              message:
+                `Dry run complete. Set dry_run: false to execute.` + skipNote +
+                (skipped.length > 0 ? " These rows will be LEFT IN THE FILE, not merged." : ""),
+            });
+          }
+
+          const imported: Record<string, number> = {};
+          let total = 0;
+          for (const [table, apply] of Object.entries(IMPORTERS)) {
             const rows = data[table] as Array<Record<string, unknown>> | undefined;
-            counts[table] = rows?.length ?? 0;
-          }
-          if (dryRun) return success({ dry_run: true, would_import: counts, message: "Dry run complete. Set dry_run: false to execute." });
-          // Actual import (decisions only — safe to merge)
-          let imported = 0;
-          const rows = data["decisions"] as Array<Record<string, unknown>> | undefined;
-          if (rows) {
+            if (!rows) { imported[table] = 0; continue; }
+            let n = 0;
             for (const row of rows) {
-              try { db.prepare("INSERT OR IGNORE INTO decisions (id, session_id, timestamp, decision, rationale, affected_files, tags, status) VALUES (?,?,?,?,?,?,?,?)").run(row.id, row.session_id, row.timestamp, row.decision, row.rationale, row.affected_files, row.tags, row.status); imported++; } catch { /* skip duplicates */ }
+              try { apply(row); n++; } catch { /* skip duplicates and malformed rows */ }
             }
+            imported[table] = n;
+            total += n;
           }
-          return success({ imported, message: `Import complete. ${imported} decisions merged.` });
+
+          return success({
+            imported: total,
+            imported_by_table: imported,
+            not_imported: notImported,
+            message: `Import complete. ${total} row(s) merged (${Object.entries(imported).map(([t, n]) => `${n} ${t}`).join(", ")}).` + skipNote,
+          });
         }
 
         // ─── COMPACT ────────────────────────────────────────────────────
