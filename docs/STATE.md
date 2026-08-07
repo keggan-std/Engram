@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-06 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `1128a1c`
+**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `1fbda4b`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `1128a1c` — fix(Phase 3): the router's own binding was blind to the sentence it was written for |
+| **Working branch** | `v2-foundations` @ `1fbda4b` — feat(FR-D9): the store now refuses a write the decoder corrupted |
 | **Published line** | `main` @ `1afe18f` — docs: v1.12.0 release notes, README Android Studio section, version bump |
 | **Pushed?** | **No. This branch has no upstream — nothing has been published from it.** |
-| **Uncommitted** | clean |
-| **Store** | schema V25 · 42 sessions · 35 decisions · 125 observations · 96 file notes |
+| **Uncommitted** | **6 file(s)** — `CLAUDE.md`, `docs/STATE.md`, `.claude/skills/`, `docs/reports/2026-08-07-integration-research-and-recommendations.md` … |
+| **Store** | schema V25 · 43 sessions · 36 decisions · 128 observations · 96 file notes |
 
-**Latest active decision — #35:** docs/README.md is now bound by tests/process/docs-router.test.ts.
+**Latest active decision — #36:** Stale figures in the master plan are DELETED AND REPLACED WITH THE MECHANISM THAT OWNS THEM, not corrected — extending decision #35's rule (the router routes; it does not restate) from docs/README.md to the synthesis document.
 
 **In progress:** #49 FR-D5 T7 — rollback needs a channel that is not a version bump; merge main into the review line first
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **43** | `task-sensitivity-reviewer` | _(in progress)_ |
 | **42** | `claude-opus-5-session-42` | THE DOCUMENTATION ROUTER IS BOUND — AND FIVE OF TEN COMPLETED DOMAIN DOCS WERE UNREACHABLE FROM IT. |
 | **41** | `claude-opus-5-session-40` | CHARTER PHASE 3 OPENED — CLAUDE.md exists at the repo root, is bound by a test, and is registered as recall channel 4. |
-| **40** | `claude-opus-5-session-40` | (auto-closed: new session started) |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**71 open tasks.** The ones that gate everything else:
+**72 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|

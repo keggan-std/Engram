@@ -34,10 +34,18 @@ codebase to rediscover what is already recorded is the single most expensive hab
 parameter (`action`, `id`, `status`, `priority`, `tags`, `task_id`, …) *before* any long free-text
 field (`decision`, `rationale`, `notes`, `content`, `summary`, `description`).
 
-This is convention #7. Malformed records here are the agent's tool-call syntax error, not a server
-bug, and the record lands truncated with fields silently lost. The ordering is a mitigation, not a
-fix — the server-side rejection is task #91, and until it ships this is all that stands between a
-session and a corrupted row. It has held across every write of the sessions that applied it.
+This is convention #7, and both halves of what it used to say here were wrong. Corrected 2026-08-07.
+
+**It is not your syntax error.** It is an open upstream decoder bug —
+[anthropics/claude-code#49747](https://github.com/anthropics/claude-code/issues/49747) — that folds
+a trailing parameter into the tail of the preceding string on long arguments. Re-reading the schema
+will not help, and the issue states plainly that prompt-layer rules cannot prevent it. Ordering
+works for a mechanical reason only: **a long field placed last has no following parameter left to
+swallow.**
+
+**The server now refuses such a write** rather than storing a row with a missing field. On a
+`MALFORMED TOOL CALL` error, nothing was written — reorder and retry, or split the text. A
+corrupted observation can now be repaired with `update_observation`; other row types still cannot.
 
 ## Evidence grading — do not promote silently
 
