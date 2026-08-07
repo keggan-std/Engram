@@ -296,6 +296,32 @@ export const PRUNE_THRESHOLD_MS = 7 * 24 * 60 * 60_000; // 7 days
 export const DEFAULT_SHARING_MODE = "none";
 export const DEFAULT_SHARING_TYPES = ["decisions", "conventions"];
 
+// ─── Cross-instance read policy (FR-D2 F4) ──────────────────────────────────
+//
+// The only tables another instance may read out of this one. It lives here, not
+// in cross-instance.service.ts, because it has two enforcement points and used
+// to have one: the READER (checkPermission) tested it, and the WRITER
+// (setSharing) stored whatever type names it was handed. searchAll() then
+// re-implemented the reader's checks inline and omitted this test, so a name
+// that setSharing accepted became a table searchAll would read — including
+// `observations`, `handoffs` and `audit_log`. PROVEN by scratchpad PoC before
+// the fix: checkPermission refused 'observations' while searchAll returned the
+// row. Same shape as audit N2 above — one policy, two doors, and the door
+// nobody looked at was the open one.
+//
+// `scope` is interpolated into SQL as an identifier in searchAll's generic
+// branch. That is only safe because this set constrains it. Do not relax the
+// check without removing the interpolation.
+export const QUERYABLE_TABLES: ReadonlySet<string> = new Set([
+  "decisions",
+  "conventions",
+  "file_notes",
+  "tasks",
+  "sessions",
+  "changes",
+  "milestones",
+]);
+
 // Architecture layer detection patterns
 export const LAYER_PATTERNS: Record<string, RegExp[]> = {
   ui: [/\/(ui|views?|screens?|pages?|components?|widgets?)\//i, /\.(jsx|tsx|vue|svelte)$/],
