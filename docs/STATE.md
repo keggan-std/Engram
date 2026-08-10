@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-10 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `0caf631`
+**Generated:** 2026-08-10 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `f8b11bb`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,11 +20,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `0caf631` — docs: the retrospective — what I'd do differently building this from scratch |
+| **Working branch** | `v2-foundations` @ `f8b11bb` — docs(STATE): regenerate after the audit, installer and retrospective work |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
 | **Uncommitted** | clean |
-| **Store** | schema V26 · 45 sessions · 42 decisions · 135 observations · 96 file notes |
+| **Store** | schema V26 · 45 sessions · 42 decisions · 136 observations · 96 file notes |
 
 **Latest active decision — #42:** The installer signals failure through exit codes: non-zero if ANY attempted write failed; --check exits 1 for unparseable configs only, never for 'update available'.
 
@@ -36,7 +36,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **45** | `claude-opus-5-session-45` | _(in progress)_ |
+| **45** | `claude-opus-5-session-45` | Cleared the 2026-08-07 handoff's outstanding list and found a shipped command that had been crashing every time it ran. |
 | **44** | `claude-opus-5-session-44` | Published v1.13.0 to npm and cleared three open defects off v2-foundations so the branch could push clean. |
 | **43** | `task-sensitivity-reviewer` | _(in progress)_ |
 
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #18** — from `claude-opus-5-session-44`, 2026-08-07 (already acknowledged).
-Session complete: v1.13.0 published, three open defects fixed and pushed clean.
+**Read #19** — from `claude-opus-5-session-45`, 2026-08-10 — **not yet acknowledged**.
+Session 45 complete: the outstanding retrospective delivered, the owed installer review done, and a shipped command found crashing.
 
 ---
 
@@ -71,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#136** | concern | A FULL-SUITE RUN FAILED 2 TESTS ON 2026-08-10 AND I DESTROYED THE EVIDENCE IN THE SAME COMMAND THAT PRODUCED IT. |
 | **#135** | concern | TWO INERT-SURFACE INSTANCES IN THE TEST LAYER ITSELF, plus one operational hazard the session created and did not fully clean up. |
 | **#132** | concern | THE STATE.md FRESHNESS GATE CANNOT REACH EXIT 0 ONCE STATE.md IS COMMITTED, SO ITS ALARM IS PERMANENTLY ON. |
 | **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
@@ -78,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#116** | friction | THIRD RECURRENCE OF THE CLOSING-DISCIPLINE GAP, and this one was load-bearing. |
 | **#108** | concern | SUPPRESSION ARM 2 LEAKED THROUGH THREE CHANNELS, not one. |
 | **#107** | concern | WHY SO MUCH RECALL WAS REPLACEABLE — the judges' own reason, and it is a limit on the whole experiment. |
-| **#101** | friction | TENTH OCCURRENCE of the convention #7 tool-call syntax corruption — committed by me, FR-D10, on my second Engram write, in the session whose domain doc is about records that lie to readers. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
