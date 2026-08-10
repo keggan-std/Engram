@@ -426,10 +426,63 @@ becomes "so it must be fine."
 
 ---
 
-## D11 — ~~This branch is one commit behind `main`'s version bump~~ · the release hold
+## D11 — ~~This branch is one commit behind `main`'s version bump~~ · ~~the release hold~~ · the deployment gap
 
-**Status:** ACTIVE — **first half CLOSED 2026-08-05, second half more urgent than when written**
-**Raised:** 2026-08-02
+**Status:** **RESOLVED as written, 2026-08-07 — and replaced by a different problem.** See the banner.
+**Raised:** 2026-08-02 · **Closed:** 2026-08-07 · **Re-scoped:** 2026-08-10
+
+> ### ✅ THE HOLD IS OVER. THE RELEASE SHIPPED. *(added 2026-08-10)*
+>
+> **PROVEN 2026-08-10:**
+>
+> ```
+> npm view engram-mcp-server version dist-tags
+>   → 1.13.0 · { "latest": "1.13.0" }
+> git tag -l v1.13.0        → v1.13.0
+> git log main --oneline -1 → f47df04
+> node -p require('./package.json').version  → 1.13.0
+> ```
+>
+> **Three claims in the body below are now false and are corrected here rather
+> than deleted, because the reasoning is the record:**
+>
+> | Where | Says | Actually |
+> |---|---|---|
+> | §📦, "The release is assembled" | `release/1.13.0` is *"not pushed and not published"* | **Published 2026-08-07** as `latest` |
+> | **Action**, below | *"the next version must be a **major** — so `2.0.0`, not `1.13.0`"* | **`1.13.0` shipped.** The major is still owed for D2/D3, but it was never the next version |
+> | **Action**, below | *"Rebase onto `main` (or merge `main` in) before release work"* | Done. `git merge-base --is-ancestor main HEAD` → true, at `dbeac30` |
+>
+> ### ⚠️ AND THE HAZARD DID NOT CLEAR WHEN THE RELEASE DID
+>
+> The entry's most urgent claim — *"published v1.12.0 is the vulnerable build …
+> every installation on 1.12.0 currently has all four P0s live"* — was true about
+> **the published line**, and publishing fixed that half. It said nothing about
+> **installed** copies, and that is the half that survived.
+>
+> **PROVEN on the maintainer's own machine, 2026-08-10, via `engram install --check`:**
+> **seven config entries across four products still launch v1.12.0** (Visual
+> Studio, Gemini CLI, JetBrains, and all four Android Studio config directories),
+> plus three more stamped `v?` — the pre-tracking era, so older still. Every one
+> of them has all four P0s live *today*, three days after the fix was published.
+>
+> Two mechanisms, both recorded, neither previously joined up:
+>
+> 1. **`npx` caches per exact spec string and never re-checks.** The README's
+>    bare `npx -y engram-mcp-server` had been serving an April build. Fixed at
+>    both ends in `d354172`.
+> 2. **The installer now writes a pinned exact version** — the correct fix for
+>    (1), and it means **Engram no longer self-upgrades.** A machine that
+>    installed 1.12.0 stays on 1.12.0 until someone re-runs the installer.
+>
+> **So D11's successor question is not "should we publish?" — it is "how does a
+> published fix reach a machine that already has the vulnerable build?"** That is
+> a distribution problem, and nothing in this document or the master plan owns it.
+> The tripwire and the 45-day advisory clock below are still live and still
+> unresolved; an advisory is now the *only* mechanism that reaches those seven
+> entries, which strengthens rather than weakens the case for one.
+>
+> Filed as Engram task **#107**. `--check` now exits non-zero on an unreadable
+> config (`2f42643`), so this state is at least machine-detectable going forward.
 
 > **✅ The version-regression half is resolved.** PROVEN 2026-08-05:
 > `git merge-base --is-ancestor main HEAD` → true (`main` is fully merged into
@@ -535,10 +588,11 @@ unpushed.** The residual risk is independent discovery on an unwatched repo.
 > wide adoption*) as a **current** state. It is the **target** state. The threat
 > model has to be calibrated to actual exposure.
 
-> ### 📦 The release is assembled. The hold is now a publish decision, not a build one *(added 2026-08-05)*
+> ### 📦 The release is assembled. The hold is now a publish decision, not a build one *(added 2026-08-05; OVERTAKEN 2026-08-07 — it was published)*
 >
-> Branch **`release/1.13.0`** (`c4fac06`), cut from `main`, **not pushed and not
-> published.** It carries all four hazards fixed — `53eba90`, `87712f4`,
+> Branch **`release/1.13.0`** (`c4fac06`), cut from `main`, ~~**not pushed and not
+> published.**~~ **published 2026-08-07 as `latest`; `main` @ `f47df04`, tag
+> `v1.13.0`.** It carries all four hazards fixed — `53eba90`, `87712f4`,
 > `e310269`, `dd3841d`, `19e9274` — plus the gates the published line has never
 > run. VERIFIED on that tree: build exit 0, **617/617 across 31 files**, all
 > three gates exit 0.
@@ -603,15 +657,24 @@ the release strategy** — version, migration path, advisory, first-release cont
 **Trigger.** Before opening a PR, merging, or publishing. Also the moment anyone
 asks "why does it say 1.11.0?"
 
-**Action.** Rebase onto `main` (or merge `main` in) *before* release work.
+**Action.** ~~Rebase onto `main` (or merge `main` in) *before* release work.
 Then the next version must be a **major** — see [D2](#d2) and [D3](#d3), two
-breaking changes — so `2.0.0`, not `1.13.0`.
+breaking changes — so `2.0.0`, not `1.13.0`.~~
+**Both halves done or superseded — see the banner.** The merge landed at
+`dbeac30`; `1.13.0` shipped on 2026-08-07. A major is still owed for D2 and D3
+when they land, but it was never the *next* version, and asserting it was is
+what made this line wrong for five days.
 
-**Related, and the more urgent half:** **published v1.12.0 is the vulnerable
-build.** Its notes claim *"557 tests pass"* and *"Zero breaking changes"* — written
-before N1, N2 and N3 existed as findings. Every installation on 1.12.0 currently
-has all four P0s live. The master plan needs to decide whether that warrants an
-advisory rather than a quiet patch release.
+**Related, and the more urgent half:** ~~**published v1.12.0 is the vulnerable
+build.**~~ **The published line is v1.13.0 and is not vulnerable.** Its notes
+claim *"557 tests pass"* and *"Zero breaking changes"* — written
+before N1, N2 and N3 existed as findings. ~~Every installation on 1.12.0 currently
+has all four P0s live.~~ **Installations still ON 1.12.0 do — measured at seven
+config entries on the maintainer's machine three days after the fix shipped, and
+the installer no longer self-upgrades them.** The master plan still needs to
+decide whether that warrants an advisory rather than a quiet patch release, and
+the answer is now less optional than when this line was written: publishing has
+already happened and did not reach them.
 
 **Would it be caught otherwise?** The version regression, yes — a diff review
 would show it. The *published build is vulnerable* half, no: nothing in the repo

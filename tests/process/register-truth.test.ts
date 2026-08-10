@@ -224,6 +224,52 @@ describe("closed findings are not still advertised as open", () => {
     }
   });
 
+  it("DEFERRED-CHANGES D11 does not claim the release is unpublished once it is tagged", () => {
+    // The senior review response listed D11 as owing a rewrite — "three of its
+    // claims are false" — and noted this file covered the hook and the router
+    // but NOT D11's prose. This is that coverage.
+    //
+    // D11 is the entry whose entire subject is the release hold. It said
+    // release/1.13.0 was "not pushed and not published" and that the next
+    // version "must be a major — so 2.0.0, not 1.13.0". v1.13.0 shipped on
+    // 2026-08-07. The document that exists to stop a stale version claim
+    // carried one for three days — the same shape as F5, inside the anti-F5
+    // machinery, for the second time.
+    //
+    // OFFLINE BY CONSTRUCTION. The obvious check is `npm view`, and it is the
+    // wrong one: a gate that reaches the registry fails on a plane. The local
+    // tag plus package.json is the same fact, available offline.
+    const released = gitOk("rev-parse", "--verify", "--quiet", "v1.13.0^{commit}");
+    if (!released) return; // nothing shipped yet — the claim is honest again
+
+    const doc = "docs/DEFERRED-CHANGES.md";
+    const body = read(doc)
+      .split("\n")
+      // TWO forms of preserved-false-claim, and the gate found the second one
+      // itself: it went red against the corrected document, naming the rows of
+      // the correction table that QUOTE the wrong sentence beside the right one.
+      //
+      //   ~~struck~~  — convention #2's "leave the record, mark it dead"
+      //   "quoted"    — a citation, not an assertion
+      //
+      // The F4 assertion above already encodes the quote rule for exactly this
+      // reason. Matching inside either would force the next author to DELETE
+      // the history to get the build green, which is the opposite of the point.
+      .map((line, i) => [i + 1, line.replace(/~~[^~]*~~/g, "").replace(/"[^"]*"|“[^”]*”/g, '""')] as const);
+
+    const offending = body.filter(([, line]) =>
+      /not pushed and not published/i.test(line) ||
+      /\bmust be a\b[^.]{0,60}\bmajor\b[^.]{0,60}\b2\.0\.0\b/i.test(line),
+    );
+
+    expect(
+      offending.map(([n, l]) => `${doc}:${n}: ${l.trim()}`),
+      `${doc} still asserts the 1.13.0 release is unpublished or is not the ` +
+        `next version, but tag v1.13.0 exists in this repository. Strike the ` +
+        `sentence and record what superseded it — do not delete it.`,
+    ).toEqual([]);
+  });
+
   it("no document claims the working branch is unpushed while it has an upstream", () => {
     // S2 again, and the one with a disclosure consequence. THREE registers said
     // "not pushed" — DEFERRED-CHANGES D11, docs/STATE.md, and the branch-guard
