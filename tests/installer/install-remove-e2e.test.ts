@@ -187,6 +187,228 @@ describe("--remove reaches the scope the installer recommends", () => {
     });
 });
 
+// ============================================================================
+// EXIT CODES — the installer could not report failure.
+//
+// Found by the 2026-08-10 review, which is the one the earlier delegated pass
+// was supposed to do and returned all-CLEAN instead. All three were PROVEN by
+// running the compiled CLI before any fix, not argued from reading it.
+//
+// The shape is this repo's signature defect: a surface that is CORRECT and
+// UNREADABLE. installToPath's catch block refuses to overwrite a config it
+// cannot parse — exactly right, and exactly what task #46 asks for — then
+// returned normally, so the process exited 0 having written nothing. A CI
+// step running the documented install command could not tell "installed" from
+// "refused to install".
+//
+// Note what the existing round-trip test above does at its "written" line: it
+// accepts EITHER the local or the global path, on the sound reasoning that
+// predicting the path would re-implement the resolver. The consequence is that
+// it cannot see which scope was used — and the scope is the third finding.
+// A test written to be robust against a behaviour it did not model will pass
+// over a defect in that behaviour.
+// ============================================================================
+
+/** A config file that exists and cannot be parsed. The FR-D5 / H1 hazard state. */
+function seedCorruptConfig(projectDir: string, relDir: string, fileName: string): string {
+    const dir = path.join(projectDir, relDir);
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, fileName);
+    writeFileSync(file, '{ "mcpServers": { "engram": { }, }  // not JSON\n');
+    return file;
+}
+
+describe("the installer can report failure", () => {
+    it("exits non-zero when the install it was asked to do did not happen", () => {
+        const dir = makeProject();
+        try {
+            const file = seedCorruptConfig(dir, path.join("__home", ".cursor"), "mcp.json");
+            const before = readFileSync(file, "utf-8");
+
+            const r = runCli(["install", "--ide", "cursor", "--yes", "--global"], dir);
+
+            // Both halves matter. Refusing to write is the safety property;
+            // exiting 1 is what makes the refusal visible to anything but a
+            // human reading scrollback.
+            expect(readFileSync(file, "utf-8"), "an unparseable config was modified").toBe(before);
+            expect(
+                r.status,
+                `install failed to write anything and still exited ${r.status}\n${r.stdout}\n${r.stderr}`
+            ).toBe(1);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("still exits 0 when the install actually happens", () => {
+        // Non-vacuity guard: an exit code that is always 1 carries no more
+        // information than one that is always 0.
+        const dir = makeProject();
+        try {
+            const r = runCli(["install", "--ide", "cursor", "--yes"], dir);
+            expect(r.status, `a healthy install exited ${r.status}\n${r.stdout}\n${r.stderr}`).toBe(0);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("--check exits non-zero when a config cannot be parsed", () => {
+        const dir = makeProject();
+        try {
+            seedCorruptConfig(dir, path.join("__home", ".cursor"), "mcp.json");
+            const r = runCli(["install", "--check"], dir);
+
+            expect(r.stdout + r.stderr).toMatch(/invalid JSON/);
+            expect(
+                r.status,
+                "--check printed 'invalid JSON' and exited 0, so nothing could act on it"
+            ).toBe(1);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("--check exits 0 when every config it finds is readable", () => {
+        const dir = makeProject();
+        try {
+            seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            const r = runCli(["install", "--check"], dir);
+            expect(r.status, `--check went red on a healthy machine\n${r.stdout}`).toBe(0);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+});
+
+describe("install scope is chosen explicitly, not discovered afterwards", () => {
+    it("--yes says which scope it picked", () => {
+        // The two entry paths disagree: interactive labels local "(recommended)"
+        // and takes it on a blank answer; --yes silently takes global. The
+        // default is not being changed — that would break every existing
+        // script — but it must not be silent.
+        const dir = makeProject();
+        try {
+            const r = runCli(["install", "--ide", "cursor", "--yes"], dir);
+            const out = r.stdout + r.stderr;
+            expect(out, "a non-interactive install did not say which scope it wrote to").toMatch(/Scope\s*:/);
+            expect(out).toMatch(/global/);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("--local writes into the project, not the home directory", () => {
+        const dir = makeProject();
+        try {
+            const r = runCli(["install", "--ide", "cursor", "--yes", "--local"], dir);
+            expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
+
+            const local = path.join(dir, ".cursor", "mcp.json");
+            const globalish = path.join(dir, "__home", ".cursor", "mcp.json");
+            expect(existsSync(local), "--local did not write a project-level config").toBe(true);
+            expect(existsSync(globalish), "--local wrote to the global scope anyway").toBe(false);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("--global writes into the home directory, not the project", () => {
+        const dir = makeProject();
+        try {
+            runCli(["install", "--ide", "cursor", "--yes", "--global"], dir);
+            expect(existsSync(path.join(dir, "__home", ".cursor", "mcp.json"))).toBe(true);
+            expect(existsSync(path.join(dir, ".cursor", "mcp.json"))).toBe(false);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+});
+
+describe("process.exit() is never reached after a fetch (nodejs/node#58091)", () => {
+    // PROVEN 5/5 on node v24.14.1: `install --check` printed its whole report
+    // and then died with exit code 127 and
+    //   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c:76
+    // because process.exit() races undici's socket teardown on Windows. The
+    // upstream fix has been stalled since January 2025.
+    //
+    // THIS GATE IS STRUCTURAL, NOT BEHAVIOURAL, AND THAT IS DELIBERATE. The
+    // crash only fires when the fetch actually runs, so a behavioural test
+    // would need the network — which would make the suite non-hermetic to
+    // prove a bug about hermeticity, and would go green offline for the wrong
+    // reason. Reading the source is the honest gate here. It also matches the
+    // derived-binding method observation #131 describes: assert against the
+    // tree, not against a remembered line number.
+    const SRC = path.join(here, "..", "..", "src", "installer", "index.ts");
+
+    /**
+     * Blank out comments, preserving length so offsets stay comparable.
+     *
+     * The first version of this gate went red against the FIXED source: the
+     * comments explaining the defect say "process.exit()", and a scanner that
+     * reads prose finds the word rather than the call. A gate that cannot tell
+     * code from the comment describing the code is a gate that fails whenever
+     * someone documents the thing it guards.
+     */
+    function stripComments(src: string): string {
+        return src
+            .replace(/\/\*[\s\S]*?\*\//g, m => " ".repeat(m.length))
+            .replace(/\/\/[^\n]*/g, m => " ".repeat(m.length));
+    }
+
+    /** Byte offsets of every `await fetchNpmLatest()` in runInstaller. */
+    function fetchOffsets(src: string): number[] {
+        const out: number[] = [];
+        const re = /await fetchNpmLatest\(\)/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(src))) out.push(m.index);
+        return out;
+    }
+
+    it("still has the fetch this gate is about", () => {
+        // Non-vacuity. If fetchNpmLatest is ever removed or renamed, the gate
+        // below passes for a reason that has nothing to do with the defect.
+        const src = stripComments(readFileSync(SRC, "utf-8"));
+        expect(
+            fetchOffsets(src).length,
+            "no `await fetchNpmLatest()` found — this whole gate has gone vacuous"
+        ).toBeGreaterThan(0);
+    });
+
+    it("no process.exit() follows a fetch inside the same branch", () => {
+        const src = stripComments(readFileSync(SRC, "utf-8"));
+        const offsets = fetchOffsets(src);
+
+        // The --check branch and the auto-detect branch each fetch and each end
+        // in a `return`. Scan from each fetch to the end of its enclosing block
+        // by brace depth, which survives the block being moved or renamed.
+        const offenders: string[] = [];
+        for (const start of offsets) {
+            let depth = 0;
+            for (let i = start; i < src.length; i++) {
+                const c = src[i];
+                if (c === "{") depth++;
+                else if (c === "}") {
+                    if (depth === 0) break; // left the enclosing block
+                    depth--;
+                }
+                if (src.startsWith("process.exit(", i)) {
+                    const line = src.slice(0, i).split("\n").length;
+                    offenders.push(`line ${line}`);
+                }
+            }
+        }
+
+        expect(
+            offenders,
+            `process.exit() is reachable after a fetch at ${offenders.join(", ")} — ` +
+            `this is the exit-127 libuv assertion. Use \`process.exitCode = n; return;\` instead.`
+        ).toEqual([]);
+    });
+});
+
+describe("the suite's own hermeticity", () => {
+    it("honours ENGRAM_SKIP_UPDATE_CHECK instead of merely setting it", () => {
+        // runCli has set this variable since this file was written, with a
+        // comment saying it keeps the installer off the network. No code read
+        // it. The suite was not hermetic; it had only never reached a code path
+        // that fetches. --check does. This asserts the control is real, which
+        // is the whole difference between a setting and a comment.
+        const dir = makeProject();
+        try {
+            const r = runCli(["install", "--check"], dir);
+            const out = r.stdout + r.stderr;
+            expect(out, "the update check ran despite ENGRAM_SKIP_UPDATE_CHECK").toMatch(/update check skipped/);
+            expect(out, "a skipped check was reported as a broken network").not.toMatch(/npm unreachable/);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+});
+
 describe("install → remove round trip, through the real CLI", () => {
     it("installs locally, then removes what it installed", () => {
         const dir = makeProject();

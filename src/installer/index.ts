@@ -92,6 +92,13 @@ function detectProjectRootForDisplay(startDir: string): { root: string; evidence
 // ─── Fetch npm latest version ────────────────────────────────────────
 
 async function fetchNpmLatest(): Promise<string | null> {
+    // tests/installer/install-remove-e2e.test.ts has set this since it was
+    // written, with a comment explaining that it keeps the suite off the
+    // network. Nothing read it. The variable was fiction and the suite was not
+    // hermetic — it simply never happened to reach this function. Honouring it
+    // makes the declared control real before a --check test quietly restores
+    // the network dependency it was meant to remove.
+    if (process.env.ENGRAM_SKIP_UPDATE_CHECK) return null;
     try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 5_000);
@@ -178,6 +185,7 @@ export async function runInstaller(args: string[]) {
     const nonInteractive = args.includes("--yes") || args.includes("-y") || !isTTY();
     const universalMode = args.includes("--universal");
     const forceGlobal = args.includes("--global");
+    const forceLocal = args.includes("--local");
 
     // ─── --version ───────────────────────────────────────────────────
     if (args.includes("--version") || args.includes("-v")) {
@@ -200,6 +208,7 @@ Options:
   --universal       Install in universal mode (~80 token single-tool schema)
   --yes, -y         Non-interactive mode (requires --ide if no IDE is detected)
   --global          Force global (user-level) installation instead of project-level
+  --local           Force project-level installation instead of global
   --remove          Remove Engram from an IDE config (requires --ide)
   --list            Show all supported IDEs and their detection/install status
   --check           Show installed version per IDE and latest available on npm
@@ -210,6 +219,13 @@ Options:
 
 Supported IDEs:
   ${ideNames}
+
+Exit codes:
+  0  success (for --check: every config that exists is readable)
+  1  an install was attempted and failed, or --check found an unreadable config
+
+Note: with --yes, installs default to GLOBAL scope. Interactive installs default
+to local. Pass --local or --global to be explicit in scripts.
 
 Examples:
   engram install                               Auto-detect IDE, install interactively
@@ -289,7 +305,11 @@ Examples:
         const npmLatest = await fetchNpmLatest();
 
         const selfCmp    = npmLatest ? semverCmp(currentVersion, npmLatest) : 0;
-        const selfStatus = !npmLatest    ? gray("(npm unreachable)")
+        // Skipped and unreachable are different facts and were reported as the
+        // same one. A user who set the variable deliberately should not be told
+        // their network is broken.
+        const skipped    = !!process.env.ENGRAM_SKIP_UPDATE_CHECK;
+        const selfStatus = !npmLatest    ? gray(skipped ? "(update check skipped)" : "(npm unreachable)")
                          : selfCmp >  0  ? yellow("⚡ pre-release")
                          : selfCmp === 0 ? green("✅ up to date")
                          :                 yellow(`⬆  v${npmLatest} is available`);
@@ -429,7 +449,43 @@ Examples:
             console.log(`  Run:      npx -y engram-mcp-server install`);
         }
         console.log(`  Releases: https://github.com/keggan-std/Engram/releases\n`);
-        process.exit(0);
+
+        // --check exists to be READ BY SOMETHING. It printed "⚠ invalid JSON"
+        // and exited 0, so a script could not act on the one state that is
+        // unambiguously broken. PROVEN: a corrupt config printed the warning
+        // and returned 0.
+        //
+        // Only invalid JSON is an error. "Update available" stays 0 on purpose:
+        // a gate that goes red every time a release lands is one a developer
+        // switches off inside a week, which is check-state-freshness.mjs's own
+        // documented reasoning and it applies unchanged here.
+        const unreadable = results.flatMap(r => r.entries).filter(e => e.state === "invalid-json");
+        if (unreadable.length) {
+            console.log(`  ${unreadable.length} config file(s) could not be parsed. Exiting 1.\n`);
+        }
+
+        // NOT process.exit(). This branch is the one that calls fetch(), and
+        // process.exit() after a fetch trips a libuv assertion on Windows:
+        //
+        //   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING),
+        //   file src\win\async.c, line 76
+        //
+        // PROVEN 5/5 on node v24.14.1 before this change — `install --check`
+        // printed its entire report correctly and then died with exit code 127.
+        // Upstream is nodejs/node#58091 and #64322: undici keeps the connection
+        // alive after the body resolves, and process.exit() races its teardown.
+        // The fix has been stalled in review since January 2025, so there is no
+        // Node version to wait for.
+        //
+        // Setting exitCode and returning lets Node drain its own handles and
+        // exit on its own terms. runInstaller is awaited at src/index.ts:127 and
+        // its caller returns immediately, so returning here ends the program.
+        //
+        // This is why the exit codes above are worth having at all: before it,
+        // --check could not return ANY code reliably, so the contract this
+        // session added would have been decorative.
+        process.exitCode = unreadable.length ? 1 : 0;
+        return;
     }
 
 
@@ -564,7 +620,8 @@ Examples:
             console.error(`Unknown IDE: "${targetIde}". Options: ${Object.keys(IDE_CONFIGS).join(", ")}`);
             process.exit(1);
         }
-        await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], nonInteractive, universalMode, forceGlobal);
+        const ok = await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], nonInteractive, universalMode, forceGlobal, forceLocal);
+        if (!ok) process.exit(1);
         return;
     }
 
@@ -621,15 +678,24 @@ Examples:
 
         if (nonInteractive) {
             // Install/update current IDE, then all other detected IDEs
-            await performInstallationForIde(currentIde, ide, true, universalMode, forceGlobal);
+            let ok = await performInstallationForIde(currentIde, ide, true, universalMode, forceGlobal, forceLocal);
             for (const id of otherDetected) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal);
+                if (!await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal, forceLocal)) ok = false;
             }
+            // exitCode, not exit(): everything from here to the end of this
+            // block runs AFTER the fetchNpmLatest() above, and process.exit()
+            // after a fetch is the libuv assertion documented in the --check
+            // branch. Same hazard, same fix, and it is a hazard of the
+            // NEIGHBOURHOOD rather than of this line.
+            if (!ok) process.exitCode = 1;
             return;
         }
 
         // ── Build menu options ───────────────────────────────────────────
-        const menuOptions: Array<{ label: string; action: () => Promise<void> }> = [];
+        // `boolean | void`: an action that installs reports whether it worked, so an
+        // interactive run gets the same exit code an equivalent --yes run would.
+        // Actions that only print (Cancel) return void and never fail the run.
+        const menuOptions: Array<{ label: string; action: () => Promise<boolean | void> }> = [];
 
         if (status.state === "installed") {
             const ref = npmLatest ?? currentVersion;
@@ -637,18 +703,18 @@ Examples:
             if (isOld) {
                 menuOptions.push({
                     label: `Update Engram to v${currentVersion} in ${ide.name}`,
-                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
                 });
             } else {
                 menuOptions.push({
                     label: `Reinstall / repair Engram in ${ide.name}`,
-                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
                 });
             }
         } else {
             menuOptions.push({
                 label: `Install Engram in ${ide.name}`,
-                action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal),
+                action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
             });
         }
 
@@ -679,7 +745,7 @@ Examples:
                     requiresCmdWrapper: false,
                     scopes: {},
                 };
-                await installToPath(configFilePath, customIde, universalMode);
+                return await installToPath(configFilePath, customIde, universalMode);
             },
         });
 
@@ -687,6 +753,7 @@ Examples:
             menuOptions.push({
                 label: `Install to other IDEs on this system (${otherDetected.length} found)...`,
                 action: async () => {
+                    let allOk = true;
                     console.log("\n  Other detected IDEs:\n");
                     otherDetected.forEach((id, i) => {
                         const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[id]);
@@ -703,14 +770,15 @@ Examples:
                     if (isNaN(ch) || ch === 0) return;
                     if (ch === allIdx) {
                         for (const id of otherDetected) {
-                            await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode, forceGlobal);
+                            if (!await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode, forceGlobal, forceLocal)) allOk = false;
                         }
                     } else if (ch >= 1 && ch <= otherDetected.length) {
                         const selId = otherDetected[ch - 1];
-                        await performInstallationForIde(selId, IDE_CONFIGS[selId], false, universalMode, forceGlobal);
+                        return await performInstallationForIde(selId, IDE_CONFIGS[selId], false, universalMode, forceGlobal, forceLocal);
                     } else {
                         console.log("  Invalid selection.");
                     }
+                    return allOk;
                 },
             });
         }
@@ -731,13 +799,13 @@ Examples:
         if (isNaN(choice) || choice < 1 || choice > menuOptions.length) {
             // Default to first option (install/update) if user just presses Enter
             if (ans.trim() === "") {
-                await menuOptions[0].action();
+                if (await menuOptions[0].action() === false) process.exitCode = 1;
             } else {
                 console.log("  Invalid selection. Exiting.");
-                process.exit(1);
+                process.exitCode = 1;
             }
         } else {
-            await menuOptions[choice - 1].action();
+            if (await menuOptions[choice - 1].action() === false) process.exitCode = 1;
         }
         return;
     }
@@ -747,9 +815,11 @@ Examples:
         if (allDetected.length > 0) {
             console.log(`\n🧠 Engram MCP Installer v${currentVersion}\n`);
             console.log(`🔍 Found ${allDetected.length} installed IDE(s): ${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
+            let ok = true;
             for (const id of allDetected) {
-                await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal);
+                if (!await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal, forceLocal)) ok = false;
             }
+            if (!ok) process.exit(1);
             return;
         }
         console.error("❌ No IDEs detected on this machine.");
@@ -806,10 +876,10 @@ Examples:
             requiresCmdWrapper: false,
             scopes: {},
         };
-        await installToPath(configFilePath, customIde, universalMode);
+        if (!await installToPath(configFilePath, customIde, universalMode)) process.exit(1);
     } else if (choice >= 1 && choice <= ideKeys.length) {
         const selectedKey = ideKeys[choice - 1];
-        await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false, universalMode, forceGlobal);
+        if (!await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false, universalMode, forceGlobal, forceLocal)) process.exit(1);
     } else {
         console.log("\n  Invalid selection. Exiting.");
         process.exit(1);
@@ -818,7 +888,17 @@ Examples:
 
 // ─── Per-IDE Installation ────────────────────────────────────────────
 
-async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean, universal = false, forceGlobal = false) {
+/**
+ * Install for one IDE. Returns false if any write it attempted failed.
+ *
+ * "Any", not "all": the case that actually bites is the multi-IDE sweep where
+ * one config is unwritable and the other four succeed. Reporting success there
+ * is how an IDE goes quietly missing. Rejected the alternative of failing only
+ * when EVERY write failed — it is friendlier and it hides exactly that.
+ *
+ * A user cancelling a prompt is not a failure and returns true.
+ */
+async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean, universal = false, forceGlobal = false, forceLocal = false): Promise<boolean> {
     const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
     const supportsGlobal = (ide.scopes?.global && ide.scopes.global.length > 0) || !!ide.resolveGlobalPaths;
 
@@ -846,7 +926,12 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
     // or when the user explicitly picks it from the scope prompt below.
     let targetScope = supportsGlobal ? "global" : "local";
 
-    if (forceGlobal && supportsGlobal) {
+    if (forceLocal && supportsLocal) {
+        // --local, the counterpart --global never had. Without it a scripted
+        // caller could ask for global explicitly but could not ask for local at
+        // all, even though local is what the interactive prompt recommends.
+        targetScope = "local";
+    } else if (forceGlobal && supportsGlobal) {
         // User explicitly requested global via --global flag
         targetScope = "global";
     } else if (supportsLocal && supportsGlobal && !nonInteractive) {
@@ -863,6 +948,21 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         }
     }
 
+    // The two entry paths disagree about the default and always have: the
+    // interactive prompt labels local "(recommended)" and takes it on a blank
+    // answer, while --yes skips the prompt entirely and lands on global. Both
+    // defaults are defensible; the defect is that the non-interactive one was
+    // SILENT, so `engram install --ide cursor --yes` run inside a project wrote
+    // to the user's home directory without ever saying so. PROVEN in a sandboxed
+    // HOME. Changing the default would break every existing script, so the fix
+    // is disclosure plus the --local flag above, not a new default.
+    if (nonInteractive && supportsGlobal && supportsLocal) {
+        const why = forceLocal ? "--local" : forceGlobal ? "--global" : "default for non-interactive installs";
+        console.log(`\n   Scope  : ${targetScope}  (${why}${!forceLocal && !forceGlobal ? "; interactive mode would default to local" : ""})`);
+    }
+
+    let ok = true;
+
     if (targetScope === "global" && supportsGlobal) {
         // Global installs on IDEs without workspaceVar get --ide=<id> so the server
         // opens a per-IDE DB shard (memory-{id}.db) instead of competing on memory.db.
@@ -874,20 +974,23 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
             const allPaths = ide.resolveGlobalPaths();
             if (allPaths.length === 0) {
                 console.log(`\n⚠️  ${ide.name} — no config directories found on this machine.`);
+                // Asked to install and installed nowhere. Not a crash, but not
+                // a success either, and a sweep must not report it as one.
+                ok = false;
             } else {
                 for (const configPath of allPaths) {
-                    await installToPath(configPath, ide, universal, globalIdeKey);
+                    if (!await installToPath(configPath, ide, universal, globalIdeKey)) ok = false;
                 }
             }
         } else {
             const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
-            await installToPath(configPath, ide, universal, globalIdeKey);
+            if (!await installToPath(configPath, ide, universal, globalIdeKey)) ok = false;
         }
     } else if (targetScope === "local") {
         if (nonInteractive) {
             // Use cwd as the project root
             const configPath = resolveIdeLocalInstallPath(ide, process.cwd())!;
-            await installToPath(configPath, ide, universal);
+            if (!await installToPath(configPath, ide, universal)) ok = false;
         } else {
             const cwd = process.cwd();
             const projectInfo = detectProjectRootForDisplay(cwd);
@@ -900,15 +1003,15 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
                 const trimmed = confirmAns.trim();
                 if (trimmed.toLowerCase() === "n") {
                     console.log("  Installation cancelled.");
-                    return;
+                    // A user who cancels got what they asked for. Not a failure.
+                    return true;
                 } else if (trimmed && trimmed.toLowerCase() !== "y" && trimmed.toLowerCase() !== "yes") {
                     // User typed a custom path
                     const resolvedDir = path.resolve(trimmed);
                     const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
-                    await installToPath(customConfigPath, ide, universal);
-                    return;
+                    return await installToPath(customConfigPath, ide, universal);
                 }
-                await installToPath(configPath, ide, universal);
+                if (!await installToPath(configPath, ide, universal)) ok = false;
             } else {
                 // Low confidence — ask the user explicitly
                 console.log(`\n  ⚠️  Could not detect a project root from the current directory.`);
@@ -916,15 +1019,28 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
                 const solutionDir = await askQuestion(`  Enter the path to your ${ide.name} project directory:\n  [${cwd}]: `);
                 const resolvedDir = solutionDir.trim() || cwd;
                 const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
-                await installToPath(customConfigPath, ide, universal);
+                if (!await installToPath(customConfigPath, ide, universal)) ok = false;
             }
         }
     } else if (!supportsGlobal && !supportsLocal) {
         console.log(`\n⚠️  ${ide.name} — No auto-install paths configured.`);
+        ok = false;
     }
+
+    return ok;
 }
 
-async function installToPath(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string) {
+/**
+ * Write one config. Returns whether the write SUCCEEDED.
+ *
+ * The return value exists because this function's catch block is the installer's
+ * only failure path, and it used to end the story: it printed a warning and
+ * returned undefined, so `install --ide vscode --yes` exited 0 having written
+ * nothing. PROVEN against a deliberately corrupt config — the refusal is
+ * correct and the exit code claimed success anyway. A scripted install could
+ * not tell "installed" from "refused to install".
+ */
+async function installToPath(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): Promise<boolean> {
     try {
         const result = addToConfig(configPath, ide, universal, ideKey);
         const currentVersion = getInstallerVersion();
@@ -950,11 +1066,13 @@ async function installToPath(configPath: string, ide: IdeDefinition, universal =
         }
 
         console.log(`      Status : ${statusText}`);
+        return true;
     } catch (e: any) {
         console.log(`\n   ⚠️  ${ide.name}`);
         console.log(`      Could not write to: ${configPath}`);
         console.log(`      Reason: ${e.message}`);
         console.log(`\n      Manual setup: add the engram entry to your IDE's MCP config.`);
         console.log(`      Entry: ${JSON.stringify(makeEngramEntry(ide), null, 2)}`);
+        return false;
     }
 }
