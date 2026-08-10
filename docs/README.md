@@ -73,6 +73,7 @@ That is deliberate: a doc that tracks its own state is the artifact the charter 
 | Document | Read when |
 |---|---|
 | **[orchestration-guide.md](orchestration-guide.md)** | **Before delegating to sub-agents.** The prompt template, verification grades, the context tax, and the concurrency hazards — derived from running eight agents on this repo, including what went wrong |
+| **[building-this-from-scratch.md](building-this-from-scratch.md)** | **Before starting a project like this one, and when deciding what to gate.** The retrospective: which practices earned their cost across ten domain reviews, an external review and a release, and which cost the most by their absence. §6 says where the advice is thin |
 | **[DEFERRED-CHANGES.md](DEFERRED-CHANGES.md)** | **Before every release, and before assuming any config is permanent.** Everything switched off, narrowed, or left half-done *on purpose*, each with the trigger that should switch it back on. Includes two breaking changes awaiting release handling |
 | [reports/](reports/) | Dated session reports. What was done, what was proven versus assumed, and what turned up along the way. Chat is ephemeral; these are not |
 
