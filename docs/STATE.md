@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-07 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `ffdc205`
+**Generated:** 2026-08-10 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `0caf631`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `ffdc205` — fix(S11, task #34): the small items, and one that was cheaper than its own record |
+| **Working branch** | `v2-foundations` @ `0caf631` — docs: the retrospective — what I'd do differently building this from scratch |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **3 file(s)** — `RELEASE_NOTES.md`, `docs/reports/2026-08-07-senior-review-response.md`, `docs/reports/2026-08-07-senior-review.md` |
-| **Store** | schema V26 · 44 sessions · 39 decisions · 132 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V26 · 45 sessions · 42 decisions · 135 observations · 96 file notes |
 
-**Latest active decision — #39:** gitCommand now takes an argv array and uses execFileSync — the string signature is DELETED, not merely unused, so the shell-injection landmine is unrepresentable rather than unarmed.
+**Latest active decision — #42:** The installer signals failure through exit codes: non-zero if ANY attempted write failed; --check exits 1 for unparseable configs only, never for 'update available'.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **45** | `claude-opus-5-session-45` | _(in progress)_ |
 | **44** | `claude-opus-5-session-44` | Published v1.13.0 to npm and cleared three open defects off v2-foundations so the branch could push clean. |
 | **43** | `task-sensitivity-reviewer` | _(in progress)_ |
-| **42** | `claude-opus-5-session-42` | THE DOCUMENTATION ROUTER IS BOUND — AND FIVE OF TEN COMPLETED DOMAIN DOCS WERE UNREACHABLE FROM IT. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**69 open tasks.** The ones that gate everything else:
+**71 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -56,11 +56,11 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 | **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
-| **46** | FR-D5 CRITICAL — installer clobbers another product's entire user state on a JSON parse failure | blocked by #49 |
+| **50** | FR-D6 CRITICAL — HTTP /export claims "all data", ships 5 of 24 tables, filtered, capped, stamped 1.9.0 | critical · backlog |
 
 ### Handoff
 
-**Read #18** — from `claude-opus-5-session-44`, 2026-08-07 — **not yet acknowledged**.
+**Read #18** — from `claude-opus-5-session-44`, 2026-08-07 (already acknowledged).
 Session complete: v1.13.0 published, three open defects fixed and pushed clean.
 
 ---
@@ -71,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#135** | concern | TWO INERT-SURFACE INSTANCES IN THE TEST LAYER ITSELF, plus one operational hazard the session created and did not fully clean up. |
 | **#132** | concern | THE STATE.md FRESHNESS GATE CANNOT REACH EXIT 0 ONCE STATE.md IS COMMITTED, SO ITS ALARM IS PERMANENTLY ON. |
 | **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
 | **#121** | friction | MEASURED — two of Engram's most-called read surfaces overflow a tool result, and one of them does it in its documented "compact" mode. |
@@ -78,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#108** | concern | SUPPRESSION ARM 2 LEAKED THROUGH THREE CHANNELS, not one. |
 | **#107** | concern | WHY SO MUCH RECALL WAS REPLACEABLE — the judges' own reason, and it is a limit on the whole experiment. |
 | **#101** | friction | TENTH OCCURRENCE of the convention #7 tool-call syntax corruption — committed by me, FR-D10, on my second Engram write, in the session whose domain doc is about records that lie to readers. |
-| **#100** | idea | FR-D10 PRE-REGISTERED PREDICTIONS — five, with a fixed scoring rule, written before any public-surface file was opened and before either delegate was launched. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
