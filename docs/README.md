@@ -93,6 +93,7 @@ That is deliberate: a doc that tracks its own state is the artifact the charter 
 | [installation.md](installation.md) | Install guide (user-facing) |
 | [how-to-schedule-events.md](how-to-schedule-events.md) | The scheduler feature (user-facing) |
 | [cross-instance-infrastructure.md](cross-instance-infrastructure.md) | Cross-instance sharing design. **F4 is FIXED** (2026-08-07 correction — this row said "still open" for six commits after the fix). `searchAll()` now delegates to `checkPermission()`; `QUERYABLE_TABLES` lives in `constants.ts` and is enforced at both ends — `cross-instance.service.ts:465`, `instance-registry.service.ts:527`, decision #38, commit `cc138b6`. Separately unresolved: the trust root is unsigned — constitution §12.8 |
+| [memory-topology.md](memory-topology.md) | **Before touching `findProjectRoot`, `initDatabase`, installer scope handling, or cross-instance sharing.** What a *global* install actually means: one process serves one project, a global install is a shared config *entry* and never a shared database, and the per-project stores are federated through `~/.engram/instances.json` rather than merged. Decision #43, VERIFIED with `file:line` throughout. §4 is the one-database-for-everything failure mode and the two limits on the warning that is supposed to catch it |
 | [multi-ide-concurrency.md](multi-ide-concurrency.md) | Per-IDE DB sharding. **Caveat:** finding F7 — sharding vs. the advertised multi-IDE continuity |
 | [pm-framework-v1.10.0.md](pm-framework-v1.10.0.md) | PM-Lite / PM-Full feature reference |
 

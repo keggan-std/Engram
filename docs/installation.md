@@ -242,14 +242,21 @@ You can also configure via the Cline extension panel → **MCP Servers** → **E
 
 ### Antigravity IDE
 
-**Config file:** `~/.gemini/antigravity/mcp_config.json`
+**Config file:** `~/.gemini/config/mcp_config.json` (global) or
+`.agents/mcp_config.json` (project) — see
+[Antigravity's MCP docs](https://antigravity.google/docs/mcp).
+
+> **Corrected 2026-08-11.** Up to v1.13.0 this said
+> `~/.gemini/antigravity/mcp_config.json`, and so did the installer. Antigravity
+> does not read that file, so those installs did nothing. Run
+> `install --remove --ide antigravity` to clear the stale entry, then reinstall.
 
 ```json
 {
   "mcpServers": {
     "engram": {
       "command": "npx",
-      "args": ["-y", "engram-mcp-server"]
+      "args": ["-y", "engram-mcp-server", "--mode=universal", "--project-root=/absolute/path/to/your/project"]
     }
   }
 }

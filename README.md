@@ -209,9 +209,36 @@ npx -y engram-mcp-server@latest install --remove --ide claudecode
 npx -y engram-mcp-server@latest --check
 ```
 
-`--check` prints, per IDE, the version stamped in that IDE's config and the
-current `latest` on npm, so it is the command that tells you whether an
-upgrade is actually needed.
+`--check` searches **this project first** — climbing up to four parent
+directories, so it works from `src/` and not only from the repo root — and then
+the machine. For each install it prints the config file, the version stamped in
+it, whether that version is behind npm, and **where that install's memory
+database is**. When something is out of date it offers to update it rather than
+making you retype a command per install.
+
+```bash
+npx -y engram-mcp-server@latest --check --scope local    # just this project and its parents
+npx -y engram-mcp-server@latest --check --scope global   # just user-level IDE configs
+npx -y engram-mcp-server@latest --check --walk-up 0      # do not climb at all
+```
+
+**Installing without being listed.** Every install is recorded in
+`~/.engram/installs.json` so `--check` can find it again — including installs
+into a custom directory, which no config scan could rediscover. `--isolated`
+skips that record:
+
+```bash
+npx -y engram-mcp-server@latest install --ide cursor --local --isolated
+```
+
+The install still happens; it simply will not appear in `--check`. The installer
+prints the config path when you use it, because that path becomes the only
+record — write it down.
+
+**Nothing is written before you have seen it.** An interactive project-local
+install shows the IDE, the mode, the config file, the database location and
+whether it will be findable, then offers *Install / change directory / toggle
+isolation / abort*. Answer with the arrow keys or the number keys.
 
 <a id="upgrading"></a>
 ### Upgrading
@@ -474,20 +501,32 @@ If you prefer to configure manually, find your IDE below. Each entry shows the c
 <details>
 <summary><strong>Antigravity IDE (Gemini)</strong></summary>
 
-**Global** — `~/.gemini/antigravity/mcp_config.json`:
+**Global** — `~/.gemini/config/mcp_config.json`
+**Project** — `.agents/mcp_config.json` in your workspace:
 
 ```json
 {
     "mcpServers": {
         "engram": {
             "command": "npx",
-            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+            "args": ["-y", "engram-mcp-server", "--mode=universal", "--project-root=/absolute/path/to/your/project"]
         }
     }
 }
 ```
 
-> Antigravity IDE (the desktop app) uses a separate config file from the Gemini CLI. Replace `/absolute/path/to/your/project` with your project path. Antigravity does not expand workspace-folder variables in MCP args.
+> **Corrected in v1.14.0.** Releases up to and including v1.13.0 wrote this entry
+> to `~/.gemini/antigravity/mcp_config.json`, which Antigravity does not read —
+> so the installer reported success and Engram never appeared. The paths above
+> are the ones [Antigravity's own MCP documentation](https://antigravity.google/docs/mcp)
+> gives. If you installed with an earlier version, run
+> `npx -y engram-mcp-server@latest install --remove --ide antigravity` to clear
+> the stale entry (the old path is still searched, for exactly this reason) and
+> then install again.
+
+> Antigravity does not expand workspace-folder variables in MCP args, so
+> `--project-root` must be a real absolute path. A project-local install writes
+> one for you.
 
 </details>
 
