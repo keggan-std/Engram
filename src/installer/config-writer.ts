@@ -46,7 +46,7 @@ export function getInstallerVersion(): string {
  * @param universal  When true, adds --mode=universal to args.
  * @param ideKey     When provided, adds --ide=<ideKey> to args.
  */
-export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: string): Record<string, any> {
+export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: string, projectRoot?: string): Record<string, any> {
     const entry: Record<string, any> = {};
 
     // Some IDEs require explicit "type": "stdio"
@@ -100,6 +100,24 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
     // /path/to/project) so the server always receives the correct project path.
     if (ide.workspaceVar) {
         baseArgs.push(`--project-root=${ide.workspaceVar}`);
+    } else if (projectRoot) {
+        // NO WORKSPACE VARIABLE, so the IDE cannot tell the server where it is.
+        // Seven of the fourteen IDEs are in this position (Windsurf, Antigravity,
+        // Claude Desktop, Cline, Roo Code, Gemini CLI, JetBrains), and until now
+        // the server had to GUESS: findProjectRoot() (src/utils.ts:157) infers
+        // from whatever cwd the IDE happened to spawn it in, and when every
+        // marker fails it lands on ~/.engram/global — one database shared by
+        // every project, which sessions.ts:227 already warns about in those
+        // words. Inference was the whole strategy and the user was never shown
+        // the answer.
+        //
+        // A literal absolute path is only correct because the caller only passes
+        // one for a PROJECT-LOCAL install, whose config file already belongs to
+        // exactly one project. Passing it on a global install would pin every
+        // project to whichever one happened to be open at install time, so
+        // performInstallationForIde passes undefined there and the runtime
+        // inference stays — correctly, because that entry really is shared.
+        baseArgs.push(`--project-root=${projectRoot}`);
     }
 
   // Per-IDE DB shard: global installs on IDEs without workspaceVar inject --ide=<key>
@@ -289,7 +307,7 @@ function entryMatches(existing: Record<string, unknown>, expected: Record<string
  *   "upgraded"        — updated from an older tracked version to the current one
  *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era)
  */
-export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): InstallResult {
+export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string, projectRoot?: string): InstallResult {
     // FR-D5 T2. This used to back up best-effort, set `config = {}`, and carry on —
     // writing a file containing ONLY the Engram entry. Measured blast radius:
     // ~/.claude.json is 40.5 KB with 53 top-level keys (oauthAccount, userID,
@@ -321,7 +339,7 @@ export function addToConfig(configPath: string, ide: IdeDefinition, universal = 
     const key = ide.configKey;
     if (!config[key]) config[key] = {};
 
-    const newEntry = makeEngramEntry(ide, universal, ideKey);
+    const newEntry = makeEngramEntry(ide, universal, ideKey, projectRoot);
     const currentVersion = newEntry._engram_version as string;
 
     // Locate an existing entry under ANY key, not just "engram" — see

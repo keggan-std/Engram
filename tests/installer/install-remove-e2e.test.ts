@@ -338,7 +338,25 @@ describe("process.exit() is never reached after a fetch (nodejs/node#58091)", ()
     function stripComments(src: string): string {
         return src
             .replace(/\/\*[\s\S]*?\*\//g, m => " ".repeat(m.length))
-            .replace(/\/\/[^\n]*/g, m => " ".repeat(m.length));
+            // (?<!:) — do NOT treat the "//" in a URL as a line comment.
+            //
+            // SECOND TIME THIS GATE HAS BEEN WRONG ABOUT WHAT IS CODE, and the
+            // failure mode was worse than the first. `--check` prints a
+            // Releases URL; when that line became
+            //     console.log(`  ${gray("Releases: https://github.com/…")}`)
+            // the stripper blanked everything from "//" to end of line,
+            // deleting the `")}`);` that closed the template expression. The
+            // brace scan below then never returned to depth 0, ran off the end
+            // of the --check branch, and reported sixteen process.exit() calls
+            // in unrelated branches as violations.
+            //
+            // That is a FALSE POSITIVE of the most expensive kind: it points at
+            // real process.exit() calls, in real code, with a real explanation
+            // attached, so the natural response is to "fix" sixteen correct
+            // lines. Verified by reproduction: reverting only this regex turns
+            // the gate red, and the offending line is 489, not the sixteen it
+            // named.
+            .replace(/(?<!:)\/\/[^\n]*/g, m => " ".repeat(m.length));
     }
 
     /** Byte offsets of every `await fetchNpmLatest()` in runInstaller. */

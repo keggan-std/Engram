@@ -10,6 +10,12 @@ import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError, findEngramEntryKey } from "./config-writer.js";
 import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
+import {
+    DEFAULT_WALK_UP, detectProjectRoot, resolveDbPath, globalFallbackDbPath,
+    discoverLocal, discoverGlobal, recordInstall, forgetInstall, ledgerPath, pruneLedger,
+    type DiscoveredInstall,
+} from "./discovery.js";
+import { select, ask, confirm } from "./prompt.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -57,36 +63,29 @@ function semverCmp(a: string, b: string): number {
     return 0;
 }
 
-// ─── Project root detection (for display purposes) ──────────────────
+// Project-root detection used to be duplicated here, with its own marker list in
+// its own order. It now comes from discovery.ts, which is also what the plan
+// panel and the local search use — one rule, so the path shown to the user
+// before the write is the path searched afterwards.
+const detectProjectRootForDisplay = detectProjectRoot;
+
+// ─── Install options carried through the call chain ─────────────────
 
 /**
- * Walk up from startDir looking for project root markers.
- * Returns the detected root and what signal was found.
+ * Everything the user chose, resolved once and passed down.
+ *
+ * These used to be five positional booleans threaded through two functions, and
+ * adding the sixth is what made the shape untenable.
  */
-function detectProjectRootForDisplay(startDir: string): { root: string; evidence: string; confidence: "high" | "medium" | "low" } {
-    let dir = startDir;
-    for (let i = 0; i < 10; i++) {
-        if (fs.existsSync(path.join(dir, ".git")))
-            return { root: dir, evidence: "git repository", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "package.json")))
-            return { root: dir, evidence: "package.json", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "Cargo.toml")))
-            return { root: dir, evidence: "Cargo.toml", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "go.mod")))
-            return { root: dir, evidence: "go.mod", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "pyproject.toml")))
-            return { root: dir, evidence: "pyproject.toml", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "build.gradle")) || fs.existsSync(path.join(dir, "build.gradle.kts")))
-            return { root: dir, evidence: "Gradle project", confidence: "high" };
-        if (fs.existsSync(path.join(dir, "pom.xml")))
-            return { root: dir, evidence: "Maven project", confidence: "high" };
-        if (fs.existsSync(path.join(dir, ".engram")))
-            return { root: dir, evidence: "existing .engram directory", confidence: "high" };
-        const parent = path.dirname(dir);
-        if (parent === dir) break;
-        dir = parent;
-    }
-    return { root: startDir, evidence: "current directory (no project markers found)", confidence: "low" };
+interface InstallOptions {
+    nonInteractive: boolean;
+    universal: boolean;
+    forceGlobal: boolean;
+    forceLocal: boolean;
+    /** Skip the machine-wide ledger, so this install is not discoverable later. */
+    isolated: boolean;
+    /** How many parent directories a local search climbs. */
+    walkUp: number;
 }
 
 // ─── Fetch npm latest version ────────────────────────────────────────
@@ -122,10 +121,28 @@ interface IdeInstallStatus {
     installedVersion?: string;
 }
 
-function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
-    const globalPaths = resolveIdeGlobalPaths(ide);
-    for (const configPath of globalPaths) {
-        if (!fs.existsSync(configPath)) continue;
+/**
+ * Where this IDE's Engram entry is, searched THE WAY THE USER IS STANDING.
+ *
+ * The old order was global-first: every user-level config path was examined,
+ * and the project was consulted only if no global config file existed at all.
+ * Two consequences, both of which read as the installer not knowing what it had
+ * just done:
+ *
+ *   - A user with a project-local install and any global config file present —
+ *     which is nearly everyone, since the global file exists as soon as the IDE
+ *     writes any setting — was told "not installed" and shown their home
+ *     directory, while the entry sat in the repo they were standing in.
+ *   - Local paths were only ever checked relative to the exact cwd, so a config
+ *     at the repo root was invisible from `src/`, which is where people run
+ *     commands.
+ *
+ * Local now wins, and the local search climbs. `walkUp` is bounded because the
+ * parent of a shallow project is the home directory.
+ */
+function resolveIdeInstallStatus(ide: IdeDefinition, walkUp = DEFAULT_WALK_UP): IdeInstallStatus {
+    const readAt = (configPath: string): IdeInstallStatus | null => {
+        if (!fs.existsSync(configPath)) return null;
         let config: Record<string, unknown>;
         try { config = readJson(configPath) as Record<string, unknown>; }
         catch (e) {
@@ -134,32 +151,39 @@ function resolveIdeInstallStatus(ide: IdeDefinition): IdeInstallStatus {
         }
         const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
         const instanceKey = findEngramEntryKey(serverMap);
-        if (instanceKey) {
-            const entry = serverMap[instanceKey];
-            return { state: "installed", configPath, installedVersion: String(entry?._engram_version ?? "?") };
+        if (!instanceKey) return { state: "not-installed", configPath };
+        const entry = serverMap[instanceKey];
+        return { state: "installed", configPath, installedVersion: String(entry?._engram_version ?? "?") };
+    };
+
+    // ── Local first, climbing ──
+    // A file that exists but holds no Engram entry is remembered rather than
+    // returned: an INSTALL further up beats a NOT-INSTALLED here, and returning
+    // on the first existing file is precisely the bug being fixed.
+    let firstBare: IdeInstallStatus | null = null;
+    let dir = process.cwd();
+    const stopAt = detectProjectRoot(dir).root;
+    for (let up = 0; up <= walkUp; up++) {
+        for (const lp of resolveIdeLocalPaths(ide, dir)) {
+            const hit = readAt(lp);
+            if (hit?.state === "installed" || hit?.state === "invalid-json") return hit;
+            if (hit && !firstBare) firstBare = hit;
         }
-        return { state: "not-installed", configPath };
+        if (path.resolve(dir) === path.resolve(stopAt)) break;
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
     }
-    // Check local dirs
-    const cwd = process.cwd();
-    {
-        for (const lp of resolveIdeLocalPaths(ide, cwd)) {
-            if (!fs.existsSync(lp)) continue;
-            let config: Record<string, unknown>;
-            try { config = readJson(lp) as Record<string, unknown>; }
-            catch (e) {
-                if (e instanceof ConfigParseError) return { state: "invalid-json", configPath: lp };
-                throw e;
-            }
-            const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
-            const instanceKey = findEngramEntryKey(serverMap);
-            if (instanceKey) {
-                const entry = serverMap[instanceKey];
-                return { state: "installed", configPath: lp, installedVersion: String(entry?._engram_version ?? "?") };
-            }
-            return { state: "not-installed", configPath: lp };
-        }
+
+    // ── Then the machine ──
+    const globalPaths = resolveIdeGlobalPaths(ide);
+    for (const configPath of globalPaths) {
+        const hit = readAt(configPath);
+        if (hit?.state === "installed" || hit?.state === "invalid-json") return hit;
+        if (hit && !firstBare) firstBare = hit;
     }
+
+    if (firstBare) return firstBare;
     return { state: "not-found", configPath: globalPaths[0] ?? "(no config path)" };
 }
 
@@ -186,6 +210,34 @@ export async function runInstaller(args: string[]) {
     const universalMode = args.includes("--universal");
     const forceGlobal = args.includes("--global");
     const forceLocal = args.includes("--local");
+    const isolated = args.includes("--isolated");
+
+    // --walk-up N. Rejecting a bad value rather than falling back silently: a
+    // user who typed `--walk-up abc` asked for something specific and a silent
+    // default would search a different tree than the one they named.
+    let walkUp = DEFAULT_WALK_UP;
+    const walkIdx = args.indexOf("--walk-up");
+    if (walkIdx >= 0) {
+        const raw = args[walkIdx + 1];
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 0 || n > 20) {
+            console.error(`❌ --walk-up expects a whole number 0-20, got "${raw ?? "(nothing)"}".`);
+            process.exit(1);
+        }
+        walkUp = n;
+    }
+
+    // --scope for the read-only commands. Install scope stays on --local/--global
+    // because those are already published and scripts depend on them (decision #42).
+    const scopeIdx = args.indexOf("--scope");
+    const scopeRaw = scopeIdx >= 0 ? args[scopeIdx + 1] : undefined;
+    if (scopeRaw !== undefined && !["local", "global", "all"].includes(scopeRaw)) {
+        console.error(`❌ --scope expects local, global or all, got "${scopeRaw}".`);
+        process.exit(1);
+    }
+    const scope = (scopeRaw ?? "all") as "local" | "global" | "all";
+
+    const opts: InstallOptions = { nonInteractive, universal: universalMode, forceGlobal, forceLocal, isolated, walkUp };
 
     // ─── --version ───────────────────────────────────────────────────
     if (args.includes("--version") || args.includes("-v")) {
@@ -205,13 +257,18 @@ Usage:
 
 Options:
   --ide <name>      Install for a specific IDE
-  --universal       Install in universal mode (~80 token single-tool schema)
+  --universal       Install in universal mode (~80 token single-tool schema, recommended)
   --yes, -y         Non-interactive mode (requires --ide if no IDE is detected)
   --global          Force global (user-level) installation instead of project-level
   --local           Force project-level installation instead of global
+  --isolated        Do not record this install in ~/.engram/installs.json, so it
+                    will NOT be found by 'engram install --check --scope global'.
+                    You are responsible for remembering where it went.
   --remove          Remove Engram from an IDE config (requires --ide)
   --list            Show all supported IDEs and their detection/install status
-  --check           Show installed version per IDE and latest available on npm
+  --check            Show what is installed, where, and whether it is current
+  --scope <s>       Narrow --check to local | global | all   (default: all)
+  --walk-up <n>     How many parent directories a local search climbs (default: ${DEFAULT_WALK_UP})
   --install-hooks   Install git post-commit hook to auto-record changes (run in your git repo)
   --remove-hooks    Remove the Engram git hook from the current repo
   --version         Show version number
@@ -224,14 +281,22 @@ Exit codes:
   0  success (for --check: every config that exists is readable)
   1  an install was attempted and failed, or --check found an unreadable config
 
-Note: with --yes, installs default to GLOBAL scope. Interactive installs default
-to local. Pass --local or --global to be explicit in scripts.
+Scope, and what it does NOT control:
+  Scope decides WHERE THE MCP ENTRY IS REGISTERED — a project config file, or
+  your user-level IDE config. It does not decide where memory is stored. Memory
+  is always per-project: the server opens <project>/.engram/memory.db, so one
+  global entry still gives each project its own separate database.
+
+  With --yes, installs default to GLOBAL scope; interactive installs default to
+  local. That difference is deliberate and kept for compatibility — pass --local
+  or --global to be explicit in scripts.
 
 Examples:
-  engram install                               Auto-detect IDE, install interactively
-  engram install --ide vscode                  Install for VS Code
-  engram install --ide vscode --universal    Install universal mode for VS Code
+  engram install --universal                   Auto-detect IDE, install interactively
+  engram install --ide vscode --universal      Install universal mode for VS Code
   engram install --ide claudecode --yes        Non-interactive install for Claude Code
+  engram install --check                       What is installed here and machine-wide
+  engram install --check --scope local         Only this project and its parents
   engram install --remove --ide cursor         Remove Engram from Cursor
   engram install --list                        Show IDE detection and install status
 `);
@@ -292,165 +357,223 @@ Examples:
     }
 
     // ─── --check ─────────────────────────────────────────────────────────────
+    //
+    // REBUILT AROUND THE QUESTION A USER ACTUALLY ASKS. The old --check swept
+    // the global config paths of all 14 IDEs and printed them in registry order,
+    // which answered "what does this machine have" while the person running it
+    // was standing in a project asking "is Engram set up HERE". Local entries
+    // appeared only if a global config file happened not to exist, and a local
+    // config one directory up — the repo root, when you run commands from src/ —
+    // was never found at all.
+    //
+    // Now: the project first, climbing a bounded number of parents; the machine
+    // second; the ledger third, because a custom-directory install lives nowhere
+    // else. Every section names what it searched, so "not installed" is a search
+    // result rather than an assertion.
     if (args.includes("--check")) {
         const currentVersion = getInstallerVersion();
         const cwd = process.cwd();
-
-        // ── ANSI color helpers (TTY only) ──────────────────────────────────────
         const { bold, dim, green, yellow, cyan, gray } = makeColors();
         const hr = "─".repeat(66);
 
-        // ── Fetch npm latest ───────────────────────────────────────────────────
         process.stdout.write(`\n  ${bold("Engram Installation Check")}\n\n  Checking npm registry...`);
         const npmLatest = await fetchNpmLatest();
 
-        const selfCmp    = npmLatest ? semverCmp(currentVersion, npmLatest) : 0;
+        const selfCmp = npmLatest ? semverCmp(currentVersion, npmLatest) : 0;
         // Skipped and unreachable are different facts and were reported as the
         // same one. A user who set the variable deliberately should not be told
         // their network is broken.
-        const skipped    = !!process.env.ENGRAM_SKIP_UPDATE_CHECK;
-        const selfStatus = !npmLatest    ? gray(skipped ? "(update check skipped)" : "(npm unreachable)")
-                         : selfCmp >  0  ? yellow("⚡ pre-release")
-                         : selfCmp === 0 ? green("✅ up to date")
-                         :                 yellow(`⬆  v${npmLatest} is available`);
+        const skipped = !!process.env.ENGRAM_SKIP_UPDATE_CHECK;
+        const selfStatus = !npmLatest ? gray(skipped ? "(update check skipped)" : "(npm unreachable)")
+            : selfCmp > 0 ? yellow("⚡ ahead of npm")
+            : selfCmp === 0 ? green("✅ up to date")
+            : yellow(`⬆  v${npmLatest} is available`);
 
-        process.stdout.write(`\r  This build : ${cyan("v" + currentVersion)}  ${selfStatus}\n`);
+        process.stdout.write(`\r  This build : ${cyan("v" + currentVersion)}  ${selfStatus}${" ".repeat(12)}\n`);
         if (npmLatest) process.stdout.write(`  npm latest : ${cyan("v" + npmLatest)}\n`);
-        process.stdout.write(`  CWD        : ${gray(cwd)}\n`);
 
-        // ── Entry resolver ─────────────────────────────────────────────────────
-        type EntryResult =
-            | { state: "not-found";     scope: "global" | "local"; filePath: string }
-            | { state: "not-installed"; scope: "global" | "local"; filePath: string }
-            | { state: "invalid-json";  scope: "global" | "local"; filePath: string }
-            | { state: "installed";     scope: "global" | "local"; filePath: string;
-                instance: string; version: string; icon: string; statusLine: string };
+        const reference = npmLatest ?? currentVersion;
+        const isBehind = (v: string) => v === "?" || semverCmp(v, reference) < 0;
 
-        const resolveEntry = (filePath: string, scope: "global" | "local", ide: IdeDefinition): EntryResult => {
-            if (!fs.existsSync(filePath)) return { state: "not-found", scope, filePath };
-            let config: Record<string, unknown>;
-            try { config = readJson(filePath) as Record<string, unknown>; }
-            catch (e) {
-                if (e instanceof ConfigParseError) return { state: "invalid-json", scope, filePath };
-                throw e;
+        // ── Gather ─────────────────────────────────────────────────────────
+        const wantLocal = scope === "local" || scope === "all";
+        const wantGlobal = scope === "global" || scope === "all";
+
+        const local = wantLocal ? discoverLocal(cwd, walkUp) : { installs: [], problems: [], searched: [] };
+        const global = wantGlobal ? discoverGlobal() : { installs: [], problems: [], searched: [] };
+
+        const projectInfo = detectProjectRoot(cwd);
+        process.stdout.write(`  Searching  : ${gray(cwd)}\n`);
+        if (wantLocal) {
+            process.stdout.write(`               ${dim(`project root ${projectInfo.root} (${projectInfo.evidence}); climbing at most ${walkUp} parent(s)`)}\n`);
+        }
+
+        // ── Render one install ─────────────────────────────────────────────
+        const renderInstall = (e: DiscoveredInstall) => {
+            const behind = isBehind(e.version);
+            const icon = behind ? yellow("⬆ ") : green("✅");
+            const ver = e.version === "?" ? gray("v? (pre-tracking)") : cyan(`v${e.version}`);
+            const state = behind ? (npmLatest ? yellow("update available") : yellow(`behind v${currentVersion}`)) : green("up to date");
+            const mode = e.mode === "universal" ? dim("universal") : e.mode === "classic" ? dim("4-tool") : dim("mode unknown");
+            console.log(`    ${icon} ${bold(e.ideName.padEnd(20))} ${ver}  ${mode}  ${state}`);
+            const rel = e.scope === "local" ? (path.relative(cwd, e.configPath) || e.configPath) : e.configPath;
+            const upNote = e.distanceUp > 0 ? dim(`  (${e.distanceUp} directory up)`) : "";
+            console.log(`         ${gray("config  " + rel)}${upNote}`);
+            if (e.dbPath) {
+                console.log(`         ${gray("memory  " + e.dbPath)}`);
+            } else {
+                // A global entry with no workspace variable cannot be told where
+                // the project is, so the database location is decided at runtime.
+                // Saying so is the honest answer; printing a guess is not.
+                console.log(`         ${gray("memory  resolved at runtime from the IDE's working directory")}`);
             }
-            const serverMap = (config?.[ide.configKey] ?? {}) as Record<string, Record<string, unknown>>;
-            const instanceKey = findEngramEntryKey(serverMap);
-            if (!instanceKey) return { state: "not-installed", scope, filePath };
-            const entry = serverMap[instanceKey];
-            const installedVersion = String(entry?._engram_version ?? "?");
-            const ref     = npmLatest ?? currentVersion;
-            const isUnknown = installedVersion === "?";
-            const icmp    = isUnknown ? -1 : semverCmp(installedVersion, ref);
-            const icon       = icmp >= 0 ? green("✅") : yellow("⬆ ");
-            const statusLine = icmp >= 0 ? green("up to date")
-                             : npmLatest  ? yellow("update available")
-                             :              yellow(`behind v${currentVersion}`);
-            return { state: "installed", scope, filePath, instance: instanceKey,
-                     version: installedVersion, icon, statusLine };
         };
 
-        // ── Collect results for every IDE ──────────────────────────────────────
-        type IdeResult = { name: string; entries: EntryResult[] };
-        const results: IdeResult[] = [];
-
-        for (const [, ide] of Object.entries(IDE_CONFIGS)) {
-            const entries: EntryResult[] = [];
-
-            // Global: for IDEs with resolveGlobalPaths (e.g. Android Studio with
-            // multiple version-specific configs), show ALL found paths. For regular
-            // IDEs with a single global path, this naturally resolves to one entry.
-            if (ide.scopes.global?.length || ide.resolveGlobalPaths) {
-                const globalPaths = resolveIdeGlobalPaths(ide);
-                let anyFound = false;
-                for (const gp of globalPaths) {
-                    const e = resolveEntry(gp, "global", ide);
-                    if (e.state !== "not-found") { entries.push(e); anyFound = true; }
-                }
-                if (!anyFound && globalPaths.length) {
-                    entries.push({ state: "not-found", scope: "global", filePath: globalPaths[0] });
-                }
-            }
-
-            // Local: scan each dir relative to CWD; add only files that actually exist.
-            for (const lp of resolveIdeLocalPaths(ide, cwd)) {
-                const e = resolveEntry(lp, "local", ide);
-                if (e.state !== "not-found") entries.push(e);
-            }
-
-            results.push({ name: ide.name, entries });
-        }
-
-        // ── Print ──────────────────────────────────────────────────────────────
-        let countInstalled = 0, countNeedUpdate = 0, countNotInstalled = 0, countNotDetected = 0;
-
-        console.log(`\n  ${gray(hr)}\n`);
-
-        for (const { name, entries } of results) {
-            const anyFound     = entries.some(e => e.state !== "not-found");
-            const anyInstalled = entries.some(e => e.state === "installed");
-
-            if (!anyFound) {
-                console.log(`  ${dim(name.padEnd(26))}  ${gray("not detected")}`);
-                countNotDetected++;
-                continue;
-            }
-
-            console.log(`  ${bold(name)}`);
-
-            let ideNotInstalled = false;
-            for (const e of entries) {
-                const tag     = e.scope === "global" ? "global" : "local ";
-                const relPath = e.scope === "local"
-                    ? (path.relative(cwd, e.filePath) || e.filePath)
-                    : e.filePath;
-
-                if (e.state === "not-found") continue;
-
-                if (e.state === "not-installed") {
-                    console.log(`    ${dim(tag)}  ${gray("not installed")}`);
-                    console.log(`           ${gray("↳ " + relPath)}`);
-                    ideNotInstalled = true;
-                    continue;
-                }
-                if (e.state === "invalid-json") {
-                    console.log(`    ${dim(tag)}  ${yellow("⚠ invalid JSON")}  ${gray("→ engram install")}`);
-                    console.log(`           ${gray("↳ " + relPath)}`);
-                    continue;
-                }
-                // installed
-                const ver = e.version === "?" ? gray("v?") : cyan(`v${e.version}`);
-                console.log(`    ${tag}  ${gray('"' + e.instance + '"')}  ${ver}  ${e.icon} ${e.statusLine}`);
-                console.log(`           ${gray("↳ " + relPath)}`);
-            }
-            console.log();
-
-            if (anyInstalled) {
-                countInstalled++;
-                const needsUpdate = (entries as EntryResult[]).some(
-                    e => e.state === "installed" && (e.statusLine.includes("update") || e.statusLine.includes("behind"))
-                );
-                if (needsUpdate) countNeedUpdate++;
-            } else if (ideNotInstalled) {
-                countNotInstalled++;
+        // ── This project ───────────────────────────────────────────────────
+        if (wantLocal) {
+            console.log(`\n  ${gray(hr)}`);
+            console.log(`  ${bold("THIS PROJECT")}  ${dim("— project-local config files")}`);
+            console.log(`  ${gray(hr)}`);
+            if (local.installs.length === 0) {
+                console.log(`    ${dim("no project-local install found")}`);
+                console.log(`    ${gray(`searched ${local.searched.length} candidate path(s) across ${walkUp + 1} directory level(s)`)}`);
+                console.log(`    ${gray("→ engram install --universal --local")}`);
+            } else {
+                local.installs.sort((a, b) => a.distanceUp - b.distanceUp || a.ideName.localeCompare(b.ideName));
+                local.installs.forEach(renderInstall);
             }
         }
 
-        // ── Summary ────────────────────────────────────────────────────────────
-        const summaryParts: string[] = [];
-        if (countInstalled)    summaryParts.push(green(`✅ ${countInstalled} installed`));
-        if (countNeedUpdate)   summaryParts.push(yellow(`⬆  ${countNeedUpdate} need update`));
-        if (countNotInstalled) summaryParts.push(`⬜ ${countNotInstalled} not installed`);
-        if (countNotDetected)  summaryParts.push(dim(`${countNotDetected} not detected`));
-
-        console.log(`  ${gray(hr)}`);
-        console.log(`  ${summaryParts.join(gray("  ·  "))}\n`);
-        if (countNeedUpdate > 0 || countNotInstalled > 0) {
-            console.log(`  Run:      npx -y engram-mcp-server install`);
+        // ── Machine-wide ───────────────────────────────────────────────────
+        if (wantGlobal) {
+            console.log(`\n  ${gray(hr)}`);
+            console.log(`  ${bold("MACHINE-WIDE")}  ${dim("— user-level IDE configs")}`);
+            console.log(`  ${gray(hr)}`);
+            if (global.installs.length === 0) {
+                console.log(`    ${dim("no user-level install found")}`);
+                console.log(`    ${gray(`searched ${global.searched.length} config path(s) across ${Object.keys(IDE_CONFIGS).length} IDEs`)}`);
+            } else {
+                global.installs.sort((a, b) => a.ideName.localeCompare(b.ideName));
+                global.installs.forEach(renderInstall);
+            }
         }
-        console.log(`  Releases: https://github.com/keggan-std/Engram/releases\n`);
 
-        // --check exists to be READ BY SOMETHING. It printed "⚠ invalid JSON"
+        // ── The ledger ─────────────────────────────────────────────────────
+        // Only rows the scan could not have reached. Repeating an install that
+        // already appeared above would pad the report and teach the reader that
+        // the two sections mean the same thing, which they do not: the scan is
+        // the fact and the ledger is the record of an intent.
+        const scanned = new Set([...local.installs, ...global.installs].map(e => path.resolve(e.configPath)));
+        const { kept, dropped } = pruneLedger();
+        const ledgerOnly = kept.filter(e => !scanned.has(path.resolve(e.configPath)));
+        if (ledgerOnly.length || dropped.length) {
+            console.log(`\n  ${gray(hr)}`);
+            console.log(`  ${bold("RECORDED ELSEWHERE")}  ${dim("— " + ledgerPath())}`);
+            console.log(`  ${gray(hr)}`);
+            for (const e of ledgerOnly) {
+                const behind = isBehind(e.version);
+                console.log(`    ${behind ? yellow("⬆ ") : green("✅")} ${bold(e.ideName.padEnd(20))} ${cyan("v" + e.version)}  ${dim(e.scope)}`);
+                console.log(`         ${gray("config  " + e.configPath)}`);
+                if (e.dbPath) console.log(`         ${gray("memory  " + e.dbPath)}`);
+            }
+            for (const e of dropped) {
+                console.log(`    ${gray("·")} ${dim(e.ideName.padEnd(20))} ${gray("recorded, but the entry is no longer in that config")}`);
+                console.log(`         ${gray("config  " + e.configPath)}`);
+            }
+            if (dropped.length) {
+                console.log(`\n    ${dim("Entries marked · were installed and have since been removed or rewritten,")}`);
+                console.log(`    ${dim("which the host application does on its own schedule. Re-install to restore.")}`);
+            }
+        }
+
+        // ── Problems ───────────────────────────────────────────────────────
+        const unreadable = [...local.problems, ...global.problems];
+        if (unreadable.length) {
+            console.log(`\n  ${gray(hr)}`);
+            console.log(`  ${yellow("UNREADABLE")}  ${dim("— Engram will not write to a config it cannot parse")}`);
+            console.log(`  ${gray(hr)}`);
+            for (const p of unreadable) {
+                console.log(`    ${yellow("⚠")}  ${p.ideName}: ${p.reason}`);
+                console.log(`         ${gray(p.configPath)}`);
+            }
+        }
+
+        // ── Summary ────────────────────────────────────────────────────────
+        const found = [...local.installs, ...global.installs];
+        const stale = found.filter(e => isBehind(e.version));
+        const parts: string[] = [];
+        if (found.length) parts.push(green(`${found.length} installed`));
+        if (stale.length) parts.push(yellow(`${stale.length} need update`));
+        if (unreadable.length) parts.push(yellow(`${unreadable.length} unreadable`));
+        if (!parts.length) parts.push(dim("nothing found"));
+
+        console.log(`\n  ${gray(hr)}`);
+        console.log(`  ${parts.join(gray("  ·  "))}`);
+        console.log(`  ${gray("Releases: https://github.com/keggan-std/Engram/releases")}\n`);
+
+        // ── Offer to act ───────────────────────────────────────────────────
+        //
+        // --check used to print and stop, so a user who had just been told three
+        // installs were stale had to retype a command per install and remember
+        // which. It now offers to do the thing it just described. Read-only
+        // unless the user picks an action, and skipped entirely when
+        // non-interactive: a status command that writes on its own in a script
+        // would be a far worse surprise than one that only prints.
+        if (stale.length && !nonInteractive) {
+            const choice = await select(`${stale.length} install(s) are behind v${reference}. What now?`, [
+                { label: `Update all ${stale.length}`, value: "all" as const, recommended: true },
+                { label: "Choose which one to update", value: "pick" as const },
+                { label: "Do nothing", value: "none" as const, hint: "print the commands instead" },
+            ]);
+
+            const updateOne = async (e: DiscoveredInstall): Promise<boolean> => {
+                const ide = IDE_CONFIGS[e.ideKey];
+                if (!ide) {
+                    console.log(`  ${yellow("⚠")}  ${e.ideName} is no longer a known IDE key — skipping ${e.configPath}`);
+                    return false;
+                }
+                // Reproduce the rule the original install followed rather than
+                // inventing one: a global entry on an IDE with no workspace
+                // variable gets its per-IDE shard key; a local entry gets the
+                // absolute project root. Preserve the mode that is already
+                // there — silently converting someone's 4-tool install to
+                // universal because universal is now recommended would be a
+                // change they did not ask for.
+                const ideKey = e.scope === "global" && !ide.workspaceVar ? e.ideKey : undefined;
+                const projectRoot = e.scope === "local" ? e.projectRoot : undefined;
+                return installToPath(e.configPath, ide, e.mode === "universal", ideKey, projectRoot, {
+                    isolated, scope: e.scope, ideKey: e.ideKey, projectRoot,
+                });
+            };
+
+            let failed = 0;
+            if (choice.value === "all" && !choice.cancelled) {
+                for (const e of stale) if (!await updateOne(e)) failed++;
+            } else if (choice.value === "pick" && !choice.cancelled) {
+                const picked = await select("Which install?", stale.map(e => ({
+                    label: `${e.ideName}  v${e.version} → v${reference}`,
+                    hint: e.scope === "local" ? path.relative(cwd, e.configPath) || e.configPath : e.configPath,
+                    value: e,
+                })));
+                if (!picked.cancelled && !await updateOne(picked.value)) failed++;
+            } else {
+                for (const e of stale) {
+                    const scopeFlag = e.scope === "local" ? "--local" : "--global";
+                    const modeFlag = e.mode === "universal" ? " --universal" : "";
+                    console.log(`  npx -y engram-mcp-server@latest install --ide ${e.ideKey} ${scopeFlag}${modeFlag}`);
+                }
+                console.log();
+            }
+            if (failed) {
+                console.log(`\n  ${yellow(`${failed} update(s) failed — see the reasons above.`)}\n`);
+                process.exitCode = 1;
+            }
+        } else if (stale.length) {
+            console.log(`  ${dim("Run without --yes to be offered an update, or:")}`);
+            console.log(`  ${gray("npx -y engram-mcp-server@latest install --universal")}\n`);
+        }
+
+        // --check exists to be READ BY SOMETHING. It printed "invalid JSON"
         // and exited 0, so a script could not act on the one state that is
         // unambiguously broken. PROVEN: a corrupt config printed the warning
         // and returned 0.
@@ -459,32 +582,22 @@ Examples:
         // a gate that goes red every time a release lands is one a developer
         // switches off inside a week, which is check-state-freshness.mjs's own
         // documented reasoning and it applies unchanged here.
-        const unreadable = results.flatMap(r => r.entries).filter(e => e.state === "invalid-json");
-        if (unreadable.length) {
-            console.log(`  ${unreadable.length} config file(s) could not be parsed. Exiting 1.\n`);
-        }
-
+        //
         // NOT process.exit(). This branch is the one that calls fetch(), and
         // process.exit() after a fetch trips a libuv assertion on Windows:
         //
         //   Assertion failed: !(handle->flags & UV_HANDLE_CLOSING),
         //   file src\win\async.c, line 76
         //
-        // PROVEN 5/5 on node v24.14.1 before this change — `install --check`
+        // PROVEN 5/5 on node v24.14.1 before decision #41 — `install --check`
         // printed its entire report correctly and then died with exit code 127.
         // Upstream is nodejs/node#58091 and #64322: undici keeps the connection
         // alive after the body resolves, and process.exit() races its teardown.
         // The fix has been stalled in review since January 2025, so there is no
-        // Node version to wait for.
-        //
-        // Setting exitCode and returning lets Node drain its own handles and
-        // exit on its own terms. runInstaller is awaited at src/index.ts:127 and
+        // Node version to wait for. Setting exitCode and returning lets Node
+        // drain its own handles. runInstaller is awaited at src/index.ts:127 and
         // its caller returns immediately, so returning here ends the program.
-        //
-        // This is why the exit codes above are worth having at all: before it,
-        // --check could not return ANY code reliably, so the contract this
-        // session added would have been decorative.
-        process.exitCode = unreadable.length ? 1 : 0;
+        if (unreadable.length) process.exitCode = 1;
         return;
     }
 
@@ -586,6 +699,13 @@ Examples:
             try {
                 if (removeFromConfig(configPath, ide)) {
                     console.log(`✅ Removed Engram from ${configPath}`);
+                    // The ledger recorded this install; leaving the row behind
+                    // would make --check report an install that is gone, which
+                    // is the stale-register failure this project has already
+                    // paid for twice. pruneLedger() would eventually hide it,
+                    // but retracting at the moment of removal is the difference
+                    // between a record and a guess.
+                    forgetInstall(configPath);
                     removed = true;
                 }
             } catch (e) {
@@ -620,7 +740,7 @@ Examples:
             console.error(`Unknown IDE: "${targetIde}". Options: ${Object.keys(IDE_CONFIGS).join(", ")}`);
             process.exit(1);
         }
-        const ok = await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], nonInteractive, universalMode, forceGlobal, forceLocal);
+        const ok = await performInstallationForIde(targetIde, IDE_CONFIGS[targetIde], opts);
         if (!ok) process.exit(1);
         return;
     }
@@ -678,9 +798,9 @@ Examples:
 
         if (nonInteractive) {
             // Install/update current IDE, then all other detected IDEs
-            let ok = await performInstallationForIde(currentIde, ide, true, universalMode, forceGlobal, forceLocal);
+            let ok = await performInstallationForIde(currentIde, ide, { ...opts, nonInteractive: true });
             for (const id of otherDetected) {
-                if (!await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal, forceLocal)) ok = false;
+                if (!await performInstallationForIde(id, IDE_CONFIGS[id], { ...opts, nonInteractive: true })) ok = false;
             }
             // exitCode, not exit(): everything from here to the end of this
             // block runs AFTER the fetchNpmLatest() above, and process.exit()
@@ -703,18 +823,18 @@ Examples:
             if (isOld) {
                 menuOptions.push({
                     label: `Update Engram to v${currentVersion} in ${ide.name}`,
-                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
+                    action: () => performInstallationForIde(currentIde!, ide, { ...opts, nonInteractive: false }),
                 });
             } else {
                 menuOptions.push({
                     label: `Reinstall / repair Engram in ${ide.name}`,
-                    action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
+                    action: () => performInstallationForIde(currentIde!, ide, { ...opts, nonInteractive: false }),
                 });
             }
         } else {
             menuOptions.push({
                 label: `Install Engram in ${ide.name}`,
-                action: () => performInstallationForIde(currentIde!, ide, false, universalMode, forceGlobal, forceLocal),
+                action: () => performInstallationForIde(currentIde!, ide, { ...opts, nonInteractive: false }),
             });
         }
 
@@ -745,7 +865,8 @@ Examples:
                     requiresCmdWrapper: false,
                     scopes: {},
                 };
-                return await installToPath(configFilePath, customIde, universalMode);
+                const root = detectProjectRoot(process.cwd()).root;
+                return await installToPath(configFilePath, customIde, universalMode, undefined, root, { isolated, scope: "local", ideKey: "custom", projectRoot: root });
             },
         });
 
@@ -754,31 +875,27 @@ Examples:
                 label: `Install to other IDEs on this system (${otherDetected.length} found)...`,
                 action: async () => {
                     let allOk = true;
-                    console.log("\n  Other detected IDEs:\n");
-                    otherDetected.forEach((id, i) => {
-                        const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[id]);
-                        const stLabel = oStatus.state === "installed"
-                            ? green("installed")
-                            : dim("not installed");
-                        console.log(`    ${i + 1}. ${IDE_CONFIGS[id].name}  ${stLabel}`);
-                    });
-                    const allIdx = otherDetected.length + 1;
-                    console.log(`    ${allIdx}. Install to ALL of the above`);
-                    console.log(`    0. Cancel`);
-                    const ans = await askQuestion(`\n  Select [0-${allIdx}]: `);
-                    const ch = parseInt(ans.trim(), 10);
-                    if (isNaN(ch) || ch === 0) return;
-                    if (ch === allIdx) {
+                    const picked = await select("Which other IDE?", [
+                        ...otherDetected.map(id => {
+                            const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[id], walkUp);
+                            return {
+                                label: IDE_CONFIGS[id].name,
+                                hint: oStatus.state === "installed"
+                                    ? `already installed, v${oStatus.installedVersion}`
+                                    : "not installed",
+                                value: id as string | "__all__",
+                            };
+                        }),
+                        { label: `Install to ALL ${otherDetected.length}`, value: "__all__" as string | "__all__" },
+                    ]);
+                    if (picked.cancelled) return;
+                    if (picked.value === "__all__") {
                         for (const id of otherDetected) {
-                            if (!await performInstallationForIde(id, IDE_CONFIGS[id], false, universalMode, forceGlobal, forceLocal)) allOk = false;
+                            if (!await performInstallationForIde(id, IDE_CONFIGS[id], { ...opts, nonInteractive: false })) allOk = false;
                         }
-                    } else if (ch >= 1 && ch <= otherDetected.length) {
-                        const selId = otherDetected[ch - 1];
-                        return await performInstallationForIde(selId, IDE_CONFIGS[selId], false, universalMode, forceGlobal, forceLocal);
-                    } else {
-                        console.log("  Invalid selection.");
+                        return allOk;
                     }
-                    return allOk;
+                    return await performInstallationForIde(picked.value, IDE_CONFIGS[picked.value], { ...opts, nonInteractive: false });
                 },
             });
         }
@@ -788,25 +905,20 @@ Examples:
             action: async () => { console.log("  Installation cancelled."); },
         });
 
-        // ── Print menu ───────────────────────────────────────────────────
-        console.log("  What would you like to do?\n");
-        menuOptions.forEach((opt, i) => {
-            console.log(`    ${i + 1}. ${opt.label}`);
-        });
-
-        const ans = await askQuestion(`\n  Select [1-${menuOptions.length}]: `);
-        const choice = parseInt(ans.trim(), 10);
-        if (isNaN(choice) || choice < 1 || choice > menuOptions.length) {
-            // Default to first option (install/update) if user just presses Enter
-            if (ans.trim() === "") {
-                if (await menuOptions[0].action() === false) process.exitCode = 1;
-            } else {
-                console.log("  Invalid selection. Exiting.");
-                process.exitCode = 1;
-            }
-        } else {
-            if (await menuOptions[choice - 1].action() === false) process.exitCode = 1;
+        // ── Menu ─────────────────────────────────────────────────────────
+        // The first option is the recommended one — install or update the IDE
+        // the user is actually sitting in — so Enter does the obvious thing, as
+        // it did when this was a numbered prompt.
+        const chosen = await select("What would you like to do?", menuOptions.map((opt, i) => ({
+            label: opt.label,
+            value: i,
+            recommended: i === 0,
+        })));
+        if (chosen.cancelled) {
+            console.log("  Cancelled.");
+            return;
         }
+        if (await menuOptions[chosen.value].action() === false) process.exitCode = 1;
         return;
     }
 
@@ -817,7 +929,7 @@ Examples:
             console.log(`🔍 Found ${allDetected.length} installed IDE(s): ${allDetected.map(id => IDE_CONFIGS[id].name).join(", ")}`);
             let ok = true;
             for (const id of allDetected) {
-                if (!await performInstallationForIde(id, IDE_CONFIGS[id], true, universalMode, forceGlobal, forceLocal)) ok = false;
+                if (!await performInstallationForIde(id, IDE_CONFIGS[id], { ...opts, nonInteractive: true })) ok = false;
             }
             if (!ok) process.exit(1);
             return;
@@ -838,31 +950,39 @@ Examples:
     console.log(`  ${dim("No IDE detected from terminal environment.")}`);
     console.log(`  ${dim("Select an IDE to install Engram for:")}\n`);
 
+    // Detected-but-not-installed IDEs are listed first. When the environment
+    // gave no signal, "this IDE exists on your machine" is the only evidence
+    // available, and burying it under alphabetical order wastes it.
     const ideKeys = Object.keys(IDE_CONFIGS);
-    ideKeys.forEach((key, index) => {
-        const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[key]);
-        const stLabel = oStatus.state === "installed"
-            ? green("installed")
-            : oStatus.state === "not-installed"
-                ? dim("detected")
-                : "";
-        console.log(`    ${(index + 1).toString().padStart(2)}. ${IDE_CONFIGS[key].name}  ${stLabel}`);
-    });
+    const statuses = new Map(ideKeys.map(k => [k, resolveIdeInstallStatus(IDE_CONFIGS[k], walkUp)]));
+    const rank = (k: string) => {
+        const s = statuses.get(k)!.state;
+        return s === "installed" ? 0 : s === "not-installed" ? 1 : 2;
+    };
+    ideKeys.sort((a, b) => rank(a) - rank(b) || IDE_CONFIGS[a].name.localeCompare(IDE_CONFIGS[b].name));
 
-    const customOpt = ideKeys.length + 1;
-    console.log(`    ${customOpt.toString().padStart(2)}. Custom config directory...`);
-    console.log(`     0. Cancel`);
+    const picked = await select("Select an IDE to install Engram for", [
+        ...ideKeys.map(key => {
+            const st = statuses.get(key)!;
+            return {
+                label: IDE_CONFIGS[key].name,
+                hint: st.state === "installed" ? `installed, v${st.installedVersion}`
+                    : st.state === "not-installed" ? "config found, Engram not in it"
+                    : st.state === "invalid-json" ? "config is not valid JSON"
+                    : undefined,
+                value: key as string,
+            };
+        }),
+        { label: "A custom config directory…", value: "__custom__" as string },
+    ]);
 
-    const answer = await askQuestion(`\n  Select [0-${customOpt}]: `);
-    const choice = parseInt(answer.trim(), 10);
-
-    if (isNaN(choice) || choice === 0) {
+    if (picked.cancelled) {
         console.log("  Installation cancelled.");
         process.exit(0);
     }
 
-    if (choice === customOpt) {
-        const customPath = await askQuestion("  Enter the path to the directory containing (or to create) the MCP config file:\n  > ");
+    if (picked.value === "__custom__") {
+        const customPath = await ask("  Enter the path to the directory containing (or to create) the MCP config file:\n  > ");
         if (!customPath.trim()) {
             console.log("  No path provided. Exiting.");
             process.exit(1);
@@ -876,13 +996,14 @@ Examples:
             requiresCmdWrapper: false,
             scopes: {},
         };
-        if (!await installToPath(configFilePath, customIde, universalMode)) process.exit(1);
-    } else if (choice >= 1 && choice <= ideKeys.length) {
-        const selectedKey = ideKeys[choice - 1];
-        if (!await performInstallationForIde(selectedKey, IDE_CONFIGS[selectedKey], false, universalMode, forceGlobal, forceLocal)) process.exit(1);
+        // A custom path is the one install a config scan can NEVER rediscover,
+        // so the ledger matters more here than anywhere else. The project root
+        // is resolved from the cwd rather than the config location: the two are
+        // unrelated for a custom directory, and the database follows the project.
+        const root = detectProjectRoot(process.cwd()).root;
+        if (!await installToPath(configFilePath, customIde, universalMode, undefined, root, { isolated, scope: "local", ideKey: "custom", projectRoot: root })) process.exit(1);
     } else {
-        console.log("\n  Invalid selection. Exiting.");
-        process.exit(1);
+        if (!await performInstallationForIde(picked.value, IDE_CONFIGS[picked.value], { ...opts, nonInteractive: false })) process.exit(1);
     }
 }
 
@@ -898,7 +1019,9 @@ Examples:
  *
  * A user cancelling a prompt is not a failure and returns true.
  */
-async function performInstallationForIde(id: string, ide: IdeDefinition, nonInteractive: boolean, universal = false, forceGlobal = false, forceLocal = false): Promise<boolean> {
+async function performInstallationForIde(id: string, ide: IdeDefinition, opts: InstallOptions): Promise<boolean> {
+    const { nonInteractive, universal, forceGlobal, forceLocal, isolated } = opts;
+    const { bold, dim, gray, yellow } = makeColors();
     const supportsLocal = ide.scopes?.localDirs && ide.scopes.localDirs.length > 0;
     const supportsGlobal = (ide.scopes?.global && ide.scopes.global.length > 0) || !!ide.resolveGlobalPaths;
 
@@ -935,17 +1058,26 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
         // User explicitly requested global via --global flag
         targetScope = "global";
     } else if (supportsLocal && supportsGlobal && !nonInteractive) {
-        console.log(`\n  ${ide.name} supports two MCP config locations:\n`);
-        console.log(`    1. Global  — user-level IDE config (all projects share this MCP server)`);
-        console.log(`    2. Local   — project-specific config file (recommended)`);
-        console.log(`\n  Note: This controls WHERE the MCP entry is registered, not where Engram`);
-        console.log(`  stores its database. The database is always per-project automatically.\n`);
-        const scopeAns = await askQuestion("  Select scope [1-2] (default 2 — local): ");
-        if (scopeAns.trim() === "1") {
-            targetScope = "global";
-        } else {
-            targetScope = "local";
+        console.log(`\n  ${dim("Scope decides where the MCP ENTRY is registered — not where memory is")}`);
+        console.log(`  ${dim("stored. Memory is per-project either way: <project>/.engram/memory.db.")}`);
+        const picked = await select(`Where should the ${ide.name} entry go?`, [
+            {
+                label: "This project only",
+                hint: `writes ${resolveIdeLocalInstallPath(ide, detectProjectRoot(process.cwd()).root)}`,
+                value: "local" as const,
+                recommended: true,
+            },
+            {
+                label: "All projects (user-level IDE config)",
+                hint: `writes ${(ide.scopes.global ?? [])[0] ?? "the user-level config"}`,
+                value: "global" as const,
+            },
+        ]);
+        if (picked.cancelled) {
+            console.log("  Cancelled — nothing was written.");
+            return true;
         }
+        targetScope = picked.value;
     }
 
     // The two entry paths disagree about the default and always have: the
@@ -979,47 +1111,112 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
                 ok = false;
             } else {
                 for (const configPath of allPaths) {
-                    if (!await installToPath(configPath, ide, universal, globalIdeKey)) ok = false;
+                    if (!await installToPath(configPath, ide, universal, globalIdeKey, undefined, { isolated, scope: "global", ideKey: id })) ok = false;
                 }
             }
         } else {
-            const configPath = ide.scopes.global!.find((p: string) => fs.existsSync(p)) || ide.scopes.global![0];
-            if (!await installToPath(configPath, ide, universal, globalIdeKey)) ok = false;
+            // ALWAYS slot 0, never "the first path that happens to exist".
+            // scopes.global carries legacy search paths for --check/--remove (see
+            // antigravity), and find(exists) would re-write a legacy entry that the
+            // IDE does not read. PROVEN safe for the other 13: no IDE declares more
+            // than one CANONICAL global path, so this is what find() already returned.
+            const configPath = ide.scopes.global![0];
+            if (!await installToPath(configPath, ide, universal, globalIdeKey, undefined, { isolated, scope: "global", ideKey: id })) ok = false;
         }
     } else if (targetScope === "local") {
+        const cwd = process.cwd();
         if (nonInteractive) {
-            // Use cwd as the project root
-            const configPath = resolveIdeLocalInstallPath(ide, process.cwd())!;
-            if (!await installToPath(configPath, ide, universal)) ok = false;
+            // cwd, NOT the detected project root. A script that cd'd somewhere
+            // chose that directory deliberately, and silently relocating its
+            // write to a parent is the same class of surprise as the global
+            // default this file already discloses (decision #42). The root is
+            // still passed down so the entry gets an absolute --project-root
+            // rather than leaving the server to infer one.
+            const configPath = resolveIdeLocalInstallPath(ide, cwd)!;
+            if (!await installToPath(configPath, ide, universal, undefined, cwd, { isolated, scope: "local", ideKey: id, projectRoot: cwd })) ok = false;
         } else {
-            const cwd = process.cwd();
-            const projectInfo = detectProjectRootForDisplay(cwd);
-            const configPath = resolveIdeLocalInstallPath(ide, projectInfo.root)!;
+            // ── THE PLAN, SHOWN BEFORE ANYTHING IS WRITTEN ──────────────────
+            //
+            // What used to be here asked "Is this correct? [Y/n]" under two
+            // printed lines, and only when a project root was detected with
+            // high confidence. When it was not, it asked for a path and wrote
+            // wherever the answer pointed with no confirmation at all — the
+            // less certain the installer was, the less it checked.
+            //
+            // Now every local install renders the same plan and the same three
+            // choices, confidence only changes which option is recommended, and
+            // "change the directory" re-renders rather than committing. Nothing
+            // is written until the user picks Install.
+            let root = detectProjectRootForDisplay(cwd).root;
+            let evidence = detectProjectRootForDisplay(cwd).evidence;
+            let confidence = detectProjectRootForDisplay(cwd).confidence;
+            let isolate = isolated;
 
-            if (projectInfo.confidence === "high") {
-                console.log(`\n  Detected project root: ${projectInfo.root}  (${projectInfo.evidence})`);
-                console.log(`  Config will be written to: ${configPath}\n`);
-                const confirmAns = await askQuestion("  Is this correct? [Y/n / enter different path]: ");
-                const trimmed = confirmAns.trim();
-                if (trimmed.toLowerCase() === "n") {
-                    console.log("  Installation cancelled.");
-                    // A user who cancels got what they asked for. Not a failure.
-                    return true;
-                } else if (trimmed && trimmed.toLowerCase() !== "y" && trimmed.toLowerCase() !== "yes") {
-                    // User typed a custom path
-                    const resolvedDir = path.resolve(trimmed);
-                    const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
-                    return await installToPath(customConfigPath, ide, universal);
+            for (;;) {
+                const configPath = resolveIdeLocalInstallPath(ide, root)!;
+                const exists = fs.existsSync(configPath);
+
+                console.log(`\n  ${gray("─".repeat(66))}`);
+                console.log(`  ${bold("Install plan")}  ${dim("— nothing has been written yet")}`);
+                console.log(`  ${gray("─".repeat(66))}`);
+                console.log(`  IDE      : ${ide.name}`);
+                console.log(`  Mode     : ${universal ? "universal (single tool, ~80 token schema)" : "classic (4 dispatcher tools, ~1,600 tokens)"}`);
+                console.log(`  Scope    : project-local`);
+                console.log(`  Project  : ${root}  ${dim("(" + evidence + ")")}`);
+                console.log(`  Config   : ${configPath}  ${dim(exists ? "(exists — Engram's entry will be merged in)" : "(will be created)")}`);
+                console.log(`  Memory   : ${resolveDbPath(root)}  ${dim(fs.existsSync(resolveDbPath(root)) ? "(exists — kept)" : "(created on first session)")}`);
+                console.log(`  Findable : ${isolate ? "no — not recorded in the machine-wide ledger" : "yes — recorded in " + ledgerPath()}`);
+                if (confidence !== "high") {
+                    console.log(`\n  ${yellow("⚠")}  No project marker (.git, package.json, …) was found here, so this`);
+                    console.log(`     is a guess. Check the Project line before continuing.`);
                 }
-                if (!await installToPath(configPath, ide, universal)) ok = false;
-            } else {
-                // Low confidence — ask the user explicitly
-                console.log(`\n  ⚠️  Could not detect a project root from the current directory.`);
-                console.log(`     (no .git, package.json, or other project markers found)\n`);
-                const solutionDir = await askQuestion(`  Enter the path to your ${ide.name} project directory:\n  [${cwd}]: `);
-                const resolvedDir = solutionDir.trim() || cwd;
-                const customConfigPath = resolveIdeLocalInstallPath(ide, resolvedDir)!;
-                if (!await installToPath(customConfigPath, ide, universal)) ok = false;
+                console.log(`  ${gray("─".repeat(66))}`);
+
+                const choice = await select("Proceed?", [
+                    { label: "Install", value: "go" as const, recommended: confidence === "high" },
+                    { label: "Change the project directory", value: "dir" as const, recommended: confidence !== "high" },
+                    {
+                        label: isolate ? "Make it findable (record in the ledger)" : "Isolate it (do not record in the ledger)",
+                        hint: isolate ? "appears in engram install --check" : "you will have to remember this path yourself",
+                        value: "iso" as const,
+                    },
+                    { label: "Abort", value: "no" as const },
+                ]);
+
+                if (choice.cancelled || choice.value === "no") {
+                    console.log("  Aborted — nothing was written.");
+                    // A user who aborts got what they asked for. Not a failure,
+                    // so the exit code stays 0.
+                    return true;
+                }
+                if (choice.value === "iso") { isolate = !isolate; continue; }
+                if (choice.value === "dir") {
+                    const typed = (await ask(`\n  Project directory [${root}]: `)).trim();
+                    if (typed) {
+                        const resolved = path.resolve(typed);
+                        if (!fs.existsSync(resolved)) {
+                            // Offer rather than assume. A typo and a
+                            // not-yet-created directory look identical here, and
+                            // creating one silently is how an install lands in
+                            // a directory named after a misspelling.
+                            if (!await confirm(`  ${resolved} does not exist. Create it?`, false)) continue;
+                            try { fs.mkdirSync(resolved, { recursive: true }); }
+                            catch (e: any) { console.log(`  ${yellow("Could not create it:")} ${e.message}`); continue; }
+                        }
+                        root = resolved;
+                        const re = detectProjectRootForDisplay(resolved);
+                        // Trust what the user typed as the root, but keep the
+                        // detector's opinion visible: if they pointed at a
+                        // subdirectory of a repo, saying so is more useful than
+                        // silently relocating the install.
+                        evidence = re.root === resolved ? re.evidence : `chosen by you — detector would have said ${re.root}`;
+                        confidence = re.root === resolved ? re.confidence : "medium";
+                    }
+                    continue;
+                }
+
+                if (!await installToPath(configPath, ide, universal, undefined, root, { isolated: isolate, scope: "local", ideKey: id, projectRoot: root })) ok = false;
+                break;
             }
         }
     } else if (!supportsGlobal && !supportsLocal) {
@@ -1040,12 +1237,49 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, nonInte
  * correct and the exit code claimed success anyway. A scripted install could
  * not tell "installed" from "refused to install".
  */
-async function installToPath(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): Promise<boolean> {
+async function installToPath(
+    configPath: string,
+    ide: IdeDefinition,
+    universal = false,
+    ideKey?: string,
+    projectRoot?: string,
+    ledger?: { isolated: boolean; scope: "local" | "global"; ideKey: string; projectRoot?: string },
+): Promise<boolean> {
+    const { dim, gray } = makeColors();
     try {
-        const result = addToConfig(configPath, ide, universal, ideKey);
+        const result = addToConfig(configPath, ide, universal, ideKey, projectRoot);
         const currentVersion = getInstallerVersion();
         console.log(`\n   ✅ ${ide.name}`);
         console.log(`      Config : ${configPath}`);
+
+        // WHERE THE MEMORY GOES. The installer knew this and never said it, so
+        // the single most common question after a successful install — "where is
+        // my data?" — had no answer in the output that just claimed success.
+        //
+        // Three distinct cases, and the difference matters:
+        //   - a project-local install, or any IDE with a workspace variable:
+        //     deterministic, so print the actual file path;
+        //   - a global install without a workspace variable: genuinely decided
+        //     at runtime, so say that rather than print a path that may be wrong;
+        //   - the same case where nothing in the cwd looks like a project: name
+        //     the shared global fallback explicitly, because that is the one
+        //     outcome a user would not want and would not otherwise discover.
+        if (projectRoot) {
+            console.log(`      Memory : ${resolveDbPath(projectRoot, ideKey)}`);
+        } else if (ide.workspaceVar) {
+            console.log(`      Memory : ${dim(`<workspace>/.engram/${ideKey ? `memory-${ideKey}.db` : "memory.db"}`)}`);
+            console.log(`               ${gray(`resolved by ${ide.name} from ${ide.workspaceVar} at launch`)}`);
+        } else {
+            const guess = detectProjectRoot(process.cwd());
+            if (guess.confidence === "high") {
+                console.log(`      Memory : ${dim(resolveDbPath(guess.root, ideKey))}`);
+                console.log(`               ${gray(`per project, detected at launch from the IDE's working directory`)}`);
+            } else {
+                console.log(`      Memory : ${dim("decided at launch from the IDE's working directory")}`);
+                console.log(`               ${gray(`if no project is detected it falls back to ${globalFallbackDbPath()},`)}`);
+                console.log(`               ${gray("which every project would then share. Pass project_root on session start to fix it.")}`);
+            }
+        }
 
         let statusText = "";
         if (result === "added") {
@@ -1066,6 +1300,37 @@ async function installToPath(configPath: string, ide: IdeDefinition, universal =
         }
 
         console.log(`      Status : ${statusText}`);
+
+        // ── The machine-wide record ────────────────────────────────────────
+        //
+        // Without this, the only way to answer "where is Engram installed" was
+        // to re-scan the config paths of the 14 known IDEs — which cannot find
+        // an install the installer itself offers to make, into a custom
+        // directory. --isolated is the opt-out, and it is loud rather than
+        // silent: an install nothing can find later is a choice the user has to
+        // be able to remember making.
+        if (ledger) {
+            if (ledger.isolated) {
+                console.log(`      Ledger : ${dim("not recorded (--isolated)")}`);
+                console.log(`               ${gray("`engram install --check` will NOT find this install. Keep this path:")}`);
+                console.log(`               ${configPath}`);
+            } else {
+                const written = recordInstall({
+                    configPath, ideKey: ledger.ideKey, ideName: ide.name,
+                    scope: ledger.scope, mode: universal ? "universal" : "classic",
+                    version: currentVersion,
+                    projectRoot: ledger.projectRoot,
+                    dbPath: ledger.projectRoot ? resolveDbPath(ledger.projectRoot, ideKey) : undefined,
+                    installedAt: new Date().toISOString(),
+                });
+                // A ledger failure must not fail the install: the config write
+                // already succeeded, and the ledger is an index over facts that
+                // live in the config file. Reporting it is still required —
+                // "recorded" is a claim, and an unwritten ledger would make
+                // --check quietly less complete.
+                console.log(`      Ledger : ${written ? gray(ledgerPath()) : dim("could not be written — install is fine, --check will rescan instead")}`);
+            }
+        }
         return true;
     } catch (e: any) {
         console.log(`\n   ⚠️  ${ide.name}`);

@@ -137,16 +137,38 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // No envVar — Gemini CLI only expands real OS env vars ($VAR or ${VAR} syntax);
         // setting ${workspaceFolder} would pass the literal string instead of the resolved path.
         //
-        // No localDirs — Antigravity is an IDE, not a CLI. It always reads the global user-level
-        // config (~/.gemini/settings.json). Project-local .gemini/settings.json is only read by
-        // the Gemini CLI tool when invoked from a terminal inside a project directory, NOT by the IDE.
-        // The Engram database location (per-project) is handled at session start by findProjectRoot()
-        // and the project_root_required fallback (v1.9.1) — it is orthogonal to MCP config placement.
+        // CORRECTED 2026-08-11, and this entry could not install Engram at all before.
+        //
+        // VERIFIED against https://antigravity.google/docs/mcp, which states:
+        // "The configuration file is located globally at ~/.gemini/config/mcp_config.json
+        // (or locally in your workspace under .agents/mcp_config.json)."
+        //
+        // Two errors, and the comment that used to sit here contained a third.
+        //  1. The global path was ~/.gemini/antigravity/mcp_config.json — a
+        //     directory Antigravity does not read. Recorded here as
+        //     "user-verified", which it was: the file existed on one machine.
+        //     What was never verified is that the IDE reads it, and it does not.
+        //     An install written there was silent, successful and inert.
+        //  2. localDirs was deliberately omitted, on the stated reasoning that
+        //     "Antigravity is an IDE, not a CLI" and so reads only the global
+        //     file. The vendor documents a project-local path in the same
+        //     sentence as the global one.
+        //  3. That same comment named ~/.gemini/settings.json as the file it
+        //     reads, which is Gemini CLI's config and disagrees with the path
+        //     the entry itself declared. Three sources of truth in one entry,
+        //     none of them the vendor.
+        //
+        // The old path is kept as a SEARCH path so `--check` and `--remove` can
+        // still find and clean up the inert entries earlier versions wrote.
+        // Writing always targets scopes.global[0], so a fresh install cannot
+        // land there again.
         scopes: {
-            // User-verified: ~/.gemini/antigravity/mcp_config.json
-            // This is the Antigravity desktop IDE app path — distinct from Gemini CLI.
-            // Source: user-verified on Windows (C:\Users\~ RG\.gemini\antigravity\mcp_config.json)
-            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
+            global: [
+                path.join(HOME, ".gemini", "config", "mcp_config.json"),
+                path.join(HOME, ".gemini", "antigravity", "mcp_config.json"), // legacy, search only
+            ],
+            localDirs: [".agents"],
+            localFile: "mcp_config.json",
         },
     },
 
