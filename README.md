@@ -165,25 +165,35 @@ compiles from source, which needs:
 - **Linux:** `build-essential` and `python3`
   (`sudo apt install build-essential python3`)
 
-### Option 1: The Magic Installer (Interactive)
+### Option 1: The Magic Installer (Interactive) — **use this one**
 
-Detects your IDE and injects the configuration safely:
-
-```bash
-npx -y engram-mcp-server@latest --install
-```
-
-**Universal mode** (~80 token single-tool schema — recommended for
-token-conscious setups):
+Detects your IDE and injects the configuration safely. Install in
+**universal mode**, which is the recommended setup:
 
 ```bash
 npx -y engram-mcp-server@latest --install --universal
 ```
 
+Universal mode exposes Engram as a **single `engram` tool with an ~80-token
+schema** instead of four dispatcher tools. Every action is still available —
+you call `engram({action:"record_decision", ...})` instead of
+`engram_memory({action:"record_decision", ...})`, and a BM25 resolver forgives
+near-miss action names. Nothing is given up: the universal catalogs and the
+four-tool action enums were compared programmatically and match exactly, **39
+of 39** memory actions and **37 of 37** admin actions reachable.
+
+> **One naming difference worth knowing.** `action:"search"` resolves to
+> *memory* search in universal mode, because the resolver checks the memory
+> dispatcher before the find dispatcher. To search the **tool catalog** — what
+> `engram_find({action:"search"})` does in four-tool mode — use its alias:
+> `engram({action:"discover", query:"..."})`.
+
+If you would rather have the four separate tools, see
+[Classic four-tool mode](#classic-mode) at the end of this section.
+
 **Non-interactive (CI/CD / scripting):**
 
 ```bash
-npx -y engram-mcp-server@latest install --ide vscode --yes
 npx -y engram-mcp-server@latest install --ide vscode --universal --yes
 ```
 
@@ -264,9 +274,13 @@ Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claude
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
-### Option 3: Universal Mode — Built-In Single-Tool Mode (v1.7+)
+### Option 3: Universal Mode written by hand (reference)
 
-Starting with v1.7.0, the main server itself can expose a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
+This is what `--install --universal` in [Option 1](#installation) writes for
+you. Use it if you configure MCP servers by hand, or to check what the
+installer produced.
+
+Since v1.7.0 the main server itself exposes a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
 
 **VS Code Copilot** (`.vscode/mcp.json`):
 
@@ -760,6 +774,40 @@ The installer automatically discovers all installed Android Studio versions and 
 > Android Studio requires `"enabled": true` in each MCP server entry. The config path is version-specific (e.g., `AndroidStudio2024.3`, `AndroidStudio2025.1`). The installer's `--check` flag shows the status of all discovered versions.
 
 </details>
+
+<a id="classic-mode"></a>
+### Classic four-tool mode — only if you want the explicit tool surface
+
+Everything above installs **universal mode**, and that is the recommendation.
+This section is here for people who want to explore the alternative.
+
+Drop `--universal` and the installer registers Engram as **four separate
+dispatcher tools** — `engram_session`, `engram_memory`, `engram_admin`,
+`engram_find`:
+
+```bash
+npx -y engram-mcp-server@latest --install
+npx -y engram-mcp-server@latest install --ide vscode --yes      # non-interactive
+```
+
+**What the four-tool surface costs and buys:**
+
+| | Universal (`--universal`) | Classic (no flag) |
+|---|---|---|
+| Schema tokens, every request | ~80 | ~1,600 |
+| Actions reachable | 39 memory + 37 admin + 5 session | identical |
+| Call shape | `engram({action:"get_tasks"})` | `engram_memory({action:"get_tasks"})` |
+| `action:"search"` | memory search (use `discover` for the catalog) | unambiguous — separate tools |
+| Agent picks the wrong tool | impossible — there is one | possible |
+
+The ~1,600 figure is the schema cost paid on **every** request for the life of
+the session, not once. That is the whole reason universal mode leads this
+section. Choose classic if you specifically want each dispatcher's parameter
+documentation in front of the agent, or if you are debugging which dispatcher
+an action lands in.
+
+Switching later is just a re-install with or without the flag — the database is
+untouched either way.
 
 ### Verifying Your Installation
 

@@ -166,7 +166,13 @@ function calculateNextTrigger(recurrence: string, currentValue: string | null): 
 
 // ─── Actions ───────────────────────────────────────────────────────────────
 
-const MEMORY_ACTIONS = [
+// Exported so tests/ergonomics/universal-parity.test.ts can compare this list
+// against find.ts's MEMORY_CATALOG. Universal mode derives its routing set from
+// the CATALOG, not from this enum (universal.ts:34), so an action added here and
+// not there is advertised by the four-tool surface and unreachable in universal
+// mode — the hazard ENGRAM_CONSTITUTION.md:424 states as a convention (D8-C5)
+// and nothing enforced.
+export const MEMORY_ACTIONS = [
   "get_file_notes", "set_file_notes", "set_file_notes_batch",
   "record_change", "get_file_history", "begin_work",
   "record_decision", "record_decisions_batch", "get_decisions", "update_decision",

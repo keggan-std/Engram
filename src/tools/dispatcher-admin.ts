@@ -44,7 +44,8 @@ function recordConfigAudit(key: string, before: string | null, after: string): v
   } catch (e) { log.warn(`[Engram] audit_log write failed for config."${key}": ${e}`); }
 }
 
-const ADMIN_ACTIONS = [
+// Exported for the same reason as MEMORY_ACTIONS — see dispatcher-memory.ts.
+export const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
   "export", "import",
   "compact", "clear",
