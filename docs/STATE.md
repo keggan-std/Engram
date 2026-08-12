@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `2c66ad1`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `0a9060e`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,11 +20,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `2c66ad1` — docs(STATE): regenerate after the cold-start, detection and write-integrity fixes |
+| **Working branch** | `v2-foundations` @ `0a9060e` — chore: remove task_dump.json, a sub-agent scratch file committed by accident |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-12-session-48-handoff.md` |
-| **Store** | schema V26 · 48 sessions · 49 decisions · 146 observations · 96 file notes |
+| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
+| **Store** | schema V26 · 49 sessions · 49 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **48** | `claude-opus-5-session-48` | _(in progress)_ |
+| **49** | `claude-opus-5-session-49` | _(in progress)_ |
+| **48** | `claude-opus-5-session-48` | Closed #59 and #99, fixed two cold-start races, an IDE misdetection reported live, and a write-integrity blind spot. |
 | **47** | `claude-sonnet-5-session-47` | Cleared handoff #20's full punch list. TASK #108: Cline/Roo Code were indistinguishable from VS Code's own terminal (both VS Code extensions, same env signals) — added detectVscodeExtensionAmbiguity(… |
-| **46** | `claude-opus-5-session-46` | Rebuilt installer discovery around the question a user actually asks, answered the global-memory architecture question from source, and found a shipped IDE integration that had never worked. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,16 +47,16 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**70 open tasks.** The ones that gate everything else:
+**58 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
 | **42** | FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text | **in progress** |
-| **11** | MASTER PLAN: Engram direction, workspace reorganisation, and change ledger | critical · backlog |
 | **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 | **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
-| **50** | FR-D6 CRITICAL — HTTP /export claims "all data", ships 5 of 24 tables, filtered, capped, stamped 1.9.0 | critical · backlog |
+| **58** | FR-D4 T1 — attribution must come from the caller: an orchestrator can never win credit against its own sub-agents | critical · backlog |
+| **64** | FR-D3 T1 CRITICAL — a freshness verdict must not be refreshed by a write that did not read the file | critical · backlog |
 
 ### Handoff
 
