@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-11 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `1a2291e`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `c4421ee`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `1a2291e` — docs: what a global install actually means, and the Antigravity path both docs also had wrong |
+| **Working branch** | `v2-foundations` @ `c4421ee` — fix(tests): tsconfig.test.json was red at 20 errors with nothing gating it |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
 | **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
-| **Store** | schema V26 · 46 sessions · 44 decisions · 140 observations · 96 file notes |
+| **Store** | schema V26 · 47 sessions · 47 decisions · 142 observations · 96 file notes |
 
-**Latest active decision — #44:** Installer discovery is LOCAL-FIRST with a bounded climb (default 4 parents, stopping at the project root), every install is recorded in a machine-wide ledger at ~/.engram/installs.json unless --isolated, and no interactive local install wr…
+**Latest active decision — #47:** Task #109 (Android Studio false positive): deleted the second detection branch (TERMINAL_EMULATOR contains JetBrains + ANDROID_HOME/ANDROID_SDK_ROOT) rather than tightening its condition.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **47** | `claude-sonnet-5-session-47` | Cleared handoff #20's full punch list. TASK #108: Cline/Roo Code were indistinguishable from VS Code's own terminal (both VS Code extensions, same env signals) — added detectVscodeExtensionAmbiguity(… |
 | **46** | `claude-opus-5-session-46` | Rebuilt installer discovery around the question a user actually asks, answered the global-memory architecture question from source, and found a shipped IDE integration that had never worked. |
 | **45** | `claude-opus-5-session-45` | Cleared the 2026-08-07 handoff's outstanding list and found a shipped command that had been crashing every time it ran. |
-| **44** | `claude-opus-5-session-44` | Published v1.13.0 to npm and cleared three open defects off v2-foundations so the branch could push clean. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**75 open tasks.** The ones that gate everything else:
+**72 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #20** — from `claude-opus-5-session-46`, 2026-08-11 — **not yet acknowledged**.
-Session 46: installer discovery, install plan and ledger shipped; the global-memory question answered as decision #43 and docs/memory-topology.md; Antigravity proven broken and fixed.
+**Read #21** — from `claude-sonnet-5-session-47`, 2026-08-12 — **not yet acknowledged**.
+Session 47: cleared handoff #20's three named tasks (#108, #109, #110) plus observation #139, all with regression tests and a clean full-suite run.
 
 ---
 
@@ -71,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#142** | friction | FOUND 2026-08-12, session 47, while adding e2e coverage for task #108. |
 | **#140** | idea | ROO CODE MAY BE A DISCONTINUED PRODUCT THAT THE REGISTRY STILL FULLY SUPPORTS. |
 | **#139** | concern | THE TEST TYPECHECK HAS BEEN RED FOR SOME TIME AND NOTHING NOTICES. |
 | **#136** | concern | A FULL-SUITE RUN FAILED 2 TESTS ON 2026-08-10 AND I DESTROYED THE EVIDENCE IN THE SAME COMMAND THAT PRODUCED IT. |
@@ -78,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#132** | concern | THE STATE.md FRESHNESS GATE CANNOT REACH EXIT 0 ONCE STATE.md IS COMMITTED, SO ITS ALARM IS PERMANENTLY ON. |
 | **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
 | **#121** | friction | MEASURED — two of Engram's most-called read surfaces overflow a tool result, and one of them does it in its documented "compact" mode. |
-| **#116** | friction | THIRD RECURRENCE OF THE CLOSING-DISCIPLINE GAP, and this one was load-bearing. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
