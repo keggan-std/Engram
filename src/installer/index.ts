@@ -8,7 +8,7 @@ import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError, findEngramEntryKey } from "./config-writer.js";
-import { detectCurrentIde, detectInstalledIdes, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
+import { detectCurrentIde, detectInstalledIdes, detectVscodeExtensionAmbiguity, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import {
     DEFAULT_WALK_UP, detectProjectRoot, resolveDbPath, globalFallbackDbPath,
@@ -750,7 +750,34 @@ Examples:
     const currentVersion = getInstallerVersion();
     const hr = "─".repeat(60);
 
-    const currentIde = detectCurrentIde();
+    let currentIde = detectCurrentIde();
+
+    // TASK #108: a terminal opened inside Cline's or Roo Code's panel is
+    // indistinguishable from VS Code's own integrated terminal by any signal
+    // this file has — both are the same host process. Auto-detect used to
+    // assume "vscode" and write there silently. If either extension is even
+    // installed on this machine, that assumption has a real chance of being
+    // wrong, so ask instead of guessing.
+    if (currentIde === "vscode") {
+        const ambiguousWith = detectVscodeExtensionAmbiguity();
+        if (ambiguousWith.length > 0) {
+            const names = ambiguousWith.map(id => IDE_CONFIGS[id].name);
+            if (nonInteractive) {
+                console.error(
+                    `⚠️  Detected VS Code's terminal, but ${names.join(" and ")} ${names.length > 1 ? "are" : "is"} ` +
+                    `also installed here and its terminal looks identical from this process. Defaulting to VS Code — ` +
+                    `if this run is actually inside ${names[0]}, use --ide ${ambiguousWith[0]} instead.`
+                );
+            } else {
+                const picked = await select("This looks like VS Code's terminal — but that's also true from inside an extension panel. Which one is this?", [
+                    { label: "VS Code (Copilot)", value: "vscode", recommended: true },
+                    ...ambiguousWith.map(id => ({ label: IDE_CONFIGS[id].name, value: id })),
+                ]);
+                if (!picked.cancelled) currentIde = picked.value;
+            }
+        }
+    }
+
     const allDetected = detectInstalledIdes();
     const otherDetected = allDetected.filter(id => id !== currentIde);
 
@@ -1109,6 +1136,9 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, opts: I
                 // Asked to install and installed nowhere. Not a crash, but not
                 // a success either, and a sweep must not report it as one.
                 ok = false;
+            } else if (!nonInteractive && !await confirmGlobalWrite(ide, allPaths)) {
+                console.log("  Aborted — nothing was written.");
+                return true;
             } else {
                 for (const configPath of allPaths) {
                     if (!await installToPath(configPath, ide, universal, globalIdeKey, undefined, { isolated, scope: "global", ideKey: id })) ok = false;
@@ -1121,6 +1151,10 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, opts: I
             // IDE does not read. PROVEN safe for the other 13: no IDE declares more
             // than one CANONICAL global path, so this is what find() already returned.
             const configPath = ide.scopes.global![0];
+            if (!nonInteractive && !await confirmGlobalWrite(ide, [configPath])) {
+                console.log("  Aborted — nothing was written.");
+                return true;
+            }
             if (!await installToPath(configPath, ide, universal, globalIdeKey, undefined, { isolated, scope: "global", ideKey: id })) ok = false;
         }
     } else if (targetScope === "local") {
@@ -1225,6 +1259,31 @@ async function performInstallationForIde(id: string, ide: IdeDefinition, opts: I
     }
 
     return ok;
+}
+
+/**
+ * TASK #110. Local installs render a full plan and require "Install" before
+ * anything is written (decision #44). A global install skipped straight to
+ * writing and only reported the path AFTER the fact, in installToPath's
+ * success message — the exact asymmetry task #110 named: "the install plan
+ * added in c2712fc now does for local scope and does NOT yet do for global."
+ * This is the global equivalent, deliberately smaller than the local one:
+ * a global path is fixed by the IDE, not something the user picks a
+ * directory for, so there is nothing to change here — just something to see
+ * before it happens.
+ */
+async function confirmGlobalWrite(ide: IdeDefinition, paths: string[]): Promise<boolean> {
+    const { bold, dim, gray } = makeColors();
+    console.log(`\n  ${gray("─".repeat(66))}`);
+    console.log(`  ${bold("Install plan")}  ${dim("— nothing has been written yet")}`);
+    console.log(`  ${gray("─".repeat(66))}`);
+    console.log(`  IDE      : ${ide.name}`);
+    console.log(`  Scope    : all projects (user-level config)`);
+    for (const p of paths) {
+        console.log(`  Config   : ${p}  ${dim(fs.existsSync(p) ? "(exists — Engram's entry will be merged in)" : "(will be created)")}`);
+    }
+    console.log(`  ${gray("─".repeat(66))}`);
+    return await confirm("  Proceed?", true);
 }
 
 /**

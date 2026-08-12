@@ -40,13 +40,31 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(here, "..", "..", "dist", "index.js");
 
 /** Run the real CLI in an isolated project + home. */
-function runCli(args: string[], cwd: string) {
+function runCli(args: string[], cwd: string, extraEnv: Record<string, string> = {}) {
+    // Every IDE/fork detection signal the real host process might be carrying
+    // (this suite itself commonly runs inside one) is scrubbed so a test that
+    // sets none of them means none of them, and a test that sets exactly one
+    // is not fighting real leakage from the terminal running the test.
+    const scrubbed = [
+        "TERM_PROGRAM", "VSCODE_IPC_HOOK", "VSCODE_CWD", "CURSOR_TRACE_ID",
+        "ANTIGRAVITY_EDITOR_APP_ROOT", "WINDSURF_PROFILE", "CLAUDE_CODE", "CLAUDE_CLI",
+        "VSINSTALLDIR", "VisualStudioVersion", "STUDIO_VM_OPTIONS", "TERMINAL_EMULATOR",
+        "ANDROID_HOME", "ANDROID_SDK_ROOT", "JETBRAINS_IDE",
+    ];
+    const env: Record<string, string | undefined> = { ...process.env };
+    for (const key of scrubbed) delete env[key];
+    // PATH itself is a detection signal (fork disambiguation matches substrings
+    // like "cursor"/"antigravity"/"windsurf" in it) — and this suite can run
+    // inside a real IDE session whose actual PATH contains one of those words,
+    // which would leak a false "detected IDE" into every test below that does
+    // not pass --ide explicitly.
+    env.PATH = "";
     return spawnSync(process.execPath, [DIST, ...args], {
         cwd,
         encoding: "utf-8",
         timeout: 60_000,
         env: {
-            ...process.env,
+            ...env,
             // Isolate anything that resolves against the user's real machine.
             HOME: path.join(cwd, "__home"),
             USERPROFILE: path.join(cwd, "__home"),
@@ -54,6 +72,7 @@ function runCli(args: string[], cwd: string) {
             // Keep the installer off the network — it fetches npm latest for a
             // version banner and a 5s timeout per test is pure cost.
             ENGRAM_SKIP_UPDATE_CHECK: "1",
+            ...extraEnv,
         },
     });
 }
@@ -451,6 +470,41 @@ describe("install → remove round trip, through the real CLI", () => {
                 JSON.parse(readFileSync(target, "utf-8")).mcpServers?.engram,
                 `--remove did not undo what --install wrote at ${target}`
             ).toBeUndefined();
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+});
+
+describe("auto-detect asks rather than assumes when Cline/Roo Code could be the real caller (task #108)", () => {
+    it("--yes defaults to VS Code but WARNS by name when Cline is also installed", () => {
+        const dir = makeProject();
+        try {
+            // Cline's extension globalStorage directory existing is the only
+            // fact detectVscodeExtensionAmbiguity() has to go on — it does not
+            // require an MCP settings file to already be there.
+            mkdirSync(
+                path.join(dir, "__home", "AppData", "Roaming", "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+                { recursive: true },
+            );
+            const r = runCli(["install", "--yes"], dir, { TERM_PROGRAM: "vscode" });
+            const out = r.stdout + r.stderr;
+            expect(r.status, `install did not exit 0\n${out}`).toBe(0);
+            expect(out, "ambiguity with Cline went unmentioned").toMatch(/Cline/);
+            expect(out, "did not name the --ide escape hatch").toMatch(/--ide cline/);
+
+            // And it still did something useful rather than just warning and
+            // exiting: the documented fallback is VS Code, applied and said so.
+            const written = path.join(dir, "__home", "AppData", "Roaming", "Code", "User", "mcp.json");
+            expect(existsSync(written), `expected VS Code's config at ${written}\n${out}`).toBe(true);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("prints no ambiguity warning when neither Cline nor Roo Code is on the machine", () => {
+        const dir = makeProject();
+        try {
+            const r = runCli(["install", "--yes"], dir, { TERM_PROGRAM: "vscode" });
+            const out = r.stdout + r.stderr;
+            expect(r.status, `install did not exit 0\n${out}`).toBe(0);
+            expect(out, "warned about an ambiguity that does not exist on this machine").not.toMatch(/Cline|Roo Code/);
         } finally { rmSync(dir, { recursive: true, force: true }); }
     });
 });

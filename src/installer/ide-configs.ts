@@ -91,6 +91,12 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // the server always receives the correct project root without heuristics.
         workspaceVar: "${workspaceFolder}",
         scopes: {
+            // TASK #110 (item 1): REPORTED, not VERIFIED. No vendor doc states
+            // this exact OS-specific path — VS Code's own docs only say "in
+            // your user profile folder", reachable via the "MCP: Open User
+            // Configuration" command. This is plausible by settings.json
+            // convention (same directory VS Code's other user settings live
+            // in) and has not been confirmed against a canonical source.
             global: [
                 path.join(APPDATA, "Code", "User", "mcp.json"),
             ],
@@ -230,7 +236,13 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
             //   Windows : %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
             //   macOS   : ~/Library/Application Support/Code/User/globalStorage/.../cline_mcp_settings.json
             //   Linux   : ~/.config/Code/User/globalStorage/.../cline_mcp_settings.json
-            // Source: confirmed from cline/cline disk.ts GlobalFileNames.mcpSettings
+            //
+            // TASK #110 (item 4): "confirmed" below overstated what a 2026-08-11
+            // audit could establish — this path is corroborated only by
+            // third-party docs describing cline/cline's disk.ts
+            // GlobalFileNames.mcpSettings; no canonical vendor page was found
+            // that states it directly. REPORTED, not VERIFIED.
+            // Source: cline/cline disk.ts GlobalFileNames.mcpSettings (third-party corroboration)
             global: [
                 path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
             ],
@@ -289,6 +301,11 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // FLAW-4 FIX: Trae officially supports ${workspaceFolder} in args/command fields.
         // Source: https://docs.trae.ai/ide/add-mcp-servers
         workspaceVar: "${workspaceFolder}",
+        // TASK #110 (item 3): only the project-level path (.trae/mcp.json) is
+        // vendor-documented. A user-level config may also exist alongside it —
+        // two fetches of the vendor page truncated before confirming — so no
+        // `global` entry is declared here rather than guess one. REPORTED, not
+        // VERIFIED: workspaceVar above is the one confirmed claim in this entry.
         scopes: {
             localDirs: [".trae"],
         },
@@ -322,8 +339,14 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
-        // Android Studio requires `enabled: true` in each MCP server entry.
-        // Without it, the server may be ignored by Gemini Agent mode.
+        // TASK #110 (item 5): the justification this comment used to give —
+        // "without it, the server may be ignored by Gemini Agent mode" — was
+        // itself unverified and, per a 2026-08-11 audit, wrong: the vendor
+        // documents `enabled` as OPTIONAL, defaulting to true, and omits it
+        // from its own example entry. Kept anyway because setting it is
+        // harmless and matches the actual mcp.json entries this config key was
+        // verified against (see the file-level comment above) — just not for
+        // the reason originally written here.
         extraEntryFields: { enabled: true },
         // Config path is versioned: %APPDATA%\Google\AndroidStudio<VERSION>\mcp.json
         // Multiple versions can coexist. `resolveGlobalPaths` discovers all of them

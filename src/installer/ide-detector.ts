@@ -15,6 +15,17 @@ import { IDE_CONFIGS } from "./ide-configs.js";
  *   1. Explicit env vars set only by a specific IDE (most reliable)
  *   2. process.execPath / argv[0] inspection for VS Code forks
  *   3. PATH / VSCODE_CWD string matching (fallback, fragile)
+ *
+ * TASK #110 (item 6): CLAUDE_CODE, CLAUDE_CLI, CURSOR_TRACE_ID, WINDSURF_PROFILE
+ * and JETBRAINS_IDE appear in no vendor documentation found by a 2026-08-11
+ * audit — same status as ANTIGRAVITY_EDITOR_APP_ROOT below, which already
+ * carried this caveat. They may be real and empirically observed; nothing on
+ * record says which, or by whom. REPORTED, not VERIFIED. An unverifiable
+ * signal is not the same defect as a wrong one, and the mitigation for both is
+ * the same: the install plan (decision #44, and confirmGlobalWrite in
+ * index.ts for the global case) prints the exact path before writing, so a
+ * misdetection is something the user catches rather than something that lands
+ * silently.
  */
 export function detectCurrentIde(): string | null {
     const env = process.env;
@@ -28,14 +39,21 @@ export function detectCurrentIde(): string | null {
 
     // ─── JetBrains detection ─────────────────────────────────────────
     // Android Studio is IntelliJ-based — check it BEFORE generic JetBrains.
-    // STUDIO_VM_OPTIONS is set by Android Studio's JVM launcher.
-    // Also catch running inside Android Studio terminal via JetBrains JediTerm
-    // combined with ANDROID_HOME/ANDROID_SDK_ROOT being set.
+    // STUDIO_VM_OPTIONS is set by Android Studio's own JVM launcher and is
+    // the only signal here that is actually about which IDE is running.
+    //
+    // TASK #109 FIX: a second branch used to also fire on
+    // TERMINAL_EMULATOR.includes("JetBrains") plus ANDROID_HOME/ANDROID_SDK_ROOT.
+    // Those env vars are set machine-wide by anyone doing command-line Android
+    // work and say nothing about which JetBrains IDE is running — IntelliJ,
+    // WebStorm, PyCharm, GoLand and RubyMine all satisfy it. A Flutter or React
+    // Native developer running the installer from IntelliJ's terminal was
+    // misdetected as Android Studio and the install was written to
+    // %APPDATA%/Google/AndroidStudio*/mcp.json, a product they may not have.
+    // Removed rather than tightened: STUDIO_VM_OPTIONS is already the correct,
+    // specific signal, and evidence about the machine (an installed SDK) is not
+    // evidence about the process using this terminal.
     if (env.STUDIO_VM_OPTIONS) return "androidstudio";
-    if (
-        env.TERMINAL_EMULATOR?.includes("JetBrains") &&
-        (env.ANDROID_HOME || env.ANDROID_SDK_ROOT)
-    ) return "androidstudio";
 
     if (env.JETBRAINS_IDE || env.TERMINAL_EMULATOR?.includes("JetBrains")) return "jetbrains";
 
@@ -76,6 +94,43 @@ export function detectCurrentIde(): string | null {
     }
 
     return null;
+}
+
+/**
+ * TASK #108. Cline and Roo Code are VS Code extensions, not separate
+ * processes — a terminal opened in either extension's panel sets exactly the
+ * same TERM_PROGRAM/VSCODE_IPC_HOOK/VSCODE_CWD signals as the host VS Code
+ * terminal, so detectCurrentIde() falls through every fork check and returns
+ * "vscode". Installing there writes the entry into VS Code's own mcp.json
+ * instead of the extension's private settings file — silent and inert,
+ * exactly the shape the Antigravity path bug had (fixed in c2712fc).
+ *
+ * No environment variable distinguishes an extension's integrated terminal
+ * from the host's, and inventing one to assert an unverified signal is how
+ * this file got four env vars no vendor doc confirms (task #110) — so this
+ * does not guess. When detectCurrentIde() lands on "vscode", call this to
+ * find out whether Cline and/or Roo Code are even installed on the machine
+ * (their extension's globalStorage directory exists, independent of whether
+ * an MCP settings file has ever been written inside it). If either is,
+ * the caller has a real ambiguity to resolve — by asking, not assuming.
+ *
+ * Returns IDE_CONFIGS keys, in priority order, or [] when there is nothing
+ * to disambiguate and "vscode" can be trusted as-is.
+ */
+export function detectVscodeExtensionAmbiguity(): string[] {
+    const candidates: string[] = [];
+    for (const id of ["cline", "roocode"]) {
+        const configPath = IDE_CONFIGS[id]?.scopes.global?.[0];
+        if (!configPath) continue;
+        // configPath is .../globalStorage/<extension-id>/settings/<file>.json.
+        // Two dirname() calls reach globalStorage/<extension-id> — the
+        // directory VS Code creates once the extension has ever activated,
+        // a more reliable "is it installed" signal than the settings FILE
+        // itself, which does not exist until something writes an MCP entry.
+        const extensionDir = path.dirname(path.dirname(configPath));
+        if (fs.existsSync(extensionDir)) candidates.push(id);
+    }
+    return candidates;
 }
 
 /**
