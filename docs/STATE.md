@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `0a9060e`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `c412552`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `0a9060e` — chore: remove task_dump.json, a sub-agent scratch file committed by accident |
+| **Working branch** | `v2-foundations` @ `c412552` — fix(FR-D1/D3): four durability and retrieval defects, each one silent |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
+| **Uncommitted** | clean |
 | **Store** | schema V26 · 49 sessions · 49 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
@@ -47,16 +47,16 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**58 open tasks.** The ones that gate everything else:
+**54 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
 | **42** | FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text | **in progress** |
-| **33** | FR-D1 T6 — import must stop previewing what it will not do (honest dry run first, then implement) | critical · backlog |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 | **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
 | **58** | FR-D4 T1 — attribution must come from the caller: an orchestrator can never win credit against its own sub-agents | critical · backlog |
-| **64** | FR-D3 T1 CRITICAL — a freshness verdict must not be refreshed by a write that did not read the file | critical · backlog |
+| **68** | FR-D7 T4 — session start costs 59,705 tokens at verbosity full against a documented ~730, and it is growing | critical · backlog |
+| **69** | FR-D7 T2 — every CRITICAL agent rule gets a mechanism or is deleted; AR-01 measures 21.1 percent | critical · backlog |
 
 ### Handoff
 
