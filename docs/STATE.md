@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `c412552`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `2141a3b`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `c412552` — fix(FR-D1/D3): four durability and retrieval defects, each one silent |
+| **Working branch** | `v2-foundations` @ `2141a3b` — docs(STATE): regenerate after the FR-D1/D3 batch |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | clean |
+| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-12-session-49-handoff.md` |
 | **Store** | schema V26 · 49 sessions · 49 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
@@ -60,8 +60,14 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #22** — from `claude-opus-5-session-48`, 2026-08-12 — **not yet acknowledged**.
-Session 48: two cold-start races, an IDE misdetection, a write-integrity hole.
+**Read #23** — from `claude-opus-5-session-49`, 2026-08-12 — **not yet acknowledged**.
+Session 49: board 70 to 54 open, 16 rows closed, four durability/retrieval defects fixed.
+
+⚠️ **1 older handoff still shows as pending and should be ignored:** #22 (`claude-opus-5-session-48`, 2026-08-12).
+
+They were never acknowledged, so they surface at every session start alongside the live
+one, as though equally current. Handoffs do not supersede each other — Engram schema
+gap 3, observation #54.
 
 ---
 
