@@ -5,11 +5,12 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, now } from "../database.js";
+import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, listUserTables, now } from "../database.js";
 import { success, error } from "../response.js";
 import { detectMalformedWrite } from "../write-integrity.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
+import { getCurrentSchemaVersion } from "../migrations.js";
 import { log } from "../logger.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import { pmSafe } from "../services/index.js";
@@ -195,15 +196,115 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── EXPORT ─────────────────────────────────────────────────────
         case "export": {
+          // ── FR-D1 T5 / task #32 — complete, or it names what it skipped ────
+          //
+          // The table list was EIGHT names, hand-typed. MEASURED on a real store
+          // at schema V26: 24 real tables exist, so 16 were silently absent —
+          // including observations (146 rows, and observations ARE the product),
+          // handoffs (22), tool_call_log (488), config (43) and checkpoints. The
+          // call still reported "Memory exported" and a KB figure, so the only
+          // signal that two thirds of the store was missing was a smaller file.
+          //
+          // Worse, the old `catch { exported[table] = [] }` rendered a table it
+          // could not read as an EMPTY ARRAY — indistinguishable from a table
+          // that is genuinely empty. A read failure became a factual-looking
+          // claim that there was nothing there.
+          //
+          // Derived from sqlite_master now, so a table added by a future
+          // migration is exported the day it exists and there is no second list
+          // to forget. This is charter §2's rule applied to a register that
+          // happened to be a string array.
+          //
+          // TWO EXCLUSIONS, both named in the payload rather than assumed:
+          //   sqlite_*  — SQLite's own bookkeeping, not ours to carry.
+          //   fts_*     — 40 FTS5 shadow tables. They are a DERIVED index over
+          //               rows this file already contains, they are rebuilt by
+          //               migration V26 on import, and carrying them would
+          //               roughly double the file to restate what is already in
+          //               it. Excluded because they are redundant, not because
+          //               they are inconvenient — and the payload says so.
           const outputPath = params.output_path ?? path.join(projectRoot, DB_DIR_NAME, "export.json");
-          const tables = ["sessions", "changes", "decisions", "file_notes", "conventions", "tasks", "milestones", "scheduled_events"];
-          const exported: Record<string, unknown> = { exported_at: new Date().toISOString(), version: SERVER_VERSION };
+          // listUserTables() lives in database.ts, not here: schema
+          // introspection belongs to the database rather than to any domain
+          // repository, and putting the query in this file raised the raw-SQL
+          // ratchet (tests/codebase/maintainability.test.ts) — task #80's
+          // number moving the wrong way. The ratchet caught it.
+          const { tables, ftsArtifacts, sqliteInternal } = listUserTables(db);
+
+          const rowCounts: Record<string, number> = {};
+          const failed: Record<string, string> = {};
+          const exported: Record<string, unknown> = {};
+
+          let redactedSecrets = 0;
           for (const table of tables) {
-            try { exported[table] = db.prepare(`SELECT * FROM ${table}`).all(); } catch { exported[table] = []; }
+            try {
+              // Quoted identifier. The name comes from sqlite_master and never
+              // from a caller, but an unquoted interpolation here would be the
+              // pattern rather than the exception, and the next table with a
+              // reserved-word name would break it silently.
+              const rows = db.prepare(`SELECT * FROM "${table.replace(/"/g, '""')}"`).all();
+
+              // `config` was NOT in the old eight-table list, so completing the
+              // export is what puts it in reach — and it can hold http_token,
+              // which SECRET_CONFIG_KEYS already redacts on every other read
+              // path. Completeness must not become the one route that serves a
+              // credential in plaintext, on a file the user is being encouraged
+              // to treat as a backup. Redacted with the same constant the config
+              // surface uses, so there is one definition of what is secret.
+              if (table === "config") {
+                for (const row of rows as Array<{ key?: string; value?: unknown }>) {
+                  if (typeof row.key === "string" && SECRET_CONFIG_KEYS.has(row.key)) {
+                    row.value = REDACTED_VALUE;
+                    redactedSecrets++;
+                  }
+                }
+              }
+
+              exported[table] = rows;
+              rowCounts[table] = rows.length;
+            } catch (e) {
+              // Reported, never rendered as an empty table. A read failure and
+              // an empty table are different facts and were the same one.
+              failed[table] = (e as Error).message;
+            }
           }
-          fs.writeFileSync(outputPath, JSON.stringify(exported, null, 2), "utf-8");
+
+          const payload = {
+            exported_at: new Date().toISOString(),
+            version: SERVER_VERSION,
+            schema_version: getCurrentSchemaVersion(db),
+            complete: Object.keys(failed).length === 0,
+            table_count: Object.keys(rowCounts).length,
+            total_rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+            row_counts: rowCounts,
+            excluded: {
+              fts_artifacts: ftsArtifacts.length,
+              sqlite_internal: sqliteInternal.length,
+              why: "FTS5 shadow tables are a derived index over rows already in this file and are rebuilt on import; sqlite_* is SQLite's own bookkeeping.",
+            },
+            failed_to_read: failed,
+            redacted_secrets: redactedSecrets,
+            note: "Secret config keys are redacted (see redacted_secrets). `config` still carries instance_id, which identifies this instance rather than authenticating it — importing it elsewhere would clone this instance's identity in the cross-instance registry.",
+            ...exported,
+          };
+
+          fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
           const sizeKb = Math.round(fs.statSync(outputPath).size / 1024);
-          return success({ path: outputPath, size_kb: sizeKb, message: `Memory exported to ${outputPath} (${sizeKb} KB).` });
+          const failNote = Object.keys(failed).length
+            ? ` ${Object.keys(failed).length} table(s) COULD NOT BE READ and are absent: ${Object.keys(failed).join(", ")}.`
+            : "";
+          return success({
+            path: outputPath,
+            size_kb: sizeKb,
+            complete: payload.complete,
+            table_count: payload.table_count,
+            total_rows: payload.total_rows,
+            row_counts: rowCounts,
+            failed_to_read: failed,
+            message:
+              `Exported ${payload.table_count} table(s), ${payload.total_rows} row(s) to ${outputPath} (${sizeKb} KB).` +
+              failNote,
+          });
         }
 
         // ─── IMPORT ─────────────────────────────────────────────────────

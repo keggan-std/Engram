@@ -265,6 +265,49 @@ export function getDbPath(): string {
   return _dbPath;
 }
 
+/** A user table and the two categories deliberately left out of it. */
+export interface UserTableCensus {
+  /** Every real data table, sorted. Safe to SELECT * from. */
+  tables: string[];
+  /** FTS5 shadow tables — a derived index over rows the base tables hold. */
+  ftsArtifacts: string[];
+  /** SQLite's own bookkeeping (`sqlite_*`). */
+  sqliteInternal: string[];
+}
+
+/**
+ * Enumerate the database's real data tables from `sqlite_master`.
+ *
+ * Task #32 needed this because the export's table list was EIGHT names typed
+ * into the handler while the schema had 24, so 16 tables were silently absent
+ * from every "export". Deriving the list means a table added by a future
+ * migration is covered the day it exists, with no second register to forget —
+ * charter §2 applied to what happened to be a string array.
+ *
+ * It lives HERE rather than in the dispatcher for two reasons. Schema
+ * introspection is a property of the database, not of any one domain, so no
+ * `repositories/` file owns it — repositories are per-table and this question
+ * is about which tables exist. And ENGRAM_CONSTITUTION.md:58 makes
+ * `repositories/` the owner of SQL, enforced by the raw-SQL ratchet in
+ * tests/codebase/maintainability.test.ts; putting the query in the dispatcher
+ * raised that ceiling, which is task #80's number moving the wrong way. The
+ * ratchet caught it, and this is the fix rather than a raised ceiling.
+ *
+ * The two exclusions are RETURNED rather than dropped, so a caller can report
+ * what it skipped instead of quietly deciding for the reader.
+ */
+export function listUserTables(db: DatabaseType = getDb()): UserTableCensus {
+  const names = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+  ).all() as Array<{ name: string }>).map(t => t.name);
+
+  return {
+    tables: names.filter(n => !n.startsWith("fts_") && !n.startsWith("sqlite_")),
+    ftsArtifacts: names.filter(n => n.startsWith("fts_")),
+    sqliteInternal: names.filter(n => n.startsWith("sqlite_")),
+  };
+}
+
 // ─── Runtime Re-Initialization ───────────────────────────────────────
 
 /**
