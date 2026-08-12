@@ -961,34 +961,97 @@ export function runMigrationsTo(db: DatabaseType, targetVersion: number): void {
   // Ensure schema_meta table exists
   db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 
-  // Get current version
-  const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
-  const currentVersion = row ? parseInt(row.value, 10) : 0;
+  const readVersion = (): number => {
+    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  };
+  const pendingFrom = (from: number) =>
+    migrations.filter(m => m.version > from && m.version <= targetVersion);
 
-  // Filter migrations that need to run
-  const pendingMigrations = migrations.filter(m => m.version > currentVersion && m.version <= targetVersion);
-
-  if (pendingMigrations.length === 0) {
+  // ─── FAST PATH, deliberately unlocked ──────────────────────────────
+  // The overwhelmingly common case is a server starting against a database
+  // already at head, and that case must not take a write lock: BEGIN IMMEDIATE
+  // blocks every other writer, and paying that on every process start to guard
+  // a first-run-only race would be a worse trade than the race. A stale read
+  // here is safe because the slow path re-reads under the lock.
+  if (pendingFrom(readVersion()).length === 0) {
     return; // Already up to date
   }
 
-  log.info(`Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  // ─── SLOW PATH: one BEGIN IMMEDIATE around read-version → run-chain ──
+  //
+  // Task #59, PROVEN: two servers cold-starting on the same fresh project both
+  // read version 0, both run the whole chain, and the loser dies on V22's
+  // unconditional `ALTER TABLE file_notes ADD COLUMN git_branch` with
+  // "duplicate column name: git_branch". The DATA survives — the PROCESS does
+  // not, and IDE MCP hosts discard stderr, so from the user's side Engram is
+  // simply absent. First run only; a restart succeeds because the chain is
+  // complete by then. Reachable by opening a fresh project in two IDEs, or by
+  // an orchestrator and a sub-agent both spawning servers.
+  //
+  // The version read MUST be inside the lock. That is the whole fix: the loser
+  // blocks at BEGIN IMMEDIATE, and when it finally reads, it reads the winner's
+  // committed version and finds nothing to do.
+  //
+  // REJECTED — make all migrations idempotent: 26 retrofits, each a chance to
+  // introduce the bug being fixed, and it must be remembered by every future
+  // author forever. REJECTED — shard the database per process: `--ide=<key>`
+  // already does this and it is why the collision is rare, but it solves cold
+  // start by abandoning the domain, since two agents in one IDE is the
+  // SUPPORTED topology. PRIOR ART: rails/rails#22092, same defect with
+  // different DDL; an advisory lock around the whole chain is Rails' accepted
+  // fix, so this is the converged answer rather than an invention.
+  //
+  // NOTE the chain is now atomic as a whole, where it used to be atomic per
+  // migration. A mid-chain failure rolls the database back to the version it
+  // started at instead of leaving it stranded part-way, which also removes the
+  // cross-migration idempotency requirement the old shape depended on. The
+  // per-migration transactions are KEPT — inside the outer one better-sqlite3
+  // makes them SAVEPOINTs — so a single migration still cannot half-apply.
+  const runChain = db.transaction(() => {
+    const currentVersion = readVersion();
+    const pendingMigrations = pendingFrom(currentVersion);
 
-  for (const migration of pendingMigrations) {
-    log.info(`  v${migration.version}: ${migration.description}`);
+    if (pendingMigrations.length === 0) {
+      // Another process ran the chain while we waited on the lock. This is the
+      // designed outcome for the loser, not an error.
+      return;
+    }
 
-    // Run migration in a transaction for safety
-    const runMigration = db.transaction(() => {
-      migration.up(db);
-      db.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
-      ).run(String(migration.version));
-    });
+    log.info(`Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
 
-    runMigration();
+    for (const migration of pendingMigrations) {
+      log.info(`  v${migration.version}: ${migration.description}`);
+
+      const runMigration = db.transaction(() => {
+        migration.up(db);
+        db.prepare(
+          "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
+        ).run(String(migration.version));
+      });
+
+      runMigration();
+    }
+
+    log.info(`Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  });
+
+  try {
+    runChain.immediate();
+  } catch (e) {
+    // A busy timeout means the winner is STILL running the chain — but it may
+    // also have committed in the gap between our timeout and this line. Only
+    // re-reading can tell the two apart, and reporting a fatal for a chain that
+    // has in fact completed is the same "absent server" outcome this fix
+    // exists to remove.
+    const busy = (e as { code?: string }).code === "SQLITE_BUSY"
+      || (e as { code?: string }).code === "SQLITE_BUSY_TIMEOUT";
+    if (busy && pendingFrom(readVersion()).length === 0) {
+      log.info("Migrations were applied by another process while this one waited; nothing to do.");
+      return;
+    }
+    throw e;
   }
-
-  log.info(`Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
 }
 
 export function getCurrentSchemaVersion(db: DatabaseType): number {

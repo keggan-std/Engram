@@ -52,6 +52,70 @@ let _ideKey: string | undefined;
  * corrupt it is renamed to a timestamped .corrupt file and a fresh database
  * is created.
  */
+/**
+ * Put the database into WAL mode, tolerating a concurrent cold start.
+ *
+ * PROVEN 2026-08-12 against the real `initDatabase()`: spawn four or five
+ * processes at one fresh project root and 5–15% of them die with
+ * `SQLITE_BUSY: database is locked`, thrown from `db.pragma("journal_mode =
+ * WAL")` — NOT from the migration chain, which task #59 covers separately. The
+ * process dies; the data is fine. IDE MCP hosts discard stderr (FR-D6 T6), so
+ * what the user sees is an Engram that is simply absent, on first run, in
+ * exactly the two-IDE topology this product supports.
+ *
+ * WHY `busy_timeout` DOES NOT COVER IT. Converting a database to WAL needs an
+ * exclusive lock, and SQLite returns SQLITE_BUSY for a lock upgrade it judges
+ * could deadlock rather than invoking the busy handler. Measured directly: with
+ * `busy_timeout = 15000` and another connection holding BEGIN EXCLUSIVE, the
+ * conversion still threw SQLITE_BUSY. The timeout is not the mechanism that
+ * saves this.
+ *
+ * WHY READING THE MODE FIRST IS THE ACTUAL FIX, not merely a fast path.
+ * `journal_mode` is a property of the FILE, and reading it needs only a shared
+ * lock — measured: a second connection reports "wal" as soon as the first has
+ * converted. So the loser of the race does not need to win the lock at all. It
+ * needs to notice it no longer has to.
+ *
+ * REJECTED — raise `busy_timeout`: it is already 15 s and the measurement above
+ * shows the conversion failing anyway, so this treats a symptom that is not the
+ * cause. REJECTED — a lock file around open: a second coordination primitive
+ * with its own staleness and cleanup problems, to serialise something SQLite
+ * already serialises correctly. REJECTED — abandon WAL: it is what makes
+ * concurrent readers work here, and multi-IDE is the supported topology.
+ *
+ * A persistent failure WARNS AND CONTINUES rather than throwing. The fallback
+ * is the rollback journal — slower under concurrency, entirely correct — and a
+ * degraded server beats an absent one whose reason went to a discarded stderr.
+ */
+function ensureWalMode(db: DatabaseType, attempts = 100, delayMs = 25): void {
+  for (let i = 0; i <= attempts; i++) {
+    // Cheap, shared-lock read. In the race this is what ends it.
+    try {
+      const mode = db.pragma("journal_mode", { simple: true }) as string | undefined;
+      if (typeof mode === "string" && mode.toLowerCase() === "wal") return;
+    } catch { /* fall through and try the conversion */ }
+
+    try {
+      db.pragma("journal_mode = WAL");
+      return;
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? "";
+      if (code !== "SQLITE_BUSY" && code !== "SQLITE_BUSY_TIMEOUT") throw err;
+      if (i === attempts) {
+        console.error(
+          "[Engram] [WARN] Could not switch the database to WAL mode — another " +
+          "process is holding it. Continuing on the rollback journal, which is " +
+          "correct but slower under concurrent access.",
+        );
+        return;
+      }
+      // Synchronous by necessity: better-sqlite3 is synchronous throughout, so
+      // there is no event loop turn to yield to here.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
+  }
+}
+
 function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   const CORRUPTION_CODES = new Set(["SQLITE_CORRUPT", "SQLITE_NOTADB"]);
 
@@ -59,7 +123,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s — multi-IDE shards may still share a file
-    db.pragma("journal_mode = WAL");   // set WAL (or confirm already in WAL) — no-op if already WAL
+    ensureWalMode(db);                 // survives a concurrent cold start; see above
     return db;
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? "";
@@ -80,7 +144,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s
-    db.pragma("journal_mode = WAL");
+    ensureWalMode(db);
     console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
     return db;
   } catch (err: unknown) {
@@ -93,6 +157,11 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
   const freshDb = new Database(dbPath);
   freshDb.pragma("busy_timeout = 15000"); // 15 s
+  // This path used to be the ONE that never set WAL, leaving the caller's
+  // line 119 as its only source — which is why that line is not simply
+  // redundant. Setting it here makes the function's contract uniform: every
+  // database it returns is in WAL mode, or has warned that it is not.
+  ensureWalMode(freshDb);
   return freshDb;
 }
 
@@ -115,8 +184,11 @@ export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType
   _dbPath = path.join(dbDir, dbFileName);
   _db = openDatabaseWithRecovery(_dbPath);
 
-  // Performance pragmas (busy_timeout already set inside openDatabaseWithRecovery)
-  _db.pragma("journal_mode = WAL");
+  // Performance pragmas. busy_timeout and WAL are both already established by
+  // openDatabaseWithRecovery on every one of its three return paths, so the
+  // bare `journal_mode = WAL` that used to sit here is gone rather than routed
+  // through ensureWalMode(): it was a second, unprotected conversion attempt of
+  // exactly the kind that produced the SQLITE_BUSY crash.
   _db.pragma("foreign_keys = ON");
   _db.pragma("synchronous = NORMAL");
   _db.pragma("cache_size = -8000");       // 8MB cache
