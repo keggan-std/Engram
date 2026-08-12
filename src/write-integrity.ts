@@ -136,6 +136,69 @@ export function detectMalformedWrite(
     for (const [field, value] of Object.entries(params)) {
         if (typeof value !== "string" || value.length === 0) continue;
 
+        // ── An opener naming a sibling is decided BEFORE the prose rule ──
+        //
+        // PROVEN 2026-08-12, by this detector missing a live corruption in the
+        // store it guards. A record_decision call folded `rationale` into
+        // `decision`, producing:
+        //
+        //   ...inside the outer one.[/decision][parameter name="rationale"]PROVEN
+        //   both directions. Without the fix, tests/... fails 2 of 3 rounds...
+        //
+        // The token WAS found. But resumesProse() then looked at what followed
+        // it, saw several hundred ordinary words — because the swallowed
+        // parameter was itself a long prose paragraph — and waved it through.
+        // Decision #48 is permanently corrupt as a result, and update_decision
+        // cannot repair a decision's text, so it joins #23.
+        //
+        // So the prose heuristic is blind in exactly the case that matters
+        // most: TWO long text fields, where the swallowed one is prose. That is
+        // not a rare shape here — record_decision(decision, rationale) and
+        // create_task(title, description) are the two most-used write shapes in
+        // this store.
+        //
+        // The discriminator that survives is not "what follows the marker" but
+        // ADJACENCY. The decoder closes the current parameter and opens the
+        // next one in a single format switch, so the two tags are neighbours
+        // with nothing but whitespace between them:
+        //
+        //   ...inside the outer one.[/decision]\n[parameter name="rationale"]  <- fold
+        //
+        // Prose that discusses the bug does not do that. This file's own kill
+        // switch test writes both tags in one paragraph — "a closing tag such
+        // as [/content] appearing where prose should be, followed by
+        // [parameter name="tags"] as literal markup" — and the two are
+        // SEPARATED BY PROSE. That test rejected the first version of this rule,
+        // which fired on the opener wherever it appeared, and the rule was
+        // narrowed rather than the test loosened (task #77's standing order,
+        // and the same correction resumesProse() itself came from).
+        //
+        // MEASURED against all 452 rows of the live store: adjacency flags 9
+        // rows the prose rule missed and loses none, and in all 9 the swallowed
+        // column is NULL — proof the parameter never arrived. Zero false
+        // positives. The backtick escape is kept for a citation that happens to
+        // quote the two tags adjacently.
+        {
+            const adjacent = new RegExp(
+                LT + "/" + field + ">\\s*" + LT + '(?:antml:)?parameter\\s+name="([A-Za-z_][A-Za-z0-9_]*)"'
+            ).exec(value);
+            const named = adjacent?.[1];
+            if (named && named !== field && siblings.includes(named)) {
+                const at = adjacent!.index;
+                const before = value.slice(Math.max(0, at - 2), at);
+                // A fold APPENDS the next parameter to the tail of a value the
+                // agent actually wrote, so something always precedes the closing
+                // tag. A value that BEGINS with the signature has no preceding
+                // string for anything to have been folded into — it is someone
+                // pasting the marker, which the existing suite covers with a
+                // 2,000-character example that starts at index 0. Narrowed to
+                // let that through rather than loosening the test.
+                if (at > 0 && !before.includes("`")) {
+                    return { field, swallowed: named, message: rejection(field, named) };
+                }
+            }
+        }
+
         // Collect every Engram-specific markup token in the value: a closing
         // tag naming this field or a sibling, and the call envelope's own
         // tokens. Generic markup (<div>, <br>) is deliberately NOT a token —

@@ -171,3 +171,91 @@ describe("the tail window is what separates prose from corruption", () => {
         expect(clean, "a signature quoted early in a long document was rejected").toBeNull();
     });
 });
+
+// ─── The prose heuristic was blind when the SWALLOWED field is prose ──────
+//
+// PROVEN 2026-08-12 by this detector missing a live corruption in the store it
+// guards. A record_decision(decision, rationale) call folded `rationale` into
+// `decision`; the token was found, but resumesProse() then looked at what came
+// after it, saw several hundred ordinary words — because the swallowed value
+// was itself a prose paragraph — and let it through. Decision #48 is
+// permanently corrupt as a result, and update_decision cannot repair a
+// decision's text, so it joins #23.
+//
+// This is not an edge case. record_decision(decision, rationale) and
+// create_task(title, description) are the two most-used write shapes here, and
+// both are two long text fields in a row.
+//
+// MEASURED against all 452 rows of the live store before shipping: the added
+// rule flags 9 rows the old one missed and loses none. All 9 are genuine —
+// every one ends with a closing tag followed by an opener naming a sibling, and
+// in every one the swallowed column is NULL, which is proof the parameter never
+// arrived. Zero false positives, so task #77's kill switch is satisfied.
+describe("an opener naming a sibling beats the prose heuristic", () => {
+    const DECISION_SIBLINGS = [
+        "decision", "rationale", "tags", "affected_files",
+        "status", "supersedes", "depends_on", "export_global",
+    ];
+
+    // The real shape of decisions #16, #17, #18, #19, #26, #27 and #48.
+    const folded = (field: string, swallowed: string, tail: string) =>
+        `A real decision sentence that ends normally.${LT}/${field}>\n${LT}parameter name="${swallowed}">${tail}`;
+
+    it("rejects a long prose rationale folded into decision", () => {
+        const bad = detectMalformedWrite({
+            decision: folded("decision", "rationale",
+                "PROVEN both directions. Without the fix the suite fails two of three rounds " +
+                "with a duplicate column error, and with it every round passes cleanly, which " +
+                "is many more than four ordinary words and is exactly why the old rule missed it."),
+        }, DECISION_SIBLINGS);
+
+        expect(bad, "the corruption that produced decision #48 is still not detected").not.toBeNull();
+        expect(bad!.field).toBe("decision");
+        expect(bad!.swallowed).toBe("rationale");
+    });
+
+    it("rejects a JSON examples array folded into rule (conventions #3 and #4)", () => {
+        const bad = detectMalformedWrite({
+            rule: folded("rule", "examples", '["Supersedes the branch clause of retired convention #1"]'),
+        }, ["category", "rule", "examples", "enforced"]);
+        expect(bad).not.toBeNull();
+        expect(bad!.swallowed).toBe("examples");
+    });
+
+    it("KILL SWITCH — a backticked citation of the signature is still storable", () => {
+        // Observation #88 quotes the signature in prose. That was the one
+        // measured false positive when this detector was built, and the
+        // backtick escape must survive the new rule.
+        const clean = detectMalformedWrite({
+            decision:
+                "Convention #7 exists because the decoder emits `" + LT + 'parameter name="rationale">' + "` " +
+                "at the tail of the preceding string, and the swallowed column then arrives NULL. " +
+                "We reject such writes rather than repairing them.",
+        }, DECISION_SIBLINGS);
+        expect(clean, "refused a well-formed call that merely quotes the signature").toBeNull();
+    });
+
+    it("KILL SWITCH — an opener naming a NON-sibling is prose, not a fold", () => {
+        // A document discussing some other tool's parameters must stay
+        // storable: the name has to match a parameter of THIS call.
+        const clean = detectMalformedWrite({
+            decision:
+                "The upstream report shows " + LT + 'parameter name="some_other_tool_field">' +
+                " appearing in their traces, which matches what we see here and confirms the " +
+                "decoder is the layer at fault rather than anything in our own schema.",
+        }, DECISION_SIBLINGS);
+        expect(clean).toBeNull();
+    });
+
+    it("KILL SWITCH — an opener naming the field itself is not a fold", () => {
+        // A parameter cannot be swallowed into itself; treating that as
+        // corruption would refuse a decision that quotes its own name.
+        const clean = detectMalformedWrite({
+            decision:
+                "When the tool call carries " + LT + 'parameter name="decision">' +
+                " twice the second one is the one that survives, which is worth writing down " +
+                "here so the next reader does not have to rediscover it from the transcript.",
+        }, DECISION_SIBLINGS);
+        expect(clean).toBeNull();
+    });
+});

@@ -508,3 +508,103 @@ describe("auto-detect asks rather than assumes when Cline/Roo Code could be the 
         } finally { rmSync(dir, { recursive: true, force: true }); }
     });
 });
+
+// ─── --check --update: the scriptable half of the update offer ────────────
+//
+// TASK #107. Publishing a fix does not reach a machine that already has the
+// vulnerable build: npx caches per exact spec string, and the installer now
+// writes a PINNED version into the IDE config, so Engram deliberately no longer
+// self-upgrades. PROVEN on the maintainer's machine 2026-08-12: `engram --check`
+// reported ELEVEN installs, NINE of them outdated.
+//
+// --check already offered to fix that — but only through an interactive
+// select(), which a script, a CI job or an agent cannot reach. So the only
+// non-interactive path was retyping one command per install, from memory, for
+// nine installs. A fix that is published still does not arrive if arriving
+// depends on somebody remembering to do it by hand.
+//
+// --update is that path. It writes ONLY when asked: --check on its own stays
+// read-only, because a status command that writes inside a script is a worse
+// surprise than one that only prints.
+
+describe("--check --update brings outdated installs current without a prompt (task #107)", () => {
+    it("updates a stale project-local install in place", () => {
+        const dir = makeProject();
+        try {
+            // seedLocalConfig stamps _engram_version 1.12.0, which is behind
+            // this build — that is what makes it appear in the stale list.
+            const file = seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            const before = JSON.parse(readFileSync(file, "utf-8"));
+            expect(before.mcpServers.engram._engram_version).toBe("1.12.0");
+
+            const r = runCli(["install", "--check", "--scope", "local", "--update"], dir);
+            expect(r.status, `exited ${r.status}\n${r.stdout}\n${r.stderr}`).toBe(0);
+
+            const after = JSON.parse(readFileSync(file, "utf-8"));
+            expect(
+                after.mcpServers.engram._engram_version,
+                `--update left the entry at ${after.mcpServers.engram._engram_version}\n${r.stdout}`
+            ).not.toBe("1.12.0");
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("leaves a co-resident MCP server untouched while updating", () => {
+        const dir = makeProject();
+        try {
+            const file = seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            runCli(["install", "--check", "--scope", "local", "--update"], dir);
+            const after = JSON.parse(readFileSync(file, "utf-8"));
+            expect(after.mcpServers["some-other-server"]).toEqual({ command: "node", args: ["other.js"] });
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("writes NOTHING without --update — --check stays a status command", () => {
+        const dir = makeProject();
+        try {
+            const file = seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            const original = readFileSync(file, "utf-8");
+
+            const r = runCli(["install", "--check", "--scope", "local"], dir);
+            expect(r.status).toBe(0);
+            expect(
+                readFileSync(file, "utf-8"),
+                "--check modified a config file without being asked to"
+            ).toBe(original);
+            // ...and it must SAY how to act, or the read-only default is just
+            // a dead end. This is the line that makes the flag discoverable.
+            expect(r.stdout).toContain("--check --update");
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("--ide narrows the update to one install, and says so when it matches none", () => {
+        const dir = makeProject();
+        try {
+            const file = seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            const original = readFileSync(file, "utf-8");
+
+            // vscode is a real IDE key but no vscode install exists here, so
+            // the filter must match nothing — and must not silently update the
+            // cursor entry it was not asked about.
+            const r = runCli(["install", "--check", "--scope", "local", "--update", "--ide", "vscode"], dir);
+            expect(readFileSync(file, "utf-8")).toBe(original);
+            expect(r.stdout).toContain("matched none");
+            expect(r.status, "a filter that matched nothing reported success").toBe(1);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it("rejects an unknown --ide instead of updating everything", () => {
+        const dir = makeProject();
+        try {
+            const file = seedLocalConfig(dir, ".cursor", "mcp.json", "mcpServers");
+            const original = readFileSync(file, "utf-8");
+
+            const r = runCli(["install", "--check", "--update", "--ide", "notanide"], dir);
+            expect(r.status).toBe(1);
+            expect(r.stderr).toContain("Unknown IDE");
+            expect(
+                readFileSync(file, "utf-8"),
+                "an unknown --ide fell through to updating everything"
+            ).toBe(original);
+        } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+});
