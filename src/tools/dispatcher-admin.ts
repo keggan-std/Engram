@@ -333,15 +333,137 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           // and there is no second place to forget.
           //
           // Task #33's definition of done is "honest dry run first, THEN
-          // implement", so the other three are deliberately still absent rather
-          // than filled in with three untested INSERT paths on a data-import
-          // route. What changed is that their absence is now REPORTED instead
-          // of silently swallowed — see `not_imported` below.
-          const IMPORTERS: Record<string, (row: Record<string, unknown>) => void> = {
-            decisions: (row) => {
-              db.prepare(
-                "INSERT OR IGNORE INTO decisions (id, session_id, timestamp, decision, rationale, affected_files, tags, status) VALUES (?,?,?,?,?,?,?,?)",
-              ).run(row.id, row.session_id, row.timestamp, row.decision, row.rationale, row.affected_files, row.tags, row.status);
+          // implement". The honest dry run landed first, on its own, so the lie
+          // stopped immediately rather than waiting for the feature. The
+          // implementation is the block below, added 2026-08-12 — all four
+          // tables now have importers, so `not_imported` is empty in practice
+          // and stays as the mechanism that keeps preview and executor from
+          // ever diverging again.
+          // ── SECOND HALF, task #33 — the three defects the honest dry run
+          //    deliberately left standing ────────────────────────────────────
+          //
+          // 1. ID REMAPPING, not INSERT OR IGNORE on the source id. The old
+          //    importer carried `row.id` across and relied on OR IGNORE, so
+          //    merging a second store into a populated one silently DROPPED
+          //    every decision whose id already existed — for two Engram stores
+          //    of similar age, most of them. Ids are now omitted so SQLite
+          //    assigns fresh ones, which is what makes a merge a merge.
+          //
+          //    `session_id` is deliberately set to NULL rather than carried.
+          //    It references a `sessions` row that this import does not bring
+          //    with it, so preserving the number would attribute an imported
+          //    decision to whatever local session happens to hold that id —
+          //    inventing provenance, which is the exact failure FR-D2 T1 is
+          //    about. NULL says "imported, origin session unknown", which is
+          //    true. `superseded_by` and `depends_on` are dropped for the same
+          //    reason: they are id references that no longer point anywhere.
+          //
+          // 2. COUNT ROWS THAT LANDED, not calls that did not throw. The old
+          //    loop incremented on every call that didn't raise, and
+          //    INSERT OR IGNORE does not raise when it ignores — so the
+          //    reported count was the number of rows OFFERED. `.changes` is
+          //    what actually landed.
+          //
+          // 3. SHAPE VALIDATION. `JSON.parse` went straight into prepared
+          //    statements. A row that is not an object, or is missing the
+          //    NOT NULL columns, is now rejected and counted rather than
+          //    throwing mid-file or inserting a half-row.
+          //
+          // file_notes is keyed by `file_path`, a natural key, so it needs no
+          // remapping — but it DOES need a policy, and the policy is: never
+          // overwrite a local note with an imported one. A local note describes
+          // this checkout; an imported one describes someone else's. Conflicts
+          // are skipped and counted, not silently applied.
+          interface ImportOutcome { inserted: number; skipped: number; rejected: number }
+
+          // EVERY importer goes through `repositories/`, not through raw SQL in
+          // this file. The first version wrote four prepared statements here and
+          // the raw-SQL ratchet (tests/codebase/maintainability.test.ts) caught
+          // it at 25 against a frozen ceiling of 22 — Law 1, and task #80's
+          // number moving the wrong way. The repositories already expose exactly
+          // what an import needs, including a nullable session id, so the bypass
+          // was never justified.
+          const isRow = (r: unknown): r is Record<string, unknown> =>
+            typeof r === "object" && r !== null && !Array.isArray(r);
+
+          const str = (v: unknown): string | null =>
+            typeof v === "string" ? v : v == null ? null : String(v);
+
+          /** Export columns hold JSON text; the repositories take arrays. */
+          const arr = (v: unknown): string[] | null => {
+            if (Array.isArray(v)) return v.map(String);
+            if (typeof v === "string" && v.trim()) {
+              try { const p = JSON.parse(v); return Array.isArray(p) ? p.map(String) : null; } catch { return null; }
+            }
+            return null;
+          };
+
+          const IMPORTERS: Record<string, (rows: unknown[]) => ImportOutcome> = {
+            decisions: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.decision)) { out.rejected++; continue; }
+                repos.decisions.create(
+                  null, str(r.timestamp)!, str(r.decision)!, str(r.rationale),
+                  arr(r.affected_files), arr(r.tags), str(r.status) ?? "active",
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            conventions: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.category) || !str(r.rule)) { out.rejected++; continue; }
+                repos.conventions.create(
+                  null, str(r.timestamp)!, str(r.category)!, str(r.rule)!,
+                  arr(r.examples), str(r.summary), arr(r.tags),
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            milestones: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.title)) { out.rejected++; continue; }
+                repos.milestones.create(
+                  null, str(r.timestamp)!, str(r.title)!,
+                  str(r.description), str(r.version), arr(r.tags),
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            file_notes: (rows) => {
+              // Natural key (`file_path`), so no remapping — but it needs a
+              // POLICY, and the policy is: never overwrite a local note with an
+              // imported one. A local note describes THIS checkout; an imported
+              // one describes someone else's. Expressed as check-then-write
+              // rather than INSERT OR IGNORE precisely so it goes through the
+              // repository — and it is sound because the whole import runs
+              // inside one BEGIN IMMEDIATE, so nothing can insert between the
+              // read and the write.
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.file_path)) { out.rejected++; continue; }
+                const fp = str(r.file_path)!;
+                if (repos.fileNotes.getByPath(fp)) { out.skipped++; continue; }
+                repos.fileNotes.upsert(fp, str(r.last_reviewed) ?? now(), null, {
+                  purpose: str(r.purpose),
+                  dependencies: arr(r.dependencies),
+                  dependents: arr(r.dependents),
+                  layer: str(r.layer) as Parameters<typeof repos.fileNotes.upsert>[3]["layer"],
+                  complexity: str(r.complexity) as Parameters<typeof repos.fileNotes.upsert>[3]["complexity"],
+                  notes: str(r.notes),
+                  file_mtime: typeof r.file_mtime === "number" ? r.file_mtime : null,
+                  git_branch: str(r.git_branch),
+                  content_hash: str(r.content_hash),
+                  executive_summary: str(r.executive_summary),
+                });
+                out.inserted++;
+              }
+              return out;
             },
           };
 
@@ -374,24 +496,55 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
             });
           }
 
+          // ONE transaction across every table. Without it, a failure at row 400
+          // of 500 left 399 rows committed with no rollback — on the path a user
+          // reaches for during recovery, which is the worst possible moment to
+          // half-apply. All-or-nothing: either the merge happened or the store
+          // is exactly as it was.
           const imported: Record<string, number> = {};
+          const keptLocal: Record<string, number> = {};
+          const rejected: Record<string, number> = {};
           let total = 0;
-          for (const [table, apply] of Object.entries(IMPORTERS)) {
-            const rows = data[table] as Array<Record<string, unknown>> | undefined;
-            if (!rows) { imported[table] = 0; continue; }
-            let n = 0;
-            for (const row of rows) {
-              try { apply(row); n++; } catch { /* skip duplicates and malformed rows */ }
+
+          const runImport = db.transaction(() => {
+            for (const [table, apply] of Object.entries(IMPORTERS)) {
+              const rows = data[table];
+              if (!Array.isArray(rows)) { imported[table] = 0; continue; }
+              const out = apply(rows);
+              imported[table] = out.inserted;
+              if (out.skipped) keptLocal[table] = out.skipped;
+              if (out.rejected) rejected[table] = out.rejected;
+              total += out.inserted;
             }
-            imported[table] = n;
-            total += n;
+          });
+
+          try {
+            runImport.immediate();
+          } catch (e) {
+            return error(
+              `Import failed and NOTHING was written — the whole merge was rolled back. ` +
+              `Reason: ${(e as Error).message}`,
+            );
           }
+
+          const detail = Object.entries(imported).filter(([, n]) => n > 0)
+            .map(([t, n]) => `${n} ${t}`).join(", ") || "nothing";
+          const skipNote2 = Object.keys(keptLocal).length
+            ? ` Kept the local copy for ${Object.entries(keptLocal).map(([t, n]) => `${n} ${t}`).join(", ")}.`
+            : "";
+          const rejectNote = Object.keys(rejected).length
+            ? ` REJECTED as malformed: ${Object.entries(rejected).map(([t, n]) => `${n} ${t}`).join(", ")}.`
+            : "";
 
           return success({
             imported: total,
             imported_by_table: imported,
+            skipped_existing: keptLocal,
+            rejected_malformed: rejected,
             not_imported: notImported,
-            message: `Import complete. ${total} row(s) merged (${Object.entries(imported).map(([t, n]) => `${n} ${t}`).join(", ")}).` + skipNote,
+            message:
+              `Import complete. ${total} row(s) merged (${detail}).` +
+              skipNote + skipNote2 + rejectNote,
           });
         }
 

@@ -78,7 +78,13 @@ const countRawSql = (rel: string) => (read(rel).match(/\.prepare\s*\(/g) ?? []).
  */
 const RAW_SQL_CEILING: Record<string, number> = {
   "src/tools/dispatcher-memory.ts": 69,
-  "src/tools/dispatcher-admin.ts": 22,
+  // Lowered 22 -> 21 on 2026-08-12. Tasks #32 and #33 both added work to this
+  // file and both were routed through database.ts / repositories/ rather than
+  // through new prepared statements — the ratchet caught two attempts to do it
+  // the other way (25 and 23) and both were fixed rather than accommodated.
+  // A ratchet that is never tightened after a genuine improvement is a ceiling,
+  // not a ratchet.
+  "src/tools/dispatcher-admin.ts": 21,
   "src/tools/sessions.ts": 8,
   "src/tools/find.ts": 0,
 };

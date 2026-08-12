@@ -415,8 +415,95 @@ export function backupDatabase(destPath?: string): string {
   // it would throw ENOENT before the file is written. Using WAL checkpoint +
   // synchronous file copy guarantees the backup file is fully written before
   // we return the path to callers.
-  try { db.pragma("wal_checkpoint(FULL)"); } catch { /* WAL may not be in use */ }
+  //
+  // ── FR-D1 T2 / task #29 — check the checkpoint, then check the copy ──
+  //
+  // The checkpoint's RESULT was discarded (`try { ... } catch {}`), and that is
+  // not cosmetic. `wal_checkpoint(FULL)` returns `busy = 1` when another
+  // connection holds a read lock and the WAL could NOT be folded into the main
+  // database file. `copyFileSync` copies only the main file — never the `-wal`
+  // sidecar — so a busy checkpoint means every commit still living in the WAL
+  // is silently absent from the "backup", which then reports success and a
+  // plausible byte count. That is the H2 shape: a backup that restores less
+  // than it claimed, discovered only when someone needs it.
+  let checkpointBusy = true;
+  for (let attempt = 0; attempt < 5 && checkpointBusy; attempt++) {
+    try {
+      const rows = db.pragma("wal_checkpoint(FULL)") as Array<{ busy: number }> | undefined;
+      // No rows means the database is not in WAL mode, so there is nothing to
+      // fold in and the main file is already the whole story.
+      checkpointBusy = Array.isArray(rows) && rows.length > 0 ? rows[0].busy === 1 : false;
+    } catch {
+      checkpointBusy = false; // WAL not in use
+    }
+    if (checkpointBusy) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  if (checkpointBusy) {
+    throw new Error(
+      "Backup aborted: the write-ahead log could not be folded into the database " +
+      "file because another connection is holding it. Copying now would silently " +
+      "omit every change still in the WAL. Nothing was written. Retry when other " +
+      "Engram processes for this project are idle.",
+    );
+  }
+
   fs.copyFileSync(getDbPath(), destPath);
+
+  // ── Verify what was written, rather than trusting that it was ──────
+  // A backup nobody has opened is a file, not a backup. This is cheap
+  // (integrity_check on a local SQLite file) and it is the only moment the
+  // check is worth anything — after the fact, the original may be gone.
+  let verified: DatabaseType | null = null;
+  try {
+    verified = new Database(destPath, { readonly: true, fileMustExist: true });
+
+    const integrity = verified.pragma("integrity_check", { simple: true });
+    if (integrity !== "ok") {
+      throw new Error(`the copy failed SQLite's integrity check (${String(integrity)})`);
+    }
+
+    // Every table the live database has must exist in the copy. This catches a
+    // truncated or torn copy that still happens to parse.
+    const sourceTables = listUserTables(db).tables;
+    const copyTables = new Set(listUserTables(verified).tables);
+    const missing = sourceTables.filter(t => !copyTables.has(t));
+    if (missing.length > 0) {
+      throw new Error(`the copy is missing ${missing.length} table(s): ${missing.join(", ")}`);
+    }
+
+    // Row counts are REPORTED, not asserted equal. Another process may commit
+    // between the copy and this read, so an exact-equality check would fail
+    // honestly-taken backups intermittently — and per FR-D6 kill switch 1 a
+    // flaky gate is worse than no gate. Emptiness IS asserted: a copy where
+    // every table is empty while the source is not is the failure this exists
+    // to catch, and no race explains it.
+    const countRows = (d: DatabaseType, tables: string[]) =>
+      tables.reduce((sum, t) => {
+        try {
+          return sum + (d.prepare(`SELECT COUNT(*) c FROM "${t.replace(/"/g, '""')}"`).get() as { c: number }).c;
+        } catch { return sum; }
+      }, 0);
+
+    const sourceRows = countRows(db, sourceTables);
+    const copyRows = countRows(verified, sourceTables);
+    if (sourceRows > 0 && copyRows === 0) {
+      throw new Error(`the copy is empty (source holds ${sourceRows} row(s))`);
+    }
+  } catch (e) {
+    // Remove the unusable file. Leaving it would put a backup that failed
+    // verification into the same directory the restore path lists as a
+    // candidate, which is worse than having no backup at all.
+    try { verified?.close(); verified = null; } catch { /* already closed */ }
+    try { fs.unlinkSync(destPath); } catch { /* best-effort */ }
+    throw new Error(
+      `Backup verification failed and the file was removed: ${(e as Error).message}. ` +
+      `The original database is untouched.`,
+    );
+  } finally {
+    try { verified?.close(); } catch { /* best-effort */ }
+  }
 
   return destPath;
 }

@@ -13,10 +13,19 @@
 //      commit, exactly as the PINNED DEFECTS note below requires. Lifecycle
 //      coverage (sync on edit/delete, soft delete, backfill, idempotency) lives
 //      in tests/storage/fts-file-notes.test.ts; the parity binding stays here.
-//   2. set_file_notes re-stats the file on EVERY write (dispatcher-memory.ts:367),
-//      so a one-field drive-by flips a correctly-`stale` note to confidence
-//      "high" while leaving another agent's now-false summary in place.
-//      STILL OPEN — task #60.
+//   2. set_file_notes re-stat'd the file on EVERY write, so a one-field
+//      drive-by flipped a correctly-`stale` note to confidence "high" while
+//      leaving another agent's now-false summary in place — and AR-02 then told
+//      the next agent not to open the file.
+//      FIXED 2026-08-12 — task #64 (this block previously cited #60, which is
+//      the file-coordination task, not this one). set_file_notes and
+//      set_file_notes_batch now refresh file_mtime/content_hash only when the
+//      write supplies every content field the row already holds
+//      (certifiesContent, dispatcher-memory.ts). The pinned assertion below was
+//      flipped from "high" to "stale" in the same commit, exactly as the PINNED
+//      DEFECTS note requires, and two tests were added for the kill switch: a
+//      genuine full re-read must still certify, or the fix would make `stale`
+//      permanent and the feature net-negative.
 //
 // WHY THESE ASSERTIONS ARE SHAPED THIS WAY. A schema-shape check ("file_notes
 // has three triggers") would pass against triggers that are present and WRONG —
@@ -43,6 +52,7 @@ import path from "node:path";
 import os from "node:os";
 import { runMigrations } from "../../src/migrations.js";
 import { FileNotesRepo } from "../../src/repositories/file-notes.repo.js";
+import { certifiesContent } from "../../src/tools/dispatcher-memory.js";
 import { DecisionsRepo } from "../../src/repositories/decisions.repo.js";
 import { SnapshotRepo } from "../../src/repositories/snapshot.repo.js";
 import { getFileMtime, getFileHash } from "../../src/utils.js";
@@ -165,16 +175,24 @@ describe("Freshness cannot be laundered by a write that did not read the file", 
     const FILE_MTIME_STALE_HOURS = 24;
     const rel = "src/target.ts";
 
-    /** Replicates dispatcher-memory.ts:361-375 — note the UNCONDITIONAL re-stat at :367. */
+    /**
+     * Mirrors the real set_file_notes path, INCLUDING its certification gate.
+     *
+     * This used to replicate the unconditional re-stat that was the defect.
+     * Now it calls the production predicate, so the suite exercises the real
+     * rule rather than a copy of it that could drift away from the code it is
+     * supposed to be protecting.
+     */
     function setFileNotes(
         repo: FileNotesRepo,
         params: { purpose?: string; notes?: string; executive_summary?: string },
         sessionId: number,
     ) {
+        const refresh = certifiesContent(repo.getByPath(rel), params);
         repo.upsert(rel, new Date().toISOString(), sessionId, {
             ...params,
-            file_mtime: getFileMtime(rel, tmp),
-            content_hash: getFileHash(rel, tmp),
+            file_mtime: refresh ? getFileMtime(rel, tmp) : undefined,
+            content_hash: refresh ? getFileHash(rel, tmp) : undefined,
         });
     }
 
@@ -189,7 +207,7 @@ describe("Freshness cannot be laundered by a write that did not read the file", 
         return driftHours > FILE_MTIME_STALE_HOURS ? "stale" : "medium";
     }
 
-    it("DEFECT (task #60): a one-field write flips stale back to high", () => {
+    it("FIXED (task #64): a one-field write can no longer flip stale back to high", () => {
         mkdirSync(path.join(tmp, "src"), { recursive: true });
         const abs = path.join(tmp, rel);
         writeFileSync(abs, "export const VERSION = 1;\n");
@@ -213,10 +231,47 @@ describe("Freshness cannot be laundered by a write that did not read the file", 
         const row = db.prepare("SELECT executive_summary FROM file_notes WHERE file_path=?")
             .get(rel) as { executive_summary: string };
 
-        // The false summary survives untouched …
+        // The false summary still survives — COALESCE(?, col) is unchanged and
+        // preserving an omitted field is correct behaviour on its own.
         expect(row.executive_summary).toBe("Safe to ignore when tracing behaviour.");
-        // … and is now certified fresh. AR-02 tells the next agent NOT to open the file.
-        // DEFECT: this must become toBe("stale") when task #60 is fixed.
+
+        // What must NOT happen is that surviving text being certified fresh.
+        // AR-02 is CRITICAL and tells the next agent to open the file only if
+        // the note is absent or stale, so a laundered `high` here does not just
+        // misinform — it instructs the next agent not to look.
+        expect(
+            confidence(),
+            "a write that supplied only `purpose` re-certified an executive_summary it never read",
+        ).toBe("stale");
+    });
+
+    it("a full re-read still marks the note fresh — the fix must not make `stale` permanent", () => {
+        // The kill switch from 03-storage.md §4 T1: a signal that always says
+        // stale is a slower way of saying "always open the file", and would
+        // make the feature net-negative. An agent that genuinely re-reads and
+        // rewrites every content field must be able to certify that.
+        mkdirSync(path.join(tmp, "src"), { recursive: true });
+        const abs = path.join(tmp, rel);
+        writeFileSync(abs, "export const VERSION = 1;\n");
+
+        const repo = new FileNotesRepo(db);
+        setFileNotes(repo, { purpose: "p", notes: "n", executive_summary: "e" }, 100);
+
+        writeFileSync(abs, "export async function migrate() {}\n");
+        const future = new Date(Date.now() + 72 * 3600_000);
+        utimesSync(abs, future, future);
+        expect(confidence()).toBe("stale");
+
+        // Agent re-reads and rewrites everything the note holds.
+        setFileNotes(repo, { purpose: "p2", notes: "n2", executive_summary: "e2" }, 200);
+        expect(confidence()).toBe("high");
+    });
+
+    it("a first write on a fresh note certifies — there is nothing to launder", () => {
+        mkdirSync(path.join(tmp, "src"), { recursive: true });
+        writeFileSync(path.join(tmp, rel), "export const A = 1;\n");
+        const repo = new FileNotesRepo(db);
+        setFileNotes(repo, { purpose: "only a purpose" }, 300);
         expect(confidence()).toBe("high");
     });
 });

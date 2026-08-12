@@ -40,7 +40,7 @@
 
 import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
-import { runMigrations, runMigrationsTo } from "../../src/migrations.js";
+import { runMigrations, runMigrationsTo, getCurrentSchemaVersion } from "../../src/migrations.js";
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -325,5 +325,59 @@ describe("an upgrade interrupted part-way", () => {
             expect(schemaVersion(db)).toBe(headVersion());
             expect(countsOf(db, tables)).toEqual(before);
         } finally { dispose(); }
+    });
+});
+
+// ─── FR-D1 T4 / task #31 — a database from the future must be refused ─────
+//
+// A store written by a NEWER Engram is not something an older binary can
+// understand, and the old failure mode was silent in the worst direction:
+// every migration is already applied, so the chain has nothing to do, the
+// runner returned cleanly, and the server went on to read and WRITE a schema
+// whose columns and constraints it had no definition of.
+//
+// Realistic, not hypothetical: npx pins per exact spec string and IDE configs
+// pin an exact version (task #107), so one machine can easily run 1.12.0 in one
+// IDE and 1.14.0 in another against the same project. Whichever starts first
+// migrates; the older one then opens a future database.
+describe("a database from the future is refused, not silently downgraded (task #31)", () => {
+    it("throws, names both versions, and changes nothing", () => {
+        const db = new Database(":memory:");
+        runMigrations(db);
+        const head = getCurrentSchemaVersion(db);
+
+        // Stamp it as written by a much newer Engram.
+        const future = head + 7;
+        db.prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)")
+            .run(String(future));
+
+        const before = userTables(db).sort();
+
+        expect(() => runMigrations(db)).toThrowError(
+            new RegExp(`v${future}.*only knows up to v${head}`, "s"),
+        );
+
+        // "Nothing has been changed" has to be true, not just claimed.
+        expect(userTables(db).sort()).toEqual(before);
+        expect(getCurrentSchemaVersion(db)).toBe(future);
+        db.close();
+    });
+
+    it("still accepts a database at exactly head — the ceiling is inclusive", () => {
+        // An off-by-one here would refuse every correctly-migrated store, which
+        // is a far worse failure than the one being fixed.
+        const db = new Database(":memory:");
+        runMigrations(db);
+        expect(() => runMigrations(db)).not.toThrow();
+        db.close();
+    });
+
+    it("still migrates a database from the past", () => {
+        const db = new Database(":memory:");
+        runMigrationsTo(db, 22);
+        expect(getCurrentSchemaVersion(db)).toBe(22);
+        expect(() => runMigrations(db)).not.toThrow();
+        expect(getCurrentSchemaVersion(db)).toBeGreaterThan(22);
+        db.close();
     });
 });

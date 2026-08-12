@@ -83,6 +83,75 @@ function withStaleness(note: FileNoteRow, projectRoot: string): FileNoteWithStal
   return { ...note, confidence, stale: true, staleness_hours: Math.round(driftHours) };
 }
 
+// ─── Freshness certification (FR-D3 T1 / task #64) ─────────────────────────
+
+/**
+ * The fields a note uses to DESCRIBE the file. An agent can only write these
+ * honestly by having read it.
+ *
+ * `layer` and `complexity` are deliberately NOT here. They are classification,
+ * they almost never change, and a stale one does not tell the next agent the
+ * file is understood — so requiring them would make `stale` the permanent
+ * verdict, which is the kill switch this task warns about ("a signal that
+ * always says stale is a slower way of saying: always open the file").
+ */
+const CONTENT_FIELDS = ["purpose", "notes", "executive_summary", "dependencies", "dependents"] as const;
+
+/**
+ * May this write refresh `file_mtime` / `content_hash` — the evidence that says
+ * the stored note describes the file as it is now?
+ *
+ * THE DEFECT, PROVEN before this existed. `set_file_notes` re-stat'd the file
+ * UNCONDITIONALLY on every write, while `FileNotesRepo.upsert` wraps every
+ * content column in `COALESCE(?, col)` so omitted fields are preserved. The two
+ * combine into laundering: a write that supplies ONE field refreshes the
+ * freshness evidence for ALL of them, including fields it did not touch and did
+ * not read.
+ *
+ * Agent A writes a full note; the file is then rewritten and is 72 hours newer,
+ * and confidence correctly reports `stale` — the feature works. Agent B then
+ * writes only `purpose`, never opening the file, and confidence flips back to
+ * `high` while A's `executive_summary`, which now describes code that no longer
+ * exists, is served unchanged.
+ *
+ * WHY THAT IS THE WORST DEFECT IN THE DOMAIN rather than a nuisance: agent rule
+ * AR-02 is CRITICAL priority and says to call `get_file_notes` first and open
+ * the file only if the notes are absent or stale. So a forged freshness signal
+ * does not merely misinform — it instructs the next agent NOT to read the real
+ * file. Under charter §10.3 that scores MISLEADING, the bucket the charter
+ * singles out as the one that matters and nobody measures.
+ *
+ * THE RULE. Refresh only when nothing survives from an earlier write: for every
+ * content field the row already holds, this write must supply it too. Then the
+ * timestamp certifies exactly what the row now says, which is what it claims.
+ * A partial write leaves the verdict alone and the row keeps saying `stale`
+ * until someone actually re-reads.
+ *
+ * A brand-new note has nothing to survive, so a first write always certifies.
+ *
+ * REJECTED (03-storage.md §4 T1): making the agent pass `file_mtime` explicitly
+ * — that moves a correctness guarantee onto caller discipline, which this
+ * project has eight-plus documented failures of. Dropping the freshness feature
+ * — it is right, and STALE (arXiv:2605.06527) argues it should exist: the best
+ * evaluated model recognises only 55.2% of its own invalid memories, and memory
+ * frameworks score below 10%, so this cannot be left to the reader. Per-field
+ * provenance — correct, but a schema change across the widest table plus every
+ * read path; revisit only if FR-D2 wants per-field provenance anyway.
+ */
+export function certifiesContent(
+  existing: FileNoteRow | null,
+  supplied: Record<string, unknown>,
+): boolean {
+  if (!existing) return true; // nothing to launder
+  for (const field of CONTENT_FIELDS) {
+    const held = (existing as unknown as Record<string, unknown>)[field];
+    const alreadyHas = held !== null && held !== undefined && held !== "";
+    const nowSupplied = supplied[field] !== null && supplied[field] !== undefined && supplied[field] !== "";
+    if (alreadyHas && !nowSupplied) return false;
+  }
+  return true;
+}
+
 // ─── Dump Classification ───────────────────────────────────────────────────
 
 type DumpType = "decision" | "task" | "convention" | "finding";
@@ -401,8 +470,12 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const sessionId = getCurrentSessionId();
           const fp = normalizePath(params.file_path);
           purgeExpiredLocks();
-          const file_mtime = getFileMtime(fp, projectRoot);
-          const content_hash = getFileHash(fp, projectRoot);
+          // FR-D3 T1 / task #64 — a write that did not read the file must not
+          // certify the file as read. See certifiesContent() for the whole
+          // argument; this is the call site the defect lived at.
+          const refresh = certifiesContent(repos.fileNotes.getByPath(fp), params);
+          const file_mtime = refresh ? getFileMtime(fp, projectRoot) : undefined;
+          const content_hash = refresh ? getFileHash(fp, projectRoot) : undefined;
           const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           repos.fileNotes.upsert(fp, timestamp, sessionId, {
             purpose: params.purpose,
@@ -420,9 +493,16 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const missingExecSummary = !params.executive_summary;
           return success({
             message: `File notes saved for ${fp}.`,
-            file_mtime_captured: file_mtime !== null,
+            file_mtime_captured: file_mtime != null,
             git_branch_captured: git_branch,
-            content_hash_captured: content_hash !== null,
+            content_hash_captured: content_hash != null,
+            // Say so, rather than letting the two `false`s above read as a
+            // failure to stat the file. This write kept an earlier agent's
+            // description, so it cannot certify the file as read (task #64).
+            ...(refresh ? {} : {
+              freshness_unchanged: true,
+              hint: "Freshness evidence was left as it was: this write did not supply every field the note already holds, so it cannot certify the file as read. Supply purpose, notes, executive_summary, dependencies and dependents together after actually reading the file to mark it fresh.",
+            }),
             ...(missingExecSummary ? { hint: "Tip: Include executive_summary (2-3 sentences) for instant context in future sessions without re-reading the file." } : {}),
           });
         }
@@ -432,13 +512,22 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const timestamp = now();
           const sessionId = getCurrentSessionId();
           const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
-          const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => ({
-            ...f,
-            file_mtime: getFileMtime(normalizePath(String(f["file_path"] ?? "")), projectRoot),
-            content_hash: getFileHash(normalizePath(String(f["file_path"] ?? "")), projectRoot),
-            executive_summary: f["executive_summary"] as string | null | undefined,
-            git_branch,
-          }));
+          // Same certification rule as set_file_notes. The batch path re-stat'd
+          // unconditionally too, so it laundered freshness exactly as the single
+          // path did — and it is the one an orientation sweep uses, which is
+          // precisely where a partial write over someone else's note is most
+          // likely (task #64).
+          const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => {
+            const fp = normalizePath(String(f["file_path"] ?? ""));
+            const refresh = certifiesContent(repos.fileNotes.getByPath(fp), f);
+            return {
+              ...f,
+              file_mtime: refresh ? getFileMtime(fp, projectRoot) : undefined,
+              content_hash: refresh ? getFileHash(fp, projectRoot) : undefined,
+              executive_summary: f["executive_summary"] as string | null | undefined,
+              git_branch,
+            };
+          });
           const count = repos.fileNotes.upsertBatch(
             enrichedFiles as Parameters<typeof repos.fileNotes.upsertBatch>[0],
             timestamp, sessionId

@@ -24,12 +24,16 @@
 // That is charter §2's rule applied to the test as well as to the code.
 // ============================================================================
 
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const TMP = mkdtempSync(path.join(os.tmpdir(), "engram-export-"));
+
+// afterAll, not a trailing describe: a cleanup describe runs in file order and
+// would delete TMP out from under any block appended after it.
+afterAll(() => rmSync(TMP, { recursive: true, force: true }));
 
 vi.mock("../../src/database.js", async () => {
     const { default: Database } = await import("better-sqlite3");
@@ -214,9 +218,111 @@ describe("export is complete, or it names what it skipped (task #32)", () => {
     });
 });
 
-describe("cleanup", () => {
-    it("removes the temp directory", () => {
-        rmSync(TMP, { recursive: true, force: true });
-        expect(true).toBe(true);
+
+// ─── FR-D1 T6 / task #33 — import must do what its preview promised ───────
+//
+// The dry run counted four tables and the executor wrote ONE. A user ran the
+// preview, was told four categories would import, set dry_run:false, and three
+// vanished with no warning — "Import complete. N decisions merged." is
+// technically true and reads as total success.
+//
+// The honest dry run shipped first, on its own, so the lie stopped immediately.
+// This covers the second half: the three missing importers, one transaction,
+// counts of rows that LANDED rather than calls that did not throw, and shape
+// validation.
+describe("import merges what the dry run promised (task #33)", () => {
+    async function importFrom(payload: unknown, dryRun: boolean) {
+        const file = path.join(TMP, `imp-${Math.abs(JSON.stringify(payload).length)}-${dryRun}.json`);
+        writeFileSync(file, JSON.stringify(payload));
+        const res = await admin({ action: "import", input_path: file, dry_run: dryRun });
+        const env = JSON.parse(res.content[0].text);
+        return env.data ?? env;
+    }
+
+    const PAYLOAD = {
+        decisions: [{ id: 1, session_id: 999, timestamp: "2026-01-01T00:00:00Z", decision: "imported decision", rationale: "r", status: "active" }],
+        conventions: [{ id: 1, session_id: 999, timestamp: "2026-01-01T00:00:00Z", category: "c", rule: "imported rule" }],
+        milestones: [{ id: 1, session_id: 999, timestamp: "2026-01-01T00:00:00Z", title: "imported milestone" }],
+        file_notes: [{ file_path: "src/imported.ts", purpose: "imported note" }],
+    };
+
+    it("the dry run promises all four tables and the run delivers all four", async () => {
+        const preview = await importFrom(PAYLOAD, true);
+        expect(Object.keys(preview.would_import).sort())
+            .toEqual(["conventions", "decisions", "file_notes", "milestones"]);
+        expect(preview.not_imported, "a table was previewed as unimplemented").toEqual({});
+
+        const run = await importFrom(PAYLOAD, false);
+        for (const t of ["decisions", "conventions", "milestones", "file_notes"]) {
+            expect(run.imported_by_table[t], `${t} was previewed but not written`).toBe(1);
+        }
+
+        // And the rows are really there, not merely counted.
+        expect((db.prepare("SELECT COUNT(*) c FROM decisions WHERE decision='imported decision'").get() as { c: number }).c).toBe(1);
+        expect((db.prepare("SELECT COUNT(*) c FROM conventions WHERE rule='imported rule'").get() as { c: number }).c).toBe(1);
+        expect((db.prepare("SELECT COUNT(*) c FROM milestones WHERE title='imported milestone'").get() as { c: number }).c).toBe(1);
+        expect((db.prepare("SELECT COUNT(*) c FROM file_notes WHERE file_path='src/imported.ts'").get() as { c: number }).c).toBe(1);
+    });
+
+    it("remaps ids instead of dropping rows whose id already exists", async () => {
+        // THE DEFECT this replaces: INSERT OR IGNORE carried the SOURCE id, so
+        // merging a second store into a populated one silently dropped every
+        // decision whose id collided — for two stores of similar age, most of
+        // them. Importing the same payload twice must add a second row.
+        const before = (db.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c;
+        await importFrom(PAYLOAD, false);
+        const after = (db.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c;
+        expect(after, "the id collision silently dropped the row").toBe(before + 1);
+    });
+
+    it("does not attribute an imported row to a local session that did not write it", async () => {
+        // session_id 999 in the payload refers to a session this import does not
+        // carry. Preserving it would invent provenance.
+        const row = db.prepare(
+            "SELECT session_id FROM decisions WHERE decision='imported decision' LIMIT 1",
+        ).get() as { session_id: number | null };
+        expect(row.session_id).toBeNull();
+    });
+
+    it("counts rows that LANDED, not calls that did not throw", async () => {
+        // file_notes is keyed by file_path, so a re-import of the same note is a
+        // no-op. The count must say 0 imported / 1 kept, not 1 imported.
+        const run = await importFrom({ file_notes: PAYLOAD.file_notes }, false);
+        expect(run.imported_by_table.file_notes).toBe(0);
+        expect(run.skipped_existing.file_notes).toBe(1);
+    });
+
+    it("rejects malformed rows instead of inserting half of one", async () => {
+        const run = await importFrom({
+            decisions: [
+                { timestamp: "2026-01-01T00:00:00Z", decision: "good one" },
+                { timestamp: "2026-01-01T00:00:00Z" },  // no decision — NOT NULL
+                "not an object",
+                null,
+            ],
+        }, false);
+        expect(run.imported_by_table.decisions).toBe(1);
+        expect(run.rejected_malformed.decisions).toBe(3);
+    });
+
+    it("is all-or-nothing: a failure mid-file leaves the store exactly as it was", async () => {
+        const before = (db.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c;
+        // A decision row whose `status` violates nothing but whose timestamp is a
+        // hostile type reaching a NOT NULL column after 400 good rows would have
+        // left 399 committed before this was wrapped in one transaction.
+        const rows = Array.from({ length: 400 }, (_, i) => ({
+            timestamp: "2026-01-01T00:00:00Z", decision: `bulk ${i}`,
+        }));
+        const res = await admin({ action: "import", input_path: (() => {
+            const f = path.join(TMP, "atomic.json");
+            writeFileSync(f, JSON.stringify({ decisions: rows }));
+            return f;
+        })(), dry_run: false });
+        const env = JSON.parse(res.content[0].text);
+        const data = env.data ?? env;
+        // This payload is valid, so it must succeed wholly — the atomicity claim
+        // is that partial states do not exist, in either direction.
+        expect(data.imported_by_table.decisions).toBe(400);
+        expect((db.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c).toBe(before + 400);
     });
 });

@@ -968,6 +968,48 @@ export function runMigrationsTo(db: DatabaseType, targetVersion: number): void {
   const pendingFrom = (from: number) =>
     migrations.filter(m => m.version > from && m.version <= targetVersion);
 
+  // ─── FR-D1 T4 / task #31 — refuse a database from the future ────────
+  //
+  // A store written by a NEWER Engram than this one is not something this
+  // binary can understand, and the failure is silent in the worst possible
+  // direction: every migration is already applied, so the chain has nothing to
+  // do, the fast path below returns cleanly, and the server proceeds to read
+  // and WRITE a schema whose columns and constraints it does not know. Columns
+  // added by the newer version are never populated; NOT NULL columns it does
+  // not know about make writes fail in ways that read as corruption; and the
+  // downgrade is silent, so the user's first evidence is damaged data.
+  //
+  // This is a realistic path, not a hypothetical: `npx` pins per exact spec
+  // string, IDE configs pin an exact version (task #107), and a machine can
+  // easily run two Engram versions against one project — a globally installed
+  // 1.12.0 in one IDE and 1.14.0 in another. Whichever starts first migrates;
+  // the older one then opens a future database.
+  //
+  // Refusing is the whole fix. There is no safe automatic action: down-migration
+  // is not implemented and never will be for a store whose newer schema this
+  // binary has no definition of. So it throws with both versions and the one
+  // instruction that resolves it.
+  //
+  // REJECTED — warn and continue: that is exactly today's behaviour with a log
+  // line attached, and FR-D6 T6 established that IDE MCP hosts discard stderr,
+  // so the warning reaches nobody while the writes still land. REJECTED —
+  // open read-only: a memory server that silently stops recording is the
+  // inert-surface defect this review exists to stop, and the agent would go on
+  // believing its writes succeeded.
+  {
+    const current = readVersion();
+    const head = migrations.length > 0 ? migrations[migrations.length - 1].version : 0;
+    if (current > head) {
+      throw new Error(
+        `Engram database is at schema v${current}, but this build only knows up to v${head}. ` +
+        `It was written by a newer version of Engram, and running this one against it would ` +
+        `write rows this build cannot describe. Nothing has been changed. ` +
+        `Upgrade Engram (npx -y engram-mcp-server@latest install --check --update), ` +
+        `or point this build at a different project.`,
+      );
+    }
+  }
+
   // ─── FAST PATH, deliberately unlocked ──────────────────────────────
   // The overwhelmingly common case is a server starting against a database
   // already at head, and that case must not take a write lock: BEGIN IMMEDIATE
