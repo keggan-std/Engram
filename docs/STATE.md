@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `c4421ee`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `a2e4139`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `c4421ee` — fix(tests): tsconfig.test.json was red at 20 errors with nothing gating it |
+| **Working branch** | `v2-foundations` @ `a2e4139` — fix(write-integrity): the detector was blind when the SWALLOWED field is prose |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/STATE.md` |
-| **Store** | schema V26 · 47 sessions · 47 decisions · 142 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V26 · 48 sessions · 49 decisions · 146 observations · 96 file notes |
 
-**Latest active decision — #47:** Task #109 (Android Studio false positive): deleted the second detection branch (TERMINAL_EMULATOR contains JetBrains + ANDROID_HOME/ANDROID_SDK_ROOT) rather than tightening its condition.
+**Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **48** | `claude-opus-5-session-48` | _(in progress)_ |
 | **47** | `claude-sonnet-5-session-47` | Cleared handoff #20's full punch list. TASK #108: Cline/Roo Code were indistinguishable from VS Code's own terminal (both VS Code extensions, same env signals) — added detectVscodeExtensionAmbiguity(… |
 | **46** | `claude-opus-5-session-46` | Rebuilt installer discovery around the question a user actually asks, answered the global-memory architecture question from source, and found a shipped IDE integration that had never worked. |
-| **45** | `claude-opus-5-session-45` | Cleared the 2026-08-07 handoff's outstanding list and found a shipped command that had been crashing every time it ran. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**72 open tasks.** The ones that gate everything else:
+**70 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
@@ -60,7 +60,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #21** — from `claude-sonnet-5-session-47`, 2026-08-12 — **not yet acknowledged**.
+**Read #21** — from `claude-sonnet-5-session-47`, 2026-08-12 (already acknowledged).
 Session 47: cleared handoff #20's three named tasks (#108, #109, #110) plus observation #139, all with regression tests and a clean full-suite run.
 
 ---
@@ -71,6 +71,7 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 
 | Obs | Kind | Flag |
 |---|---|---|
+| **#144** | concern | MEASURED session 48: convention #7's ordering rule is NOT sufficient. |
 | **#142** | friction | FOUND 2026-08-12, session 47, while adding e2e coverage for task #108. |
 | **#140** | idea | ROO CODE MAY BE A DISCONTINUED PRODUCT THAT THE REGISTRY STILL FULLY SUPPORTS. |
 | **#139** | concern | THE TEST TYPECHECK HAS BEEN RED FOR SOME TIME AND NOTHING NOTICES. |
@@ -78,7 +79,6 @@ Newest first. Suggestions left *for the next agent* — these are not tracked ta
 | **#135** | concern | TWO INERT-SURFACE INSTANCES IN THE TEST LAYER ITSELF, plus one operational hazard the session created and did not fully clean up. |
 | **#132** | concern | THE STATE.md FRESHNESS GATE CANNOT REACH EXIT 0 ONCE STATE.md IS COMMITTED, SO ITS ALARM IS PERMANENTLY ON. |
 | **#122** | concern | tests/durability/backup-restore.test.ts failed once under full-suite parallel load and passes reliably in isolation. |
-| **#121** | friction | MEASURED — two of Engram's most-called read surfaces overflow a tool result, and one of them does it in its documented "compact" mode. |
 
 Observations have no resolved/superseded state, so "still relevant" cannot be queried —
 this is newest-first, not open-only (schema gap 2). Full text:
