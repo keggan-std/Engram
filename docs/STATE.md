@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `a2e4139`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `2c66ad1`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `a2e4139` — fix(write-integrity): the detector was blind when the SWALLOWED field is prose |
+| **Working branch** | `v2-foundations` @ `2c66ad1` — docs(STATE): regenerate after the cold-start, detection and write-integrity fixes |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | clean |
+| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-12-session-48-handoff.md` |
 | **Store** | schema V26 · 48 sessions · 49 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #21** — from `claude-sonnet-5-session-47`, 2026-08-12 (already acknowledged).
-Session 47: cleared handoff #20's three named tasks (#108, #109, #110) plus observation #139, all with regression tests and a clean full-suite run.
+**Read #22** — from `claude-opus-5-session-48`, 2026-08-12 — **not yet acknowledged**.
+Session 48: two cold-start races, an IDE misdetection, a write-integrity hole.
 
 ---
 
