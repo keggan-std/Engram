@@ -155,3 +155,89 @@ describe("detectVscodeExtensionAmbiguity", () => {
         expect(detectVscodeExtensionAmbiguity()).toEqual(["cline"]);
     });
 });
+
+// ─── Fork disambiguation: PATH is machine evidence, VSCODE_CWD is not ─────
+//
+// PROVEN 2026-08-12 on the maintainer's machine by running the real
+// `engram install --universal` from a VS Code terminal:
+//
+//   Detected IDE  : Antigravity IDE (Gemini)
+//   Config file   : C:\Users\El-Roi\.gemini\antigravity\mcp_config.json
+//
+// VSCODE_CWD read `...\Programs\Microsoft VS Code` — the running editor, named
+// unambiguously — and detectCurrentIde() consulted it, found no fork name in
+// it, and then FELL THROUGH to PATH, where two Antigravity install directories
+// were sitting because Antigravity is installed on that machine. The installer
+// stated the wrong product as fact and was one confirmation away from writing
+// there.
+//
+// Same shape as #109 one file over: machine evidence read as process evidence.
+
+describe("VS Code fork disambiguation (the Antigravity false positive)", () => {
+    const TOUCHED = [
+        "CLAUDE_CODE", "CLAUDE_CLI", "VSINSTALLDIR", "VisualStudioVersion",
+        "STUDIO_VM_OPTIONS", "TERMINAL_EMULATOR", "JETBRAINS_IDE",
+        "TERM_PROGRAM", "VSCODE_IPC_HOOK", "VSCODE_CWD",
+        "CURSOR_TRACE_ID", "ANTIGRAVITY_EDITOR_APP_ROOT", "WINDSURF_PROFILE", "PATH",
+    ];
+    const saved: Record<string, string | undefined> = {};
+
+    beforeEach(() => {
+        for (const k of TOUCHED) { saved[k] = process.env[k]; delete process.env[k]; }
+    });
+    afterEach(() => {
+        for (const k of TOUCHED) {
+            if (saved[k] === undefined) delete process.env[k];
+            else process.env[k] = saved[k];
+        }
+    });
+
+    it("does not call VS Code 'Antigravity' just because Antigravity is on PATH", () => {
+        // The exact reproduction, with the real strings from that machine.
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.VSCODE_CWD = "C:\Users\El-Roi\AppData\Local\Programs\Microsoft VS Code";
+        process.env.PATH = "C:\Users\El-Roi\AppData\Local\Programs\Antigravity\bin;D:\apps data\Antigravity IDE\bin";
+        expect(detectCurrentIde()).toBe("vscode");
+    });
+
+    it("still identifies a fork when VSCODE_CWD actually names one", () => {
+        // The fix must not buy correctness by making detection useless.
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.VSCODE_CWD = "C:\Users\El-Roi\AppData\Local\Programs\Antigravity";
+        expect(detectCurrentIde()).toBe("antigravity");
+    });
+
+    it("prefers an explicit fork env var over everything", () => {
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.VSCODE_CWD = "C:\Users\El-Roi\AppData\Local\Programs\Microsoft VS Code";
+        process.env.CURSOR_TRACE_ID = "abc";
+        expect(detectCurrentIde()).toBe("cursor");
+    });
+
+    it("reports PATH forks as an ambiguity to ask about, not an answer", async () => {
+        // No VSCODE_CWD: nothing authoritative is available, so PATH is the
+        // only signal left. It must produce a QUESTION, never an assertion.
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.PATH = "C:\Programs\Antigravity\bin;C:\Programs\Windsurf\bin";
+        const { detectVscodeForkAmbiguity } = await import("../../src/installer/ide-detector.js");
+        expect(detectCurrentIde()).toBe("vscode");
+        expect(detectVscodeForkAmbiguity()).toEqual(["antigravity", "windsurf"]);
+    });
+
+    it("asks nothing when VSCODE_CWD already answered", async () => {
+        // PATH must not get a second vote against a signal that is genuinely
+        // about this process — that second vote WAS the bug.
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.VSCODE_CWD = "C:\Programs\Microsoft VS Code";
+        process.env.PATH = "C:\Programs\Antigravity\bin";
+        const { detectVscodeForkAmbiguity } = await import("../../src/installer/ide-detector.js");
+        expect(detectVscodeForkAmbiguity()).toEqual([]);
+    });
+
+    it("asks nothing on a machine with no fork installed at all", async () => {
+        process.env.VSCODE_IPC_HOOK = "/tmp/vscode.sock";
+        process.env.PATH = "C:\Windows\System32;C:\Program Files\nodejs";
+        const { detectVscodeForkAmbiguity } = await import("../../src/installer/ide-detector.js");
+        expect(detectVscodeForkAmbiguity()).toEqual([]);
+    });
+});

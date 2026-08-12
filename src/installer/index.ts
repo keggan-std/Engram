@@ -8,7 +8,7 @@ import readline from "readline";
 import { fileURLToPath } from "url";
 import { IDE_CONFIGS, type IdeDefinition } from "./ide-configs.js";
 import { addToConfig, removeFromConfig, makeEngramEntry, readJson, getInstallerVersion, ConfigParseError, findEngramEntryKey } from "./config-writer.js";
-import { detectCurrentIde, detectInstalledIdes, detectVscodeExtensionAmbiguity, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
+import { detectCurrentIde, detectInstalledIdes, detectVscodeExtensionAmbiguity, detectVscodeForkAmbiguity, resolveIdeGlobalPaths, resolveIdeLocalPaths, resolveIdeLocalInstallPath } from "./ide-detector.js";
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import {
     DEFAULT_WALK_UP, detectProjectRoot, resolveDbPath, globalFallbackDbPath,
@@ -267,6 +267,9 @@ Options:
   --remove          Remove Engram from an IDE config (requires --ide)
   --list            Show all supported IDEs and their detection/install status
   --check            Show what is installed, where, and whether it is current
+  --update          With --check: update every outdated install, no prompt.
+                    Add --ide <name> to update only that one. Without this
+                    flag --check never writes anything.
   --scope <s>       Narrow --check to local | global | all   (default: all)
   --walk-up <n>     How many parent directories a local search climbs (default: ${DEFAULT_WALK_UP})
   --install-hooks   Install git post-commit hook to auto-record changes (run in your git repo)
@@ -296,6 +299,8 @@ Examples:
   engram install --ide vscode --universal      Install universal mode for VS Code
   engram install --ide claudecode --yes        Non-interactive install for Claude Code
   engram install --check                       What is installed here and machine-wide
+  engram install --check --update              Update every outdated install, no prompt
+  engram install --check --update --ide vscode Update just that one
   engram install --check --scope local         Only this project and its parents
   engram install --remove --ide cursor         Remove Engram from Cursor
   engram install --list                        Show IDE detection and install status
@@ -373,6 +378,17 @@ Examples:
     if (args.includes("--check")) {
         const currentVersion = getInstallerVersion();
         const cwd = process.cwd();
+        // --update turns the report into an action, without a prompt. Narrowed
+        // by --ide when the caller wants exactly one. Parsed here rather than
+        // with the other flags so it stays next to the branch that honours it.
+        const updateRequested = args.includes("--update");
+        const checkIdeIdx = args.indexOf("--ide");
+        const updateIdeFilter = checkIdeIdx >= 0 ? args[checkIdeIdx + 1] : undefined;
+        if (updateRequested && updateIdeFilter && !IDE_CONFIGS[updateIdeFilter]) {
+            console.error(`Unknown IDE: "${updateIdeFilter}". Options: ${Object.keys(IDE_CONFIGS).join(", ")}`);
+            process.exitCode = 1;
+            return;
+        }
         const { bold, dim, green, yellow, cyan, gray } = makeColors();
         const hr = "─".repeat(66);
 
@@ -519,34 +535,70 @@ Examples:
         // unless the user picks an action, and skipped entirely when
         // non-interactive: a status command that writes on its own in a script
         // would be a far worse surprise than one that only prints.
-        if (stale.length && !nonInteractive) {
+        const updateOne = async (e: DiscoveredInstall): Promise<boolean> => {
+            const ide = IDE_CONFIGS[e.ideKey];
+            if (!ide) {
+                console.log(`  ${yellow("⚠")}  ${e.ideName} is no longer a known IDE key — skipping ${e.configPath}`);
+                return false;
+            }
+            // Reproduce the rule the original install followed rather than
+            // inventing one: a global entry on an IDE with no workspace
+            // variable gets its per-IDE shard key; a local entry gets the
+            // absolute project root. Preserve the mode that is already
+            // there — silently converting someone's 4-tool install to
+            // universal because universal is now recommended would be a
+            // change they did not ask for.
+            const ideKey = e.scope === "global" && !ide.workspaceVar ? e.ideKey : undefined;
+            const projectRoot = e.scope === "local" ? e.projectRoot : undefined;
+            return installToPath(e.configPath, ide, e.mode === "universal", ideKey, projectRoot, {
+                isolated, scope: e.scope, ideKey: e.ideKey, projectRoot,
+            });
+        };
+
+        const printManualCommands = (targets: DiscoveredInstall[]) => {
+            for (const e of targets) {
+                const scopeFlag = e.scope === "local" ? "--local" : "--global";
+                const modeFlag = e.mode === "universal" ? " --universal" : "";
+                console.log(`  npx -y engram-mcp-server@latest install --ide ${e.ideKey} ${scopeFlag}${modeFlag}`);
+            }
+            console.log();
+        };
+
+        let failed = 0;
+
+        if (stale.length && updateRequested) {
+            // ── --update: the scriptable half ──────────────────────────────
+            //
+            // The interactive offer below cannot be reached by a script, a CI
+            // job, or an agent, and those are exactly the callers that would
+            // keep a fleet current. Without this flag the ONLY way to update N
+            // installs without a human at a keyboard is to retype one command
+            // per install — which is the friction task #107 is about, one level
+            // up: a fix that is published still does not arrive if arriving
+            // requires someone to remember to do it by hand.
+            //
+            // Writing is opt-in and explicit. --check stays read-only unless
+            // this flag is present, because a status command that writes on its
+            // own in a script is a far worse surprise than one that only prints.
+            const targets = updateIdeFilter
+                ? stale.filter(e => e.ideKey === updateIdeFilter)
+                : stale;
+
+            if (!targets.length) {
+                console.log(`  ${yellow(`--ide ${updateIdeFilter} matched none of the ${stale.length} outdated install(s).`)}`);
+                console.log(`  ${dim("Outdated: " + stale.map(e => e.ideKey).join(", "))}\n`);
+                process.exitCode = 1;
+            } else {
+                console.log(`  ${bold(`Updating ${targets.length} install(s) to v${currentVersion}...`)}\n`);
+                for (const e of targets) if (!await updateOne(e)) failed++;
+            }
+        } else if (stale.length && !nonInteractive) {
             const choice = await select(`${stale.length} install(s) are behind v${reference}. What now?`, [
                 { label: `Update all ${stale.length}`, value: "all" as const, recommended: true },
                 { label: "Choose which one to update", value: "pick" as const },
                 { label: "Do nothing", value: "none" as const, hint: "print the commands instead" },
             ]);
 
-            const updateOne = async (e: DiscoveredInstall): Promise<boolean> => {
-                const ide = IDE_CONFIGS[e.ideKey];
-                if (!ide) {
-                    console.log(`  ${yellow("⚠")}  ${e.ideName} is no longer a known IDE key — skipping ${e.configPath}`);
-                    return false;
-                }
-                // Reproduce the rule the original install followed rather than
-                // inventing one: a global entry on an IDE with no workspace
-                // variable gets its per-IDE shard key; a local entry gets the
-                // absolute project root. Preserve the mode that is already
-                // there — silently converting someone's 4-tool install to
-                // universal because universal is now recommended would be a
-                // change they did not ask for.
-                const ideKey = e.scope === "global" && !ide.workspaceVar ? e.ideKey : undefined;
-                const projectRoot = e.scope === "local" ? e.projectRoot : undefined;
-                return installToPath(e.configPath, ide, e.mode === "universal", ideKey, projectRoot, {
-                    isolated, scope: e.scope, ideKey: e.ideKey, projectRoot,
-                });
-            };
-
-            let failed = 0;
             if (choice.value === "all" && !choice.cancelled) {
                 for (const e of stale) if (!await updateOne(e)) failed++;
             } else if (choice.value === "pick" && !choice.cancelled) {
@@ -557,20 +609,18 @@ Examples:
                 })));
                 if (!picked.cancelled && !await updateOne(picked.value)) failed++;
             } else {
-                for (const e of stale) {
-                    const scopeFlag = e.scope === "local" ? "--local" : "--global";
-                    const modeFlag = e.mode === "universal" ? " --universal" : "";
-                    console.log(`  npx -y engram-mcp-server@latest install --ide ${e.ideKey} ${scopeFlag}${modeFlag}`);
-                }
-                console.log();
-            }
-            if (failed) {
-                console.log(`\n  ${yellow(`${failed} update(s) failed — see the reasons above.`)}\n`);
-                process.exitCode = 1;
+                printManualCommands(stale);
             }
         } else if (stale.length) {
-            console.log(`  ${dim("Run without --yes to be offered an update, or:")}`);
-            console.log(`  ${gray("npx -y engram-mcp-server@latest install --universal")}\n`);
+            console.log(`  ${dim("Non-interactive. To update these without a prompt:")}`);
+            console.log(`  ${gray("engram install --check --update")}              ${dim("all of them")}`);
+            console.log(`  ${gray("engram install --check --update --ide <name>")}  ${dim("just one")}\n`);
+            printManualCommands(stale);
+        }
+
+        if (failed) {
+            console.log(`\n  ${yellow(`${failed} update(s) failed — see the reasons above.`)}\n`);
+            process.exitCode = 1;
         }
 
         // --check exists to be READ BY SOMETHING. It printed "invalid JSON"
@@ -759,7 +809,14 @@ Examples:
     // installed on this machine, that assumption has a real chance of being
     // wrong, so ask instead of guessing.
     if (currentIde === "vscode") {
-        const ambiguousWith = detectVscodeExtensionAmbiguity();
+        // Two independent reasons "vscode" might be wrong, resolved by one
+        // prompt. (1) Cline/Roo Code panels are the same host process, so no
+        // signal distinguishes them — task #108. (2) A VS Code FORK whose
+        // terminal sets VSCODE_IPC_HOOK but not VSCODE_CWD leaves only PATH,
+        // which says what is installed rather than what is running — the
+        // Antigravity false positive PROVEN in ide-detector.ts. Both are
+        // "we genuinely cannot tell", and both get asked rather than guessed.
+        const ambiguousWith = [...detectVscodeForkAmbiguity(), ...detectVscodeExtensionAmbiguity()];
         if (ambiguousWith.length > 0) {
             const names = ambiguousWith.map(id => IDE_CONFIGS[id].name);
             if (nonInteractive) {
@@ -769,7 +826,7 @@ Examples:
                     `if this run is actually inside ${names[0]}, use --ide ${ambiguousWith[0]} instead.`
                 );
             } else {
-                const picked = await select("This looks like VS Code's terminal — but that's also true from inside an extension panel. Which one is this?", [
+                const picked = await select("This looks like VS Code — but a fork or an extension panel looks the same from here. Which one is this?", [
                     { label: "VS Code (Copilot)", value: "vscode", recommended: true },
                     ...ambiguousWith.map(id => ({ label: IDE_CONFIGS[id].name, value: id })),
                 ]);

@@ -78,22 +78,73 @@ export function detectCurrentIde(): string | null {
         // ── Windsurf ─────────────────────────────────────────────────
         if (env.WINDSURF_PROFILE) return "windsurf";
 
-        // ── Fork disambiguation via install path in VSCODE_CWD ───────
-        const cwdLower = (env.VSCODE_CWD || "").toLowerCase();
-        if (cwdLower.includes("antigravity")) return "antigravity";
-        if (cwdLower.includes("cursor")) return "cursor";
-        if (cwdLower.includes("windsurf")) return "windsurf";
+        // ── Fork disambiguation via the running editor's install dir ──
+        // VSCODE_CWD is set by VS Code's terminal integration to the directory
+        // the RUNNING editor was launched from, so a fork's name appears in it.
+        // It is evidence about THIS PROCESS, which is what we are asking about.
+        //
+        // When it is present it is AUTHORITATIVE and the search stops here —
+        // including when it matches no fork, which means plain VS Code. Falling
+        // through to PATH after a VSCODE_CWD that already answered the question
+        // is what produced the bug below.
+        if (env.VSCODE_CWD) {
+            const cwdLower = env.VSCODE_CWD.toLowerCase();
+            if (cwdLower.includes("antigravity")) return "antigravity";
+            if (cwdLower.includes("cursor")) return "cursor";
+            if (cwdLower.includes("windsurf")) return "windsurf";
+            return "vscode";
+        }
 
-        // ── Fork disambiguation via PATH ─────────────────────────────
-        const pathLower = (env.PATH || "").toLowerCase();
-        if (pathLower.includes("antigravity")) return "antigravity";
-        if (pathLower.includes("cursor")) return "cursor";
-        if (pathLower.includes("windsurf")) return "windsurf";
-
+        // ── No VSCODE_CWD: PATH is machine evidence, so do not assert ──
+        // PROVEN 2026-08-12 on the maintainer's machine, running the real
+        // `engram install --universal` from a VS Code terminal:
+        //
+        //   Detected IDE  : Antigravity IDE (Gemini)
+        //   Config file   : C:\Users\El-Roi\.gemini\antigravity\mcp_config.json
+        //
+        // while VSCODE_CWD read `...\Programs\Microsoft VS Code`. PATH carried
+        // two Antigravity entries — `...\Programs\Antigravity\bin` and
+        // `D:\apps data\Antigravity IDE\bin` — because Antigravity is INSTALLED
+        // on that machine, not because it was running. The installer was one
+        // confirmation away from writing Engram into a product the user was not
+        // using, and the panel stated the wrong IDE as fact.
+        //
+        // This is task #109's defect exactly one file over: evidence about the
+        // MACHINE (something on PATH, an Android SDK) is not evidence about the
+        // PROCESS using this terminal. #109 was fixed by DELETING the offending
+        // branch rather than tightening it, and the same reasoning applies —
+        // every fork name that can appear in PATH can appear there without
+        // running, and no amount of tightening changes what PATH is evidence of.
+        //
+        // It is not simply deleted, though, because a fork whose terminal sets
+        // VSCODE_IPC_HOOK but not VSCODE_CWD would then be silently misread as
+        // VS Code — the task #108 hazard. So the PATH signal is demoted from an
+        // assertion to an AMBIGUITY, reported by detectVscodeForkAmbiguity()
+        // below and resolved the way #108 resolved its own: by asking.
         return "vscode";
     }
 
     return null;
+}
+
+/**
+ * Forks that PATH suggests might be the real caller, when nothing authoritative
+ * said so. Returns IDE_CONFIGS keys, or [] when there is nothing to ask about.
+ *
+ * Only meaningful when detectCurrentIde() returned "vscode". If VSCODE_CWD was
+ * set it already answered the question and this returns [] — PATH must never
+ * get a second vote against a signal that is actually about this process.
+ *
+ * See detectCurrentIde() for the PROVEN false positive that demoted PATH from
+ * an assertion to a question.
+ */
+export function detectVscodeForkAmbiguity(): string[] {
+    const env = process.env;
+    if (env.VSCODE_CWD) return []; // authoritative; nothing to disambiguate
+    const pathLower = (env.PATH || "").toLowerCase();
+    return ["antigravity", "cursor", "windsurf"].filter(
+        id => pathLower.includes(id) && IDE_CONFIGS[id],
+    );
 }
 
 /**
