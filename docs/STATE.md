@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `2141a3b`
+**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `020c5df`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,7 +20,7 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `2141a3b` — docs(STATE): regenerate after the FR-D1/D3 batch |
+| **Working branch** | `v2-foundations` @ `020c5df` — docs(reports): session 49 handoff |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
 | **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-12-session-49-handoff.md` |
@@ -36,7 +36,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **49** | `claude-opus-5-session-49` | _(in progress)_ |
+| **49** | `claude-opus-5-session-49` | Board 70 to 54 open: 16 rows closed, 10 already-shipped. |
 | **48** | `claude-opus-5-session-48` | Closed #59 and #99, fixed two cold-start races, an IDE misdetection reported live, and a write-integrity blind spot. |
 | **47** | `claude-sonnet-5-session-47` | Cleared handoff #20's full punch list. TASK #108: Cline/Roo Code were indistinguishable from VS Code's own terminal (both VS Code extensions, same env signals) — added detectVscodeExtensionAmbiguity(… |
 

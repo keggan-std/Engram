@@ -35,7 +35,7 @@ the criticals were re-verified personally rather than accepted from a delegated 
 |---|---|
 | #7, #11, #46, #50, #51, #84, #89, #95, #96, #99, #100, #101 | #29, #31, #32, #33, #59, #64 |
 
-Remaining: **54 open — 6 critical, 27 high, 15 medium, 2 low.**
+Remaining: **54 open — 8 critical, 29 high, 15 medium, 2 low.**
 
 ---
 
