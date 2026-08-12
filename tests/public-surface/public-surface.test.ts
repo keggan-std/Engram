@@ -62,6 +62,7 @@ const PKG = JSON.parse(read("package.json")) as {
   license: string;
   dependencies: Record<string, string>;
   releaseNotes?: string;
+  engines: { node: string };
 };
 
 /** Every .ts under src/, recursively. */
@@ -378,7 +379,7 @@ describe("FR-D10 §5 — the tarball carries the policy it promises", () => {
     // followed the support statement into EBADENGINE and a native build
     // failure in the dependency that IS the database. CI cannot catch it: the
     // matrix is 20.x and 22.x.
-    const floor = (PKG.engines as { node: string }).node;
+    const floor = PKG.engines.node;
     const major = Number(/(\d+)/.exec(floor)?.[1]);
     expect(
       major,

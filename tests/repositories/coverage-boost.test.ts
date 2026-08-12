@@ -294,10 +294,15 @@ describe("TasksRepo — extended coverage", () => {
     });
 
     it("getFiltered with status filter returns correct subset", () => {
-        repos.tasks.create(null, NOW, { title: "Active task", status: "in-progress", priority: "high" });
+        // TASK STATUS LITERAL FIX (observation #139): TaskStatus uses an
+        // underscore ("in_progress"), not a hyphen. The hyphenated form used
+        // to appear on both the write and the read here, so the assertion
+        // passed by writing and reading the same wrong string — a real
+        // status filter with the actual literal was never exercised.
+        repos.tasks.create(null, NOW, { title: "Active task", status: "in_progress", priority: "high" });
         repos.tasks.create(null, NOW, { title: "Backlog task", status: "backlog", priority: "medium" });
-        const inProgress = repos.tasks.getFiltered({ status: "in-progress", limit: 10 });
-        expect(inProgress.every(t => t.status === "in-progress")).toBe(true);
+        const inProgress = repos.tasks.getFiltered({ status: "in_progress", limit: 10 });
+        expect(inProgress.every(t => t.status === "in_progress")).toBe(true);
     });
 
     it("getFiltered with includeDone=true includes done tasks", () => {

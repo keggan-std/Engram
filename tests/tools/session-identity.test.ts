@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import type { Database as DatabaseType } from "better-sqlite3";
 
 // ─── Database mock (real migrations + real repositories, in-memory) ───────────
 vi.mock("../../src/database.js", async () => {
@@ -92,7 +93,7 @@ class HandlerCapturer {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 let callSession: (action: string, extra?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-let db: InstanceType<typeof import("better-sqlite3").default>;
+let db: DatabaseType;
 
 interface SessionSnapshot {
     id: number;
