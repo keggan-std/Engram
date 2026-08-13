@@ -6,7 +6,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  now, getCurrentSessionId, getRepos, getProjectRoot, getDb, getServices
+  // getCurrentSessionId is deliberately NOT imported. Its unscoped form was
+  // called at 16 sites in this file and answered "the newest open session
+  // belonging to anyone" — task #58. Identity comes from resolveSession().
+  now, getRepos, getProjectRoot, getDb, getServices
 } from "../database.js";
 import {
   normalizePath, coerceStringArray, coerceNumberArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
@@ -15,6 +18,7 @@ import {
 import { success, error } from "../response.js";
 import { log } from "../logger.js";
 import { detectMalformedWrite } from "../write-integrity.js";
+import { resolveSession, ambiguityNote } from "./session-identity.js";
 import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
@@ -421,6 +425,25 @@ Use engram_find(query: "...") to look up exact param schemas.`,
       // ── PM Advisor: record this action (best-effort) ─────────────────────
       pmSafe(() => getServices().advisor.recordAction(String(params.action), params as Record<string, unknown>), undefined, 'advisor.recordAction');
 
+      // ── Who is writing this row (task #58) ───────────────────────────────
+      //
+      // Resolved ONCE, here, instead of sixteen bare getCurrentSessionId()
+      // calls further down. Bare, that query is "the newest open session
+      // belonging to ANYONE", and since a parent session always predates the
+      // sub-agents it spawns, ORDER BY id DESC hands every one of those
+      // sixteen writes to a live child. The orchestrator lost 100% of the
+      // time — deterministic, not a race. See session-identity.ts.
+      //
+      // One resolution per call rather than per case: sixteen sites resolving
+      // independently is sixteen chances for the next one to be added bare,
+      // which is exactly how this got to sixteen.
+      //
+      // Outside the IIFE because the advisory note below is attached after it
+      // returns, and the whole point of resolving once is that both halves see
+      // the same answer.
+      const actingSession = resolveSession(params, getRepos());
+      const sessionAttribution = ambiguityNote(actingSession, String(params.action));
+
       // Execute the action in an IIFE so we can intercept the result for nudge injection
       const _result = await (async () => {
       const { action } = params;
@@ -467,7 +490,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "set_file_notes": {
           if (!params.file_path) return error("file_path required for set_file_notes.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const fp = normalizePath(params.file_path);
           purgeExpiredLocks();
           // FR-D3 T1 / task #64 — a write that did not read the file must not
@@ -510,7 +533,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "set_file_notes_batch": {
           if (!params.files || !Array.isArray(params.files)) return error("files array required for set_file_notes_batch.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           // Same certification rule as set_file_notes. The batch path re-stat'd
           // unconditionally too, so it laundered freshness exactly as the single
@@ -540,7 +563,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_change": {
           if (!params.changes || !Array.isArray(params.changes)) return error("changes array required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const normalized = (params.changes as Array<Record<string, unknown>>).map(c => ({
             ...c,
             file_path: normalizePath(String(c["file_path"] ?? "")),
@@ -579,7 +602,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "begin_work": {
           if (!params.description) return error("description required for begin_work.");
           if (!params.files || !Array.isArray(params.files)) return error("files array required for begin_work.");
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const normalizedFiles = (params.files as unknown as string[]).map(f => normalizePath(String(f)));
           try {
             // AUDIT N3c: agent_id used to fall back to the literal "unknown", so
@@ -601,7 +624,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_decision": {
           if (!params.decision) return error("decision string required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const newId = repos.decisions.create(
             sessionId, timestamp,
             params.decision, params.rationale,
@@ -635,7 +658,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_decisions_batch": {
           if (!params.decisions || !Array.isArray(params.decisions)) return error("decisions array required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const ids = repos.decisions.createBatch(
             params.decisions as Parameters<typeof repos.decisions.createBatch>[0],
             sessionId, timestamp
@@ -677,7 +700,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "add_convention": {
           if (!params.category || !params.rule) return error("category and rule required for add_convention.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             "INSERT INTO conventions (session_id, timestamp, category, rule, examples) VALUES (?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.category, params.rule, params.examples ? JSON.stringify(params.examples) : null);
@@ -718,7 +741,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "create_task": {
           if (!params.title) return error("title required for create_task.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             `INSERT INTO tasks (session_id, created_at, updated_at, title, description, status, priority, assigned_files, tags, blocked_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(
@@ -806,7 +829,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
 
         case "checkpoint": {
           if (!params.current_understanding || !params.progress) return error("current_understanding and progress required for checkpoint.");
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           db.prepare(
             `INSERT INTO checkpoints (session_id, agent_name, created_at, current_understanding, progress, relevant_files) VALUES (?, ?, ?, ?, ?, ?)`
           ).run(
@@ -821,7 +844,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         case "get_checkpoint": {
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const cp = db.prepare("SELECT * FROM checkpoints WHERE session_id = ? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
           if (!cp) return success({ message: "No checkpoint found for current session.", session_id: sessionId });
           const files = cp.relevant_files ? (JSON.parse(cp.relevant_files as string) as unknown) : null;
@@ -936,7 +959,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             sinceTimestamp = last?.ended_at || new Date(Date.now() - 86400000).toISOString();
           } else if (params.since === "session_start") {
             // Resolve to the current session's started_at — prevents alphabetic-comparison bug
-            const sessionId = getCurrentSessionId();
+            const sessionId = actingSession.id;
             const session = sessionId ? db.prepare("SELECT started_at FROM sessions WHERE id = ? LIMIT 1").get(sessionId) as { started_at: string } | undefined : undefined;
             sinceTimestamp = session?.started_at || new Date(Date.now() - 3600000).toISOString();
           } else if (SINCE_RELATIVE.test(params.since)) {
@@ -1002,7 +1025,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_milestone": {
           if (!params.title) return error("title required for record_milestone.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             "INSERT INTO milestones (session_id, timestamp, title, description, version, tags) VALUES (?, ?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.title, params.description || null, params.version || null, params.tags ? JSON.stringify(params.tags) : null);
@@ -1022,7 +1045,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (params.trigger_type === "datetime" && !params.trigger_value) return error("trigger_value (ISO datetime) required when trigger_type is 'datetime'.");
           if (params.trigger_type === "task_complete" && !params.trigger_value) return error("trigger_value (task ID) required when trigger_type is 'task_complete'.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             `INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
           ).run(sessionId, timestamp, params.title, params.description || null, params.trigger_type, params.trigger_value || null, (params.requires_approval ?? true) ? 1 : 0, params.action_summary || null, params.action_data || null, params.priority ?? "medium", params.tags ? JSON.stringify(params.tags) : null, params.recurrence || null);
@@ -1075,7 +1098,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             db.prepare("UPDATE scheduled_events SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?").run(now(), params.id);
             if (event.recurrence && event.recurrence !== "once") {
               const nextVal = event.trigger_type === "datetime" ? calculateNextTrigger(event.recurrence, event.trigger_value ?? null) : event.trigger_value;
-              db.prepare(`INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`).run(getCurrentSessionId(), now(), event.title, event.description, event.trigger_type, nextVal, event.requires_approval, event.action_summary, event.action_data, event.priority, event.tags, event.recurrence);
+              db.prepare(`INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`).run(actingSession.id, now(), event.title, event.description, event.trigger_type, nextVal, event.requires_approval, event.action_summary, event.action_data, event.priority, event.tags, event.recurrence);
             }
             return success({ event_id: params.id, status: "acknowledged", message: `Event #${params.id} approved.${params.note ? ` Note: ${params.note}` : ""}` });
           } else {
@@ -1109,7 +1132,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const scores = scoreDump(params.content);
           const classified = pickDumpType(scores, params.hint === "auto" ? undefined : params.hint);
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const extractedItems: Array<{ type: DumpType; id: number; summary: string }> = [];
           try {
             switch (classified) {
@@ -1170,7 +1193,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_observation": {
           if (!params.content) return error("content required for record_observation.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const category = params.observation_category ?? "other";
           const filePath = params.file_path ? normalizePath(params.file_path, projectRoot) : undefined;
           const id = repos.observations.create(
@@ -1335,6 +1358,20 @@ Use engram_find(query: "...") to look up exact param schemas.`,
 
       }
       })(); // end action IIFE
+
+      // ── Say when attribution was a guess (task #58) ───────────────────────
+      //
+      // Attached here, once, rather than at sixteen return sites — the same
+      // reason the resolution itself is computed once. Present ONLY on the
+      // bottom rung: with a session_id, an agent_name, or this process's own
+      // session, the answer is a fact and annotating it would train the reader
+      // to ignore the field on the one call where it means something.
+      if (sessionAttribution) {
+        try {
+          const _parsed = JSON.parse(_result.content[0].text);
+          _result.content[0].text = JSON.stringify({ ..._parsed, session_attribution: sessionAttribution });
+        } catch { /* best effort — a non-JSON body is still a valid response */ }
+      }
 
       // ── PM Advisor: inject nudge if warranted (best-effort) ───────────────
       const _nudge = pmSafe(() => getServices().advisor.checkNudge(), null as string | null, 'advisor.checkNudge');

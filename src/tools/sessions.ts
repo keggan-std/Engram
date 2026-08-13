@@ -19,6 +19,10 @@ import { pmSafe } from "../services/index.js";
 import * as os from "os";
 import * as path from "path";
 import { buildToolCatalog, AGENT_RULES } from "./find.js";
+import {
+  resolveSession, ambiguityNote, setProcessSession, clearProcessSession,
+  type SessionResolution,
+} from "./session-identity.js";
 
 
 // ============================================================================
@@ -61,39 +65,12 @@ function storeCatalogDelivery(agent_name: string, tier: 0 | 1 | 2): void {
 // resolution order below is strict-to-loose, and the loosest rung reports that
 // it guessed rather than guessing silently.
 
-type SessionResolution =
-  | { id: number; scope: "explicit" | "agent" | "global"; ambiguous: boolean }
-  | { id: null; scope: "none"; ambiguous: false };
-
-/**
- * Decide which session a non-start action operates on.
- *   1. `session_id` — the handle returned by `start`. Exact, always preferred.
- *   2. `agent_name` — the caller's own newest open session.
- *   3. newest open session of any agent — legacy fallback, flagged `ambiguous`
- *      when more than one session is open so the caller learns it was a guess.
- */
-function resolveSession(
-  params: { session_id?: number; agent_name?: string },
-  repos: ReturnType<typeof getRepos>
-): SessionResolution {
-  if (params.session_id !== undefined) {
-    return { id: params.session_id, scope: "explicit", ambiguous: false };
-  }
-  const agentName = params.agent_name?.trim();
-  if (agentName) {
-    const own = repos.sessions.getOpenSessionId(agentName);
-    if (own !== null) return { id: own, scope: "agent", ambiguous: false };
-  }
-  const open = repos.sessions.getOpenSessions();
-  if (open.length === 0) return { id: null, scope: "none", ambiguous: false };
-  return { id: open[0].id, scope: "global", ambiguous: open.length > 1 };
-}
-
-/** Advisory note attached to responses that had to guess which session was meant. */
-function ambiguityNote(resolution: SessionResolution, action: string): string | undefined {
-  if (resolution.scope !== "global" || !resolution.ambiguous) return undefined;
-  return `More than one session is open and no session_id or agent_name was supplied, so the newest was used. Pass session_id (returned by engram_session(action:'start')) or agent_name to make '${action}' unambiguous.`;
-}
+// The ladder moved to session-identity.ts so engram_memory can reach it too.
+// It had three rungs here and the memory dispatcher could reach none of them,
+// which is task #58: 16 bare getCurrentSessionId() calls, and a parent session
+// that loses attribution to its own sub-agents 100% of the time. A fourth rung
+// — the session THIS PROCESS started — is what makes the dispatcher's answer
+// deterministic. See that file's header for why the process is the right unit.
 
 export function registerSessionDispatcher(server: McpServer): void {
   // Named so the write-integrity check can DERIVE this tool's valid parameter
@@ -257,6 +234,12 @@ Actions:
             }
 
             const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp, parentSessionId);
+            // Task #58. This process now knows whose writes it is handling, so
+            // engram_memory stops asking the store to guess. A sub-agent needs
+            // this at least as much as an orchestrator: it is the party whose
+            // id wins the bad query, so without it the ONLY correct answer is
+            // the one that was already accidentally right.
+            setProcessSession(sessionId, agent_name);
             const task = repos.tasks.getById(params.task_id) as Record<string, unknown> | null;
             if (!task) return error(`Task #${params.task_id} not found.`);
             const assignedFiles: string[] = task.assigned_files ? (typeof task.assigned_files === "string" ? JSON.parse(task.assigned_files) : task.assigned_files as string[]) : [];
@@ -302,6 +285,7 @@ Actions:
 
           const lastSession = getLastCompletedSession();
           const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
+          setProcessSession(sessionId, agent_name);   // task #58 — see the sub path above
 
           let autoCompacted = false;
           try { autoCompacted = services.compaction.autoCompact(COMPACTION_THRESHOLD_SESSIONS); } catch { /* best effort */ }
@@ -599,6 +583,11 @@ Actions:
           try { observationCount = repos.observations.countBySession(sessionId); } catch { /* table may not exist */ }
           const didClose = repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
           if (!didClose) return error(`Session #${sessionId} is already closed. Its summary was left untouched.`);
+          // Only if it was OURS. Ending someone else's session by passing their
+          // session_id must not blank this process's identity — the next write
+          // would silently fall back to the global rung, reintroducing the
+          // defect from the path most likely to run with several sessions open.
+          clearProcessSession(sessionId);
 
           return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, agent_name: agentName ?? undefined, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, session_resolution: ambiguityNote(resolution, "end"), ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
         }

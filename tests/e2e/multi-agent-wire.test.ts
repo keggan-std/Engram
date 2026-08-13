@@ -228,16 +228,26 @@ describe("multi-agent contract (two real processes, one project root)", () => {
     }, 60_000);
 
     // ── 4. Attribution: the orchestrator cannot win against its own children ─
-    // getCurrentSessionId() (database.ts:486) is
+    // FIXED, task #58. This test asserted the DEFECT on purpose until now.
+    //
+    // getCurrentSessionId() is
     //   SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1
-    // called unscoped at 16 sites in dispatcher-memory.ts. Because a parent
-    // session always predates its sub-agents (asserted in beforeAll), the parent
-    // always loses. Not a race — deterministic.
+    // and it was called unscoped at 16 sites in dispatcher-memory.ts. A parent
+    // session always predates the sub-agents it spawns (asserted in beforeAll),
+    // so ORDER BY id DESC handed every one of those writes to a live child. The
+    // parent lost 100% of the time — deterministic, not a race.
     //
     // Observed live before it was reproduced here: decision #21 of this project
     // was recorded by session #24 (fr-lead) and stamped to session #27, a
-    // sub-agent. See observation #79. PINNED AS A DEFECT.
-    it("a record written by agent A is stamped with agent B's session", async () => {
+    // sub-agent. See observation #79.
+    //
+    // What makes A's write attributable is that A is its OWN SERVER PROCESS —
+    // the process handling this call is the one that opened sessionA. That is
+    // the rung the ladder was missing; see src/tools/session-identity.ts.
+    // Note the call below passes NEITHER session_id NOR agent_name, which is
+    // the whole point: the fix must not depend on callers volunteering an
+    // identity they were never asked for.
+    it("a record written by agent A is stamped with agent A's session", async () => {
         await A.call("engram_memory", {
             action: "record_decision",
             decision: "A DECIDED THIS", rationale: "recorded solely by agent-A",
@@ -253,10 +263,33 @@ describe("multi-agent contract (two real processes, one project root)", () => {
             ).get(row.session_id) as { agent_name: string } | undefined;
 
             expect(row.decision).toBe("A DECIDED THIS");
-            // The defect, pinned. When attribution is fixed, these two lines
-            // become `toBe(sessionA)` / `toBe("agent-A")` in the same commit.
-            expect(row.session_id, "DEFECT: stamped with the newest open session").toBe(sessionB);
-            expect(owner?.agent_name, "DEFECT: credited to the agent that did not act").toBe("agent-B");
+            expect(row.session_id, "the acting agent's own session").toBe(sessionA);
+            expect(owner?.agent_name, "credited to the agent that acted").toBe("agent-A");
+            // The discriminating half. sessionB is open and newer, so the old
+            // query would return it; asserting only `toBe(sessionA)` would also
+            // pass on a single-session store and prove nothing.
+            expect(row.session_id).not.toBe(sessionB);
+        } finally { d.close(); }
+    }, 60_000);
+
+    // ── 4b. The other direction: B must not win against A either ────────────
+    // Test 4 alone would pass if the fix simply inverted the ordering to
+    // ORDER BY id ASC — which would break the sub-agent instead of the lead
+    // and look identical from A's side. This is the control.
+    it("a record written by agent B is stamped with agent B's session", async () => {
+        await B.call("engram_memory", {
+            action: "record_decision",
+            decision: "B DECIDED THIS", rationale: "recorded solely by agent-B",
+        });
+
+        const d = db();
+        try {
+            const row = d.prepare(
+                "SELECT session_id, decision FROM decisions WHERE decision = 'B DECIDED THIS' ORDER BY id DESC LIMIT 1",
+            ).get() as { session_id: number; decision: string } | undefined;
+            expect(row, "agent B's decision was written").toBeTruthy();
+            expect(row!.session_id, "the acting agent's own session").toBe(sessionB);
+            expect(row!.session_id).not.toBe(sessionA);
         } finally { d.close(); }
     }, 60_000);
 
