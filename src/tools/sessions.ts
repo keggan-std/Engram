@@ -13,7 +13,9 @@ import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
 import { detectMalformedWrite } from "../write-integrity.js";
-import type { SessionContext, ProjectSnapshot, ScheduledEventRow, ConventionRow } from "../types.js";
+// ProjectSnapshot dropped with task #68: session start now returns a
+// ProjectSnapshotDigest, and the full snapshot belongs to scan_project.
+import type { SessionContext, ScheduledEventRow, ConventionRow } from "../types.js";
 import { getPMConventions, getPhaseOverview } from "../knowledge/index.js";
 import { pmSafe } from "../services/index.js";
 import * as os from "os";
@@ -21,7 +23,6 @@ import * as path from "path";
 import { buildToolCatalog, AGENT_RULES } from "./find.js";
 import {
   resolveSession, ambiguityNote, setProcessSession, clearProcessSession,
-  type SessionResolution,
 } from "./session-identity.js";
 
 

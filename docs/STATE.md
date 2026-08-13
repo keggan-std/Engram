@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-12 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `020c5df`
+**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `8a623e6`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `020c5df` — docs(reports): session 49 handoff |
+| **Working branch** | `v2-foundations` @ `8a623e6` — fix(FR-D9 #75): the surface gate could not read the half of the contract that lies |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-12-session-49-handoff.md` |
-| **Store** | schema V26 · 49 sessions · 49 decisions · 146 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V26 · 50 sessions · 51 decisions · 146 observations · 96 file notes |
 
-**Latest active decision — #49:** ensureWalMode() fixes a second cold-start race in src/database.ts.
+**Latest active decision — #51:** Task #58 fixed by adding a fourth resolution rung: the session THIS SERVER PROCESS started.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **50** | `claude-opus-5-session-50` | _(in progress)_ |
 | **49** | `claude-opus-5-session-49` | Board 70 to 54 open: 16 rows closed, 10 already-shipped. |
 | **48** | `claude-opus-5-session-48` | Closed #59 and #99, fixed two cold-start races, an IDE misdetection reported live, and a write-integrity blind spot. |
-| **47** | `claude-sonnet-5-session-47` | Cleared handoff #20's full punch list. TASK #108: Cline/Roo Code were indistinguishable from VS Code's own terminal (both VS Code extensions, same env signals) — added detectVscodeExtensionAmbiguity(… |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,27 +47,21 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**54 open tasks.** The ones that gate everything else:
+**48 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
 | **42** | FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text | **in progress** |
 | **38** | FR-D2 T1 — server-resolved provenance on every memory row (author, route, trust tier) | critical · backlog |
 | **40** | FR-D2 T2 — trust tier gates the session-start replay (blocked on T1) | critical · backlog |
-| **58** | FR-D4 T1 — attribution must come from the caller: an orchestrator can never win credit against its own sub-agents | critical · backlog |
-| **68** | FR-D7 T4 — session start costs 59,705 tokens at verbosity full against a documented ~730, and it is growing | critical · backlog |
 | **69** | FR-D7 T2 — every CRITICAL agent rule gets a mechanism or is deleted; AR-01 measures 21.1 percent | critical · backlog |
+| **71** | FR-D7 T1 — one flattened schema advertises 79 optional parameters for actions that accept one | critical · backlog |
+| **98** | MASTER PLAN item 3 — the 2026-09-16 advisory decision: publish, or record the extension as a decision | critical · backlog |
 
 ### Handoff
 
-**Read #23** — from `claude-opus-5-session-49`, 2026-08-12 — **not yet acknowledged**.
+**Read #23** — from `claude-opus-5-session-49`, 2026-08-12 (already acknowledged).
 Session 49: board 70 to 54 open, 16 rows closed, four durability/retrieval defects fixed.
-
-⚠️ **1 older handoff still shows as pending and should be ignored:** #22 (`claude-opus-5-session-48`, 2026-08-12).
-
-They were never acknowledged, so they surface at every session start alongside the live
-one, as though equally current. Handoffs do not supersede each other — Engram schema
-gap 3, observation #54.
 
 ---
 

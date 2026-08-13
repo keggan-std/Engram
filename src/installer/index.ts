@@ -563,10 +563,27 @@ Examples:
         };
 
         const printManualCommands = (targets: DiscoveredInstall[]) => {
+            const grouped = new Map<string, DiscoveredInstall[]>();
             for (const e of targets) {
                 const scopeFlag = e.scope === "local" ? "--local" : "--global";
                 const modeFlag = e.mode === "universal" ? " --universal" : "";
-                console.log(`  npx -y engram-mcp-server@latest install --ide ${e.ideKey} ${scopeFlag}${modeFlag}`);
+                const cmd = `npx -y engram-mcp-server@latest install --ide ${e.ideKey} ${scopeFlag}${modeFlag}`;
+                grouped.set(cmd, [...(grouped.get(cmd) ?? []), e]);
+            }
+            // Deduplicated. Four Android Studio channels produce four IDENTICAL
+            // commands, and printing them four times says "run this four times"
+            // — which is both wrong and impossible to act on, since nothing in
+            // the repeated line distinguishes which config it would reach.
+            // One line per distinct command, with the count and the paths it
+            // covers, is the same information without the false implication.
+            for (const [cmd, entries] of grouped) {
+                console.log(`  ${cmd}`);
+                if (entries.length > 1) {
+                    console.log(`  ${dim(`  ↳ covers all ${entries.length}:`)}`);
+                    for (const e of entries) {
+                        console.log(`  ${gray(`      ${abbreviatePath(e.configPath, e.scope === "local" ? cwd : undefined)}`)}`);
+                    }
+                }
             }
             console.log();
         };
