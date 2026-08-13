@@ -80,6 +80,39 @@ survived every removal, while the call reported success. The CLI and MCP paths
 also used **different markers** and each refused to recognise the other's hook.
 Both now share one marker and one recogniser.
 
+## `engines` said Node 18, and Node 18 cannot run Engram
+
+v1.13.0 and earlier published `"node": ">=18.0.0"`. **PROVEN** by reading the
+installed dependency trees: `better-sqlite3@12.11.1` declares
+`20.x || 22.x || 23.x || 24.x || 25.x || 26.x` and `open@11` declares `>=20`. A
+user on Node 18 got an `EBADENGINE` warning and then a **native build failure on
+the dependency that *is* the database** — an install that cannot possibly work,
+advertised as supported. CI could not catch it: the matrix is 20.x and 22.x.
+
+Now `>=20.0.0`. Note that `better-sqlite3` enumerates majors rather than using a
+floor, so 19 and 21 are excluded too.
+
+## `better-sqlite3` floor raised to `^12.11.1` — WAL corruption
+
+Not a routine bump. `12.6.2` bundled **SQLite 3.51.2**, which carries a
+WAL-reset database-corruption bug fixed in **3.51.3**
+([sqlite.org/changes.html](https://sqlite.org/changes.html), 2026-03-13).
+
+Engram runs in WAL mode and is explicitly a multi-agent, multi-IDE tool, so the
+trigger — two or more connections writing or checkpointing the same file at the
+same instant — **is its normal operating mode**, not a corner case. `12.11.1`
+bundles 3.53.2, verified by querying `sqlite_version()`.
+
+## The published `package.json` carried the wrong release notes
+
+`prepack` injects the changelog into `package.json` at publish time, and nothing
+put it back — there was no `postpack`. The consequence was that a **stale value
+sat committed in the file**: the v1.14.0 tree carried v1.13.0's notes, 6,320
+characters of them, and nothing reported it because `prepack` silently
+overwrites the field anyway. The injector now writes a backup, `postpack`
+restores it, and the committed value is removed with a note saying never to
+commit one.
+
 ## Also
 
 - The two generated-surface gates are wired as npm scripts (`surface:check`,
