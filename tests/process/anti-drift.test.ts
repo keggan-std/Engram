@@ -279,38 +279,59 @@ describe("FR-D9 §5 — conventions shipped as `enforced` are classified", () =>
 
 // ─── 4. The capability surface's blind spot ─────────────────────────────────
 
-describe("FR-D9 §5 — the surface gate's blind spot is pinned", () => {
-  it("DEFECT: the generator never reads Zod per-parameter descriptions — task #75", () => {
-    // PROVEN by experiment this session: a deliberately false `.describe()`
-    // string compiled into the shipped schema passes `--check` at exit 0, while
-    // adding one optional parameter fails it at exit 1.
-    //
-    // This assertion pins the CAUSE rather than the symptom, because the
-    // symptom needs a build and a subprocess and this must stay a unit test.
-    const gen = read("scripts/generate-capability-surface.mjs");
+describe("FR-D9 §5 — the surface gate can read the part of the contract that lies", () => {
+  // FIXED, task #75. Both assertions below were pinned to the DEFECT and are
+  // inverted here, in the commit that shipped the fix.
+  //
+  // The gate caught structural drift exactly as designed — adding one optional
+  // parameter failed it at exit 1 — and was COMPLETELY BLIND to semantic
+  // drift: a deliberately false `.describe()` string, compiled into the
+  // shipped schema, passed `--check` at exit 0.
+  //
+  // That mattered because FR-D7 traced AR-01's 21.1% compliance to
+  // record_change advertising file_path, change_type and description while
+  // ignoring all three — a defect that IS a description telling an agent
+  // something false. The gate built to keep the agent-facing contract honest
+  // could not read the half that lied, and would not have caught its return.
+  //
+  // Ceiling, stated: this makes a changed description a DIFF IN REVIEW. It
+  // cannot make a description TRUE from inside the same source. Rejected — a
+  // lint rule requiring every parameter to have one, which enforces presence
+  // and not truth, and FR-D7's defect was a description that was present and
+  // wrong. Task #77 is the other half.
 
-    // The capturer records the TOOL-level description — one reference, at the
-    // SchemaCapturer. Zod exposes text set via `.describe()` on each field, and
-    // reading it would require a second reference somewhere in the parameter
-    // renderer. Counting is the honest form here: asserting "no `.description`
-    // anywhere" would contradict the one legitimate use.
-    const refs = [...gen.matchAll(/\.description\b/g)].length;
-    expect(gen).toContain("description: config?.description");
-    expect(
-      refs,
-      "a second `.description` reference appeared — if the parameter renderer now " +
-        "reads Zod descriptions, task #75 has shipped and this DEFECT pin must be edited",
-    ).toBe(1);
-  });
-
-  it("descriptions that exist in source are absent from the generated surface", () => {
-    // Derived, not restated: take a description string that demonstrably exists
-    // in the schema and assert the generated doc does not carry it.
-    const src = read("src/tools/dispatcher-memory.ts");
-    const sample = /\.describe\("([^"]{25,})"\)/.exec(src);
+  it("the generated surface carries per-parameter descriptions", () => {
+    // Derived, not restated: take a description that demonstrably exists in
+    // the schema source and assert the generated doc now carries it. Asserting
+    // a hand-copied string would be a register kept by discipline — the thing
+    // charter §2 rejects, and the thing this whole suite exists to replace.
+    const src = read("src/tools/sessions.ts");
+    const sample = /\.describe\("([^"]{25,80})"\)/.exec(src);
     expect(sample, "no sample .describe() found — schema shape changed").not.toBeNull();
 
     const surface = read("docs/CAPABILITY-SURFACE.md");
-    expect(surface).not.toContain(sample![1]);
+    expect(
+      surface,
+      `The surface no longer renders parameter descriptions. Task #75 shipped that ` +
+      `column precisely so a changed description becomes a red line in review; ` +
+      `dropping it restores the blind spot without restoring the pin that named it.`,
+    ).toContain(sample![1]);
+  });
+
+  it("the surface has a Description column at all", () => {
+    // The cheap structural half. A generator that emitted the column header
+    // and then an em-dash for every row would satisfy the test above only by
+    // accident of one description surviving; this fails loudly instead.
+    const surface = read("docs/CAPABILITY-SURFACE.md");
+    expect(surface).toContain("| Parameter | Type | Required | Constraints | Description |");
+  });
+
+  it("parameters WITHOUT a description are named, not silently blank", () => {
+    // 73 of engram_memory's 78 parameters have no description. Rendering that
+    // as 73 em-dashes hides it; naming the count puts it in front of a
+    // reviewer. This is the finding the fix exposed, and it is why the
+    // generator reports it rather than leaving the column half-empty.
+    const surface = read("docs/CAPABILITY-SURFACE.md");
+    expect(surface).toMatch(/> \*\*No description\*\* \(\d+ of \d+\):/);
   });
 });
