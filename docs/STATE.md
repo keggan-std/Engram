@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `8a623e6`
+**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `a355c1d`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `8a623e6` — fix(FR-D9 #75): the surface gate could not read the half of the contract that lies |
+| **Working branch** | `v2-foundations` @ `a355c1d` — fix(installer): four identical update commands said "run this four times" |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | clean |
+| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-13-session-50-handoff.md` |
 | **Store** | schema V26 · 50 sessions · 51 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #51:** Task #58 fixed by adding a fourth resolution rung: the session THIS SERVER PROCESS started.
@@ -60,8 +60,8 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #23** — from `claude-opus-5-session-49`, 2026-08-12 (already acknowledged).
-Session 49: board 70 to 54 open, 16 rows closed, four durability/retrieval defects fixed.
+**Read #24** — from `claude-opus-5-session-50`, 2026-08-13 — **not yet acknowledged**.
+Session 50: cleared the whole named batch (#58/#12, #61, #65, #67, #103, #75) plus #68 and the installer CLI issues.
 
 ---
 
