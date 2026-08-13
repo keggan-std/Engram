@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `420224b`
+**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `75c595b`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,11 +20,11 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `420224b` — docs: correct three master-plan claims that outlived their subject, and draft the advisory |
+| **Working branch** | `v2-foundations` @ `75c595b` — docs: a pre-release staleness sweep, and two documents that were lying about security |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **10 file(s)** — `docs/DEFERRED-CHANGES.md`, `docs/ENGRAM_CONSTITUTION.md`, `docs/README.md`, `docs/STATE.md` … |
-| **Store** | schema V26 · 51 sessions · 52 decisions · 146 observations · 96 file notes |
+| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-14-session-51-52-handoff.md` |
+| **Store** | schema V26 · 53 sessions · 52 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #52:** v1.14.0 is cut from main as a narrow non-breaking release carrying only the installer fixes, rather than merging v2-foundations to main as 2.0.0.
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
+| **53** | `claude-opus-5-session-53` | _(in progress)_ |
+| **52** | `claude-opus-5-session-52` | v1.14.0 published and verified against the registry rather than the tree that built it. |
 | **51** | `claude-opus-5-session-51` | Prepared v1.14.0 on release/1.14.0, cut from main rather than merging v2-foundations, because merging is breaking (agent_name required on start, absent from main) and Release B's own targets have not… |
-| **50** | `claude-opus-5-session-50` | Cleared handoff #23's entire named batch plus #68 and the reported installer CLI defects. |
-| **49** | `claude-opus-5-session-49` | Board 70 to 54 open: 16 rows closed, 10 already-shipped. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -60,8 +60,14 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ### Handoff
 
-**Read #24** — from `claude-opus-5-session-50`, 2026-08-13 — **not yet acknowledged**.
-Session 50: cleared the whole named batch (#58/#12, #61, #65, #67, #103, #75) plus #68 and the installer CLI issues.
+**Read #25** — from `claude-opus-5-session-53`, 2026-08-13 — **not yet acknowledged**.
+v1.14.0 published and verified from the registry; 15/15 installs now current.
+
+⚠️ **1 older handoff still shows as pending and should be ignored:** #24 (`claude-opus-5-session-50`, 2026-08-13).
+
+They were never acknowledged, so they surface at every session start alongside the live
+one, as though equally current. Handoffs do not supersede each other — Engram schema
+gap 3, observation #54.
 
 ---
 
