@@ -487,9 +487,9 @@ of done is the binding, not the edit.
 | # | Item | Done when | Tasks |
 |---|---|---|---|
 | **0a** | ✅ **The gates run wherever `npm test` runs** — *done 2026-08-05* | `capability-surface --check` and `http-surface --check` fail `npm test` on any branch, under either workflow, with no push required. `knip` classified CI-only against a task | #93, #95 |
-| **0b** | ✅ **The published line gets the gates** — *prepared 2026-08-05* | Done on `release/1.13.0`: five gate inputs ported, `surface` job added, `knip` measured **green** on `main`'s source. Ships with Release A | #93 |
+| **0b** | ⚠️ **The published line gets the gates** — **HALF TRUE, corrected 2026-08-13** | The generator *files* shipped with Release A and are on `main`. The **npm scripts that invoke them did not**, so nothing on the published line ever ran them: `npm run surface:check` on `main` exits with npm's usage error, not the gate's. Wired in **`1.14.0`** | #93 |
 | **1** | ~~**H1 — installer config clobber**~~ **— code done; this is now delivery** | Nothing to build. See §7.0a | #46 → #49 |
-| **2** | ✅ **Release A (`1.13.0`)** — *assembled and verified, awaiting publish* | `release/1.13.0` @ `c4fac06`: all four hazards, 617/617, three gates at exit 0, notes state why. **Remaining: `npm publish` + push — the maintainer's** | #49 |
+| **2** | ✅ **Release A (`1.13.0`)** — **SHIPPED.** *Corrected 2026-08-13; this row said "awaiting publish" for eight days after it landed* | PROVEN: `git merge-base --is-ancestor c4fac06 main` exits 0, `release/1.13.0` and `main` are both `f47df04`, and `npm view engram-mcp-server version` returns **1.13.0**. See §7.0c for what shipping it did *not* fix | #49 |
 | **3** | **Advisory decision** — *§9 item 1, the maintainer's alone* | Published, or the extension recorded as a decision, by **2026-09-16**. Scheduled event **#1** fires on the date | **#98** |
 | **4** | **Reject malformed records on write** | The one-regex acceptance test in task #91 rejects the convention-#7 signature; `update_observation` exists | #77, #91 |
 | **5** | **Provenance (D2 T1)** | Every memory row carries server-resolved author/route/trust tier | #38, #58 |
@@ -506,7 +506,7 @@ a reader would reasonably assume items 4 onward are in progress. They are not.
 
 | | |
 |---|---|
-| **Items 0a, 0b, 1, 2** | Landed or assembled. **Item 2 has not moved** — `release/1.13.0` @ `c4fac06` is still unpublished and unpushed, VERIFIED 2026-08-06 by `git log -1` |
+| **Items 0a, 0b, 1, 2** | ~~**Item 2 has not moved** — `release/1.13.0` @ `c4fac06` is still unpublished and unpushed, VERIFIED 2026-08-06~~ **Superseded 2026-08-13: item 2 SHIPPED.** `c4fac06` is an ancestor of `main`, both branches are `f47df04`, and npm serves 1.13.0. Item 0b is only half done — see the corrected row above |
 | **Item 3** | Now has a row (**#98**) and a scheduled event (**#1**). It had neither until 2026-08-06 |
 | **Items 4–10** | **None started.** No target after Release A has been implemented |
 | **Sessions 41–43** | Went to **charter Phase 3**, not to this table: `CLAUDE.md` bound (decision #34), `docs/README.md` bound (decision #35), this sweep. Phase 3's remaining half — the skills under `.claude/skills/` — is **unstarted**, and `.claude/skills/` does not exist |
@@ -518,6 +518,32 @@ still only exist on an unpushed branch, so *"one of them has been observed
 failing"* remains unproven. Phase 3 work is the entry-point half of the same
 problem. **The honest statement is that the programme is gated on §9 decision 2 —
 whether to push — which is the maintainer's and is unchanged.**
+
+### 7.0c Release A shipped, and went stale the same day *(added 2026-08-13)*
+
+**This section exists because §7 item 2 asserted "awaiting publish" for eight days
+after it landed** — finding F5, in the plan that names F5. The correction is above;
+this is the consequence.
+
+Release A shipped the four hazards. It did **not** ship the thing a user needs in
+order to find out whether it arrived:
+
+| | |
+|---|---|
+| **`install --check` crashed on Windows** | Printed its full report, then died with **exit code 127**. `process.exit()` after the registry `fetch()` — [nodejs/node#58091](https://github.com/nodejs/node/issues/58091), stalled upstream since Jan 2025. The fix was written on `v2-foundations` *after* Release A was cut, so it was never in it |
+| **The README told users to run the cached copy** | **Nine** untagged `npx -y engram-mcp-server` invocations. npx caches by package name, so a reader following the README re-runs whatever version they first downloaded and is told it is current |
+| **The gates were files, not scripts** | See item 0b above |
+
+**The generalisation, and it is the one worth keeping.** Release A was verified
+against *its own tree* and shipped correctly. Nothing verified the **path by which
+a user receives it**, and that path was broken in three independent places at once.
+A release is not delivered when it is published; it is delivered when the command
+a user runs returns the new version. Task **#107** is that gap and it now has a
+worked example.
+
+**`1.14.0` is the answer**, cut from `main` rather than from the review line
+precisely so it carries no breaking change and can ship immediately. It is
+deliberately narrow: *the fixes a user needs in order to receive the next one.*
 
 ### 7.0a H1 was already fixed, and this table described the wrong fix *(added 2026-08-05)*
 

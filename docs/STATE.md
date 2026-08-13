@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `a355c1d`
+**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `cf56d4e`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `a355c1d` — fix(installer): four identical update commands said "run this four times" |
+| **Working branch** | `v2-foundations` @ `cf56d4e` — docs(reports): session 50 handoff, and regenerate STATE |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-13-session-50-handoff.md` |
-| **Store** | schema V26 · 50 sessions · 51 decisions · 146 observations · 96 file notes |
+| **Uncommitted** | **2 file(s)** — `docs/ENGRAM-MASTER-PLAN.md`, `docs/reports/2026-08-13-security-advisory-DRAFT.md` |
+| **Store** | schema V26 · 51 sessions · 52 decisions · 146 observations · 96 file notes |
 
-**Latest active decision — #51:** Task #58 fixed by adding a fourth resolution rung: the session THIS SERVER PROCESS started.
+**Latest active decision — #52:** v1.14.0 is cut from main as a narrow non-breaking release carrying only the installer fixes, rather than merging v2-foundations to main as 2.0.0.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **50** | `claude-opus-5-session-50` | _(in progress)_ |
+| **51** | `claude-opus-5-session-51` | _(in progress)_ |
+| **50** | `claude-opus-5-session-50` | Cleared handoff #23's entire named batch plus #68 and the reported installer CLI defects. |
 | **49** | `claude-opus-5-session-49` | Board 70 to 54 open: 16 rows closed, 10 already-shipped. |
-| **48** | `claude-opus-5-session-48` | Closed #59 and #99, fixed two cold-start races, an IDE misdetection reported live, and a write-integrity blind spot. |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**48 open tasks.** The ones that gate everything else:
+**49 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|
