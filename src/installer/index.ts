@@ -12,10 +12,12 @@ import { detectCurrentIde, detectInstalledIdes, detectVscodeExtensionAmbiguity, 
 import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import {
     DEFAULT_WALK_UP, detectProjectRoot, resolveDbPath, globalFallbackDbPath,
-    discoverLocal, discoverGlobal, recordInstall, forgetInstall, ledgerPath, pruneLedger,
+    discoverLocal, discoverGlobal, discoverEverywhere, groupByIde,
+    formatVersion, abbreviatePath,
+    recordInstall, forgetInstall, ledgerPath, pruneLedger,
     type DiscoveredInstall,
 } from "./discovery.js";
-import { select, ask, confirm } from "./prompt.js";
+import { select, multiselect, ask, confirm } from "./prompt.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -253,7 +255,12 @@ Engram MCP Installer v${getInstallerVersion()}
 
 Usage:
   engram install [options]
-  npx -y engram-mcp-server install [options]
+  npx -y engram-mcp-server@latest install [options]
+
+  The @latest is not decoration. npx caches by package name, so a bare
+  "npx -y engram-mcp-server" re-runs whatever version it downloaded the
+  first time — README.md documents this trap and every command there
+  carries the tag. Printing one without it here taught the opposite.
 
 Options:
   --ide <name>      Install for a specific IDE
@@ -428,7 +435,7 @@ Examples:
         const renderInstall = (e: DiscoveredInstall) => {
             const behind = isBehind(e.version);
             const icon = behind ? yellow("⬆ ") : green("✅");
-            const ver = e.version === "?" ? gray("v? (pre-tracking)") : cyan(`v${e.version}`);
+            const ver = e.version === "?" ? gray(formatVersion(e.version)) : cyan(formatVersion(e.version));
             const state = behind ? (npmLatest ? yellow("update available") : yellow(`behind v${currentVersion}`)) : green("up to date");
             const mode = e.mode === "universal" ? dim("universal") : e.mode === "classic" ? dim("4-tool") : dim("mode unknown");
             console.log(`    ${icon} ${bold(e.ideName.padEnd(20))} ${ver}  ${mode}  ${state}`);
@@ -595,19 +602,30 @@ Examples:
         } else if (stale.length && !nonInteractive) {
             const choice = await select(`${stale.length} install(s) are behind v${reference}. What now?`, [
                 { label: `Update all ${stale.length}`, value: "all" as const, recommended: true },
-                { label: "Choose which one to update", value: "pick" as const },
+                { label: "Choose which ones to update", value: "pick" as const, hint: "multi-select" },
                 { label: "Do nothing", value: "none" as const, hint: "print the commands instead" },
             ]);
 
             if (choice.value === "all" && !choice.cancelled) {
                 for (const e of stale) if (!await updateOne(e)) failed++;
             } else if (choice.value === "pick" && !choice.cancelled) {
-                const picked = await select("Which install?", stale.map(e => ({
-                    label: `${e.ideName}  v${e.version} → v${reference}`,
-                    hint: e.scope === "local" ? path.relative(cwd, e.configPath) || e.configPath : e.configPath,
+                // multiselect, not select. The report above may list ten rows;
+                // single-pick meant ten runs of the command to act on the report
+                // it had just printed once.
+                const picked = await multiselect("Space to toggle, Enter to update the selected", stale.map(e => ({
+                    label: `${e.ideName}  ${formatVersion(e.version)} → v${reference}`,
+                    hint: `${e.scope}  ${abbreviatePath(e.configPath, e.scope === "local" ? cwd : undefined)}`,
                     value: e,
                 })));
-                if (!picked.cancelled && !await updateOne(picked.value)) failed++;
+                if (picked.cancelled) {
+                    console.log(`  ${dim("Cancelled — nothing was written.")}\n`);
+                } else if (!picked.values.length) {
+                    console.log(`  ${dim("Nothing selected — nothing was written.")}\n`);
+                    printManualCommands(stale);
+                } else {
+                    console.log(`\n  ${bold(`Updating ${picked.values.length} install(s) to v${currentVersion}...`)}\n`);
+                    for (const e of picked.values) if (!await updateOne(e)) failed++;
+                }
             } else {
                 printManualCommands(stale);
             }
@@ -859,7 +877,9 @@ Examples:
 
         // Version status
         if (status.state === "installed" && status.installedVersion) {
-            const ver = status.installedVersion === "?" ? gray("v? (pre-tracking)") : cyan("v" + status.installedVersion);
+            const ver = status.installedVersion === "?"
+                ? gray(formatVersion(status.installedVersion))
+                : cyan(formatVersion(status.installedVersion));
             const ref = npmLatest ?? currentVersion;
             const isOld = status.installedVersion === "?" || semverCmp(status.installedVersion, ref) < 0;
             const versionStatus = isOld
@@ -954,32 +974,96 @@ Examples:
             },
         });
 
-        if (otherDetected.length > 0) {
+        // ── What else is on this machine ─────────────────────────────────
+        //
+        // From discovery.ts, not resolveIdeInstallStatus. The old menu asked for
+        // ONE status per IDE and got the first path that matched, so a machine
+        // with four Android Studio channels was told about one of them and the
+        // other three were invisible from the installer that had written them.
+        //
+        // The candidate list is the UNION of "IDE detected on this machine" and
+        // "IDE that has an Engram entry somewhere", because those differ in both
+        // directions: a detected IDE may have no install, and an install may sit
+        // in a config whose IDE no longer reports itself as present.
+        const machine = discoverEverywhere(cwd, walkUp);
+        const byIde = groupByIde(machine.installs);
+        const reference = npmLatest ?? currentVersion;
+        const outdated = (e: DiscoveredInstall) => e.version === "?" || semverCmp(e.version, reference) < 0;
+
+        const otherKeys = [...new Set([...otherDetected, ...byIde.keys()])]
+            .filter(id => id !== currentIde && IDE_CONFIGS[id])
+            .sort((a, b) => IDE_CONFIGS[a].name.localeCompare(IDE_CONFIGS[b].name));
+
+        /** One line per IDE: how many installs, how many stale, and where. */
+        const summarise = (id: string): string => {
+            const list = byIde.get(id) ?? [];
+            if (!list.length) return "not installed";
+            const stale = list.filter(outdated).length;
+            const state = stale === 0 ? "up to date"
+                : stale === list.length ? "update available"
+                : `${stale} of ${list.length} outdated`;
+            if (list.length === 1) {
+                const e = list[0];
+                return `${e.scope} · ${formatVersion(e.version)} · ${state} · ${abbreviatePath(e.configPath, e.scope === "local" ? cwd : undefined)}`;
+            }
+            const scopes = [...new Set(list.map(e => e.scope))].join("+");
+            return `${list.length} installs (${scopes}) · ${state}`;
+        };
+
+        if (otherKeys.length > 0) {
             menuOptions.push({
-                label: `Install to other IDEs on this system (${otherDetected.length} found)...`,
+                label: `Install or update other IDEs on this system (${otherKeys.length} found)...`,
                 action: async () => {
+                    const picked = await multiselect("Space to toggle, a for all, Enter to confirm", otherKeys.map(id => ({
+                        label: IDE_CONFIGS[id].name,
+                        hint: summarise(id),
+                        value: id,
+                    })));
+                    if (picked.cancelled) { console.log("  Cancelled."); return; }
+                    if (!picked.values.length) { console.log("  Nothing selected."); return; }
                     let allOk = true;
-                    const picked = await select("Which other IDE?", [
-                        ...otherDetected.map(id => {
-                            const oStatus = resolveIdeInstallStatus(IDE_CONFIGS[id], walkUp);
-                            return {
-                                label: IDE_CONFIGS[id].name,
-                                hint: oStatus.state === "installed"
-                                    ? `already installed, v${oStatus.installedVersion}`
-                                    : "not installed",
-                                value: id as string | "__all__",
-                            };
-                        }),
-                        { label: `Install to ALL ${otherDetected.length}`, value: "__all__" as string | "__all__" },
-                    ]);
-                    if (picked.cancelled) return;
-                    if (picked.value === "__all__") {
-                        for (const id of otherDetected) {
-                            if (!await performInstallationForIde(id, IDE_CONFIGS[id], { ...opts, nonInteractive: false })) allOk = false;
-                        }
-                        return allOk;
+                    for (const id of picked.values) {
+                        if (!await performInstallationForIde(id, IDE_CONFIGS[id], { ...opts, nonInteractive: false })) allOk = false;
                     }
-                    return await performInstallationForIde(picked.value, IDE_CONFIGS[picked.value], { ...opts, nonInteractive: false });
+                    return allOk;
+                },
+            });
+        }
+
+        // ── Details ──────────────────────────────────────────────────────
+        //
+        // The status panel above answers "what about the IDE I am sitting in".
+        // Everything else the installer knows — every instance, its scope, its
+        // version, its mode, its config file and the database it will open — was
+        // discovered and then thrown away. Printing it costs one menu entry and
+        // is the difference between a user who can reason about four Android
+        // Studio channels and one who cannot tell them apart.
+        if (machine.installs.length || machine.problems.length) {
+            menuOptions.push({
+                label: `Show full details of all ${machine.installs.length} install(s) on this machine`,
+                action: async () => {
+                    console.log(`\n  ${gray(hr)}`);
+                    console.log(`  ${bold("ALL ENGRAM INSTALLS")}  ${dim(`reference v${reference}`)}`);
+                    console.log(`  ${gray(hr)}`);
+                    for (const [id, list] of [...byIde.entries()].sort((a, b) =>
+                        IDE_CONFIGS[a[0]].name.localeCompare(IDE_CONFIGS[b[0]].name))) {
+                        console.log(`\n  ${bold(IDE_CONFIGS[id].name)}  ${dim(`— ${list.length} install(s), --ide ${id}`)}`);
+                        for (const e of list) {
+                            const stale = outdated(e);
+                            const icon = stale ? yellow("⬆ ") : green("✅");
+                            const mode = e.mode === "universal" ? "universal" : e.mode === "classic" ? "4-tool" : "mode unknown";
+                            console.log(`    ${icon} ${bold(e.scope.padEnd(6))} ${cyan(formatVersion(e.version).padEnd(22))} ${dim(mode)}`);
+                            console.log(`         ${gray("config  " + e.configPath)}`);
+                            if (e.projectRoot) console.log(`         ${gray("project " + e.projectRoot)}`);
+                            console.log(`         ${gray("memory  " + (e.dbPath ?? "resolved at runtime from the IDE's working directory"))}`);
+                        }
+                    }
+                    for (const p of machine.problems) {
+                        console.log(`\n  ${yellow("⚠")}  ${bold(p.ideName)} — ${p.reason}`);
+                        console.log(`         ${gray(p.configPath)}`);
+                    }
+                    console.log(`\n  ${dim("Update every outdated install without a prompt:")}`);
+                    console.log(`  ${gray("npx -y engram-mcp-server@latest install --check --update")}\n`);
                 },
             });
         }
@@ -1039,6 +1123,11 @@ Examples:
     // available, and burying it under alphabetical order wastes it.
     const ideKeys = Object.keys(IDE_CONFIGS);
     const statuses = new Map(ideKeys.map(k => [k, resolveIdeInstallStatus(IDE_CONFIGS[k], walkUp)]));
+    // Instance counts come from discovery, which finds ALL of them; the
+    // per-IDE state still comes from resolveIdeInstallStatus because this list
+    // must also describe IDEs that have no install at all, which discovery by
+    // definition does not return.
+    const fallThroughByIde = groupByIde(discoverEverywhere(process.cwd(), walkUp).installs);
     const rank = (k: string) => {
         const s = statuses.get(k)!.state;
         return s === "installed" ? 0 : s === "not-installed" ? 1 : 2;
@@ -1048,11 +1137,17 @@ Examples:
     const picked = await select("Select an IDE to install Engram for", [
         ...ideKeys.map(key => {
             const st = statuses.get(key)!;
+            const found = fallThroughByIde.get(key) ?? [];
+            const where = found.length > 1
+                ? `${found.length} installs (${[...new Set(found.map(e => e.scope))].join("+")})`
+                : found.length === 1
+                    ? `${found[0].scope} · ${abbreviatePath(found[0].configPath, process.cwd())}`
+                    : abbreviatePath(st.configPath, process.cwd());
             return {
                 label: IDE_CONFIGS[key].name,
-                hint: st.state === "installed" ? `installed, v${st.installedVersion}`
-                    : st.state === "not-installed" ? "config found, Engram not in it"
-                    : st.state === "invalid-json" ? "config is not valid JSON"
+                hint: st.state === "installed" ? `installed ${formatVersion(st.installedVersion)} · ${where}`
+                    : st.state === "not-installed" ? `config found, Engram not in it · ${where}`
+                    : st.state === "invalid-json" ? `config is not valid JSON · ${where}`
                     : undefined,
                 value: key as string,
             };

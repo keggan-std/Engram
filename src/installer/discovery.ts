@@ -227,6 +227,96 @@ export function discoverGlobal(): DiscoveryResult {
     return { installs, problems, searched };
 }
 
+// ─── Display helpers ─────────────────────────────────────────────────
+//
+// These live next to DiscoveredInstall rather than in index.ts because both
+// `--check` and the interactive installer render the same three facts — the
+// version, where the config is, and which scope it belongs to — and they had
+// drifted into rendering them differently. `--check` printed
+// "v? (pre-tracking)"; the install menu printed a bare "v?" for the identical
+// state. One reader, two answers, from one database.
+
+/**
+ * A version string a person can act on.
+ *
+ * "?" is what readEntry() stores when the entry predates version stamping. It
+ * is an honest value and a terrible label: a user reading "v?" concludes the
+ * installer is broken, when the fact is "installed before Engram recorded
+ * versions, therefore older than every stamped release".
+ */
+export function formatVersion(version: string | undefined): string {
+    if (!version || version === "?") return "unversioned (pre-1.9)";
+    return `v${version}`;
+}
+
+/**
+ * A path short enough to read, long enough to identify.
+ *
+ * The four Android Studio configs on a real machine differ only in their
+ * second-to-last segment, so a formatter that truncates the TAIL makes them
+ * indistinguishable — which is the opposite of the point. Home is collapsed to
+ * `~`, and any middle is elided, but the last two segments always survive.
+ */
+export function abbreviatePath(configPath: string, cwd?: string): string {
+    const home = os.homedir();
+    const abs = path.resolve(configPath);
+
+    if (cwd) {
+        const rel = path.relative(cwd, abs);
+        // Only when it is genuinely inside cwd — "..\..\..\x" is not shorter
+        // in any sense that helps.
+        if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return `.${path.sep}${rel}`;
+    }
+
+    let display = abs;
+    if (abs.toLowerCase().startsWith(home.toLowerCase())) {
+        display = `~${abs.slice(home.length)}`;
+    }
+    if (display.length <= 44) return display;
+
+    const parts = display.split(/[\\/]/);
+    if (parts.length <= 3) return display;
+    return [parts[0], "…", parts[parts.length - 2], parts[parts.length - 1]].join(path.sep);
+}
+
+/** Every install on this machine that is visible from `cwd`, local and global. */
+export function discoverEverywhere(cwd: string, walkUp = DEFAULT_WALK_UP): DiscoveryResult {
+    const local = discoverLocal(cwd, walkUp);
+    const global = discoverGlobal();
+    return {
+        installs: [...local.installs, ...global.installs],
+        problems: [...local.problems, ...global.problems],
+        searched: [...local.searched, ...global.searched],
+    };
+}
+
+/**
+ * Installs grouped by IDE key.
+ *
+ * The interactive installer assumed one IDE = one install and asked
+ * resolveIdeInstallStatus for a single answer. On a machine with four Android
+ * Studio channels that is not a summary, it is a coin toss — three real
+ * installs go unmentioned and the one named is whichever the path list happened
+ * to reach first.
+ */
+export function groupByIde(installs: DiscoveredInstall[]): Map<string, DiscoveredInstall[]> {
+    const byIde = new Map<string, DiscoveredInstall[]>();
+    for (const e of installs) {
+        const list = byIde.get(e.ideKey);
+        if (list) list.push(e);
+        else byIde.set(e.ideKey, [e]);
+    }
+    // Local before global, then by path, so the ordering is stable across runs
+    // and a user comparing two runs is comparing the same list.
+    for (const list of byIde.values()) {
+        list.sort((a, b) =>
+            (a.scope === b.scope ? 0 : a.scope === "local" ? -1 : 1)
+            || a.distanceUp - b.distanceUp
+            || a.configPath.localeCompare(b.configPath));
+    }
+    return byIde;
+}
+
 // ─── The install ledger ──────────────────────────────────────────────
 
 export interface LedgerEntry {
