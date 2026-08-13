@@ -157,37 +157,52 @@ Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, 
 Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
 
 ```bash
-npx -y engram-mcp-server --install
+npx -y engram-mcp-server@latest --install
 ```
 
 **Universal mode** (~80 token single-tool schema — recommended for token-conscious setups):
 
 ```bash
-npx -y engram-mcp-server --install --universal
+npx -y engram-mcp-server@latest --install --universal
 ```
 
 **Non-interactive mode (CI/CD / Scripting):**
 
 ```bash
-npx -y engram-mcp-server install --ide vscode --yes
-npx -y engram-mcp-server install --ide vscode --universal --yes
+npx -y engram-mcp-server@latest install --ide vscode --yes
+npx -y engram-mcp-server@latest install --ide vscode --universal --yes
 ```
 
 **Clean removal:**
 
 ```bash
-npx -y engram-mcp-server install --remove --ide claudecode
+npx -y engram-mcp-server@latest install --remove --ide claudecode
 ```
 
 **Check installed version vs npm latest:**
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
 ```
+
+> **Why every command here says `@latest`.** `npx` caches by *package name*, not
+> by version. A bare `npx -y engram-mcp-server` re-runs whatever copy npx
+> downloaded the first time you ran it — which can be months old — and it does so
+> silently, reporting that version as if it were current. On a real machine the
+> day after v1.13.0 was published:
+>
+> ```
+> npx -y engram-mcp-server         --version   ->  v1.12.0   (cached in April)
+> npx -y engram-mcp-server@latest  --version   ->  v1.13.0
+> ```
+>
+> This is the difference between receiving a fix and being told you already have
+> it. Keep the tag. If you have run the untagged form before, `npx clear-npx-cache`
+> or simply using `@latest` from now on resolves it.
 
 ### Option 2: Global Install (Windows Fallback)
 
-If `npx -y engram-mcp-server --install` fails on Windows, install globally first then run the installer:
+If `npx -y engram-mcp-server@latest --install` fails on Windows, install globally first then run the installer:
 
 ```bash
 npm install -g engram-mcp-server
@@ -699,13 +714,13 @@ The installer automatically discovers all installed Android Studio versions and 
 After installing, verify Engram is working by running:
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
 ```
 
 Or use the MCP Inspector for a full interactive test:
 
 ```bash
-npx @modelcontextprotocol/inspector npx -y engram-mcp-server
+npx @modelcontextprotocol/inspector npx -y engram-mcp-server@latest
 ```
 
 In your IDE, open the AI chat and ask the agent to call `engram_session(action:"start")`. If it returns a session ID and tool catalog, Engram is running correctly.

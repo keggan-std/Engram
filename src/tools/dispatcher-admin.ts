@@ -10,6 +10,7 @@ import { success, error } from "../response.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
 import { log } from "../logger.js";
+import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import { pmSafe } from "../services/index.js";
 import { detectCurrentPhase } from "../services/event-trigger.service.js";
 import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
@@ -361,11 +362,14 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           const hooksDir = path.join(gitDir, "hooks");
           fs.mkdirSync(hooksDir, { recursive: true });
           const hookPath = path.join(hooksDir, "post-commit");
-          const hookContent = `#!/bin/bash\n# Engram Post-Commit Hook\nENGRAM_DIR=".engram"\nCHANGE_LOG="$ENGRAM_DIR/git-changes.log"\nmkdir -p "$ENGRAM_DIR"\nHASH=$(git rev-parse --short HEAD)\nMSG=$(git log -1 --pretty=format:"%s")\nDATE=$(git log -1 --pretty=format:"%aI")\nFILES=$(git diff-tree --no-commit-id --name-status -r HEAD)\n{ echo "--- COMMIT $HASH ---"; echo "date: $DATE"; echo "message: $MSG"; echo "files:"; echo "$FILES"; echo "---"; echo ""; } >> "$CHANGE_LOG"\n`;
+          const hookContent = `#!/bin/bash\n# ${ENGRAM_HOOK_MARKER}\nENGRAM_DIR=".engram"\nCHANGE_LOG="$ENGRAM_DIR/git-changes.log"\nmkdir -p "$ENGRAM_DIR"\nHASH=$(git rev-parse --short HEAD)\nMSG=$(git log -1 --pretty=format:"%s")\nDATE=$(git log -1 --pretty=format:"%aI")\nFILES=$(git diff-tree --no-commit-id --name-status -r HEAD)\n{ echo "--- COMMIT $HASH ---"; echo "date: $DATE"; echo "message: $MSG"; echo "files:"; echo "$FILES"; echo "---"; echo ""; } >> "$CHANGE_LOG"\n`;
           if (fs.existsSync(hookPath)) {
             const existing = fs.readFileSync(hookPath, "utf-8");
-            if (existing.includes("Engram Post-Commit Hook")) return success({ message: "Engram post-commit hook already installed.", hook_path: hookPath });
-            fs.appendFileSync(hookPath, "\n\n" + hookContent);
+            // Shared recognition with the CLI installer — see src/git-hook.ts.
+            // These two paths previously used different markers and each refused
+            // to remove the other's hook.
+            if (isEngramHook(existing)) return success({ message: "Engram post-commit hook already installed.", hook_path: hookPath });
+            fs.appendFileSync(hookPath, "\n\n" + hookContent.replace(/^#!\/bin\/bash\n/, ""));
           } else {
             fs.writeFileSync(hookPath, hookContent);
           }
@@ -377,10 +381,12 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           const hookPath2 = path.join(projectRoot, ".git", "hooks", "post-commit");
           if (!fs.existsSync(hookPath2)) return success({ message: "No post-commit hook found." });
           const existing2 = fs.readFileSync(hookPath2, "utf-8");
-          if (!existing2.includes("Engram Post-Commit Hook")) return success({ message: "Engram hook not found in existing post-commit hook." });
-          // Remove only the engram section
-          const cleaned = existing2.replace(/\n?\n?# Engram Post-Commit Hook[\s\S]*?\n---\n\n/g, "").trim();
-          if (cleaned) { fs.writeFileSync(hookPath2, cleaned + "\n"); } else { fs.unlinkSync(hookPath2); }
+          if (!isEngramHook(existing2)) return success({ message: "Engram hook not found in existing post-commit hook." });
+          // Remove only the engram section. The previous regex anchored on a
+          // "\n---\n\n" terminator that this hook's own content never emits, so
+          // it matched nothing and the block survived every removal.
+          const cleaned = stripEngramHookBlock(existing2);
+          if (cleaned.replace(/^#!.*$/m, "").trim()) { fs.writeFileSync(hookPath2, cleaned); } else { fs.unlinkSync(hookPath2); }
           return success({ message: "Engram post-commit hook removed.", hook_path: hookPath2 });
         }
 

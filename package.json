@@ -1,6 +1,6 @@
 {
   "name": "engram-mcp-server",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "Engram — Persistent Memory Cortex for AI coding agents. Gives agents session continuity, change tracking, decision logging, and project intelligence across sessions.",
   "type": "module",
   "main": "dist/index.js",
@@ -30,6 +30,10 @@
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "build:dashboard": "cd packages/engram-dashboard && npm install && npm run build",
     "dev:http": "node dist/index.js --mode=http",
+    "surface": "node scripts/generate-capability-surface.mjs",
+    "surface:check": "node scripts/generate-capability-surface.mjs --check",
+    "http-surface": "node scripts/generate-http-surface.mjs",
+    "http-surface:check": "node scripts/generate-http-surface.mjs --check",
     "dashboard": "npm run build && npm --prefix packages/engram-dashboard install --prefer-offline && concurrently -k --raw -n \"api,ui\" -c \"cyan,green\" \"node dist/index.js --mode=http --open-port=5173\" \"npm --prefix packages/engram-dashboard run dev\""
   },
   "keywords": [

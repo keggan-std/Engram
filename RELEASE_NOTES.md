@@ -1,3 +1,105 @@
+# v1.14.0 — The installer tells the truth about what is on your machine
+
+**Released:** v1.14.0 — August 13, 2026 · **Base:** v1.13.0
+
+## Overview
+
+`v1.13.0` shipped a working product with a broken **`--check`**. On Windows the
+command printed its entire report correctly and then **died with exit code 127**,
+and the report it printed described one install per IDE on machines that have
+several. This release fixes the command you run to find out whether the other
+fixes arrived.
+
+Everything here is installer-side. **No schema change, no MCP tool-contract
+change, no migration.** Upgrading is safe from any 1.x.
+
+---
+
+## `install --check` crashed on Windows after printing its report
+
+```
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+```
+
+**Cause.** `--check` fetches the npm registry to compare versions, then called
+`process.exit()`. Node's built-in `fetch` (undici) keeps the connection alive
+after the body resolves, and `process.exit()` races its teardown — upstream
+[nodejs/node#58091](https://github.com/nodejs/node/issues/58091) and
+[#64322](https://github.com/nodejs/node/issues/64322). It reproduces only on
+Windows, and the upstream fix has been stalled in review since January 2025, so
+there is no Node version to wait for.
+
+**Fix.** `--check` now sets `process.exitCode` and returns, letting Node drain
+its own handles. Rejected the common workaround of sleeping ~100 ms before
+exiting: it trades a crash for a race that is quieter and still wrong.
+
+Exit codes are unchanged and still meaningful: `0` for success, `1` when a config
+exists but cannot be parsed. *"Update available"* stays `0` on purpose — a gate
+that goes red on every release is one a developer switches off inside a week.
+
+## One IDE is not one install
+
+The interactive installer asked for a single status per IDE and took the first
+config path that matched. On a machine with four Android Studio channels that is
+not a summary, it is a coin toss: three real installs went unmentioned and the
+one named was whichever path happened to be reached first.
+
+It now reads the same discovery engine `--check` uses, and gained:
+
+- **Multi-select.** `--check` could offer *"update all"* or *"pick one"*. Faced
+  with ten outdated installs, picking one meant running the command ten times.
+- **A details view** — every instance with its scope, mode, config file, project
+  root and the database it will open.
+- **Shortened paths that stay distinguishable.** `$HOME` collapses to `~` and the
+  middle is elided, **never the tail** — sibling configs differ only in their
+  second-to-last segment, so a tail-truncating shortener would render four
+  channels identical.
+- **Deduplicated commands.** `--check` printed four *identical* update commands.
+  It now prints one and lists the paths it covers.
+
+## "installed" with no version
+
+An entry written before Engram stamped versions displayed as `v?`. That is
+honest and unreadable — it reads as a broken installer rather than as *"older
+than every stamped release"*. It is now **`unversioned (pre-1.9)`** everywhere,
+in `--check` and in the install menus, which previously disagreed about the same
+state.
+
+## `--help` printed a command the README warns against
+
+The usage line said `npx -y engram-mcp-server install`. npx caches by package
+name, so the untagged form re-runs whatever version it downloaded first — the
+trap `README.md` documents and every command in it avoids. The help text now
+carries `@latest`.
+
+## `remove_hooks` never removed anything
+
+`engram_admin(action:"remove_hooks")` matched on a `\n---\n\n` terminator that
+its own hook content never emits, so the regex matched nothing and the block
+survived every removal, while the call reported success. The CLI and MCP paths
+also used **different markers** and each refused to recognise the other's hook.
+Both now share one marker and one recogniser.
+
+## Also
+
+- The two generated-surface gates are wired as npm scripts (`surface:check`,
+  `http-surface:check`). The generators shipped in v1.13.0; the scripts to run
+  them did not, so nothing invoked them on the published line.
+- Five type errors in the test suite are fixed, including one that was a real
+  defect: a task-status assertion used `"in-progress"` on both the write and the
+  read, so it passed by writing and reading the same wrong string and never
+  exercised the actual `in_progress` literal.
+
+## Not in this release
+
+The larger work on the `v2-foundations` branch — memory attribution under
+concurrency, session-start payload bounds, and the schema-honesty gates — is
+**not** here. It contains breaking changes and ships as `2.0.0` when its targets
+land. This release is deliberately narrow: the fixes a user needs in order to
+receive the next one.
+
+---
+
 # v1.13.0 — Security, data-safety, and honest failures
 
 **Released:** v1.13.0 — August 5, 2026

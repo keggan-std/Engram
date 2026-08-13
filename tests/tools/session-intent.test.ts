@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
-import type { BetterSQLite3Database } from "better-sqlite3";
+import type { Database as DatabaseType } from "better-sqlite3";
 
 // ─── Database mock ────────────────────────────────────────────────────────────
 vi.mock("../../src/database.js", async () => {
@@ -77,7 +77,7 @@ class HandlerCapturer {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 let callSession: (action: string, extra?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-let db: InstanceType<typeof import("better-sqlite3").default>;
+let db: DatabaseType;
 let repos: Awaited<ReturnType<typeof import("../../src/repositories/index.js").createRepositories>>;
 
 /** Convenience: reset PM config to default state (lite=true, full=false) */

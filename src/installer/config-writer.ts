@@ -46,7 +46,7 @@ export function getInstallerVersion(): string {
  * @param universal  When true, adds --mode=universal to args.
  * @param ideKey     When provided, adds --ide=<ideKey> to args.
  */
-export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: string): Record<string, any> {
+export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: string, projectRoot?: string): Record<string, any> {
     const entry: Record<string, any> = {};
 
     // Some IDEs require explicit "type": "stdio"
@@ -54,8 +54,44 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
         entry.type = "stdio";
     }
 
-    // Build args
-    const baseArgs = ["-y", "engram-mcp-server"];
+    // Build args.
+    //
+    // THE SPEC IS PINNED, and that is the fix for a defect PROVEN on 2026-08-07.
+    //
+    // This used to be the bare `["-y", "engram-mcp-server"]`. npx caches per
+    // EXACT SPEC STRING, so the bare form resolves to whatever it first cached
+    // for that string and never re-checks the registry. Measured on the author's
+    // own machine the day after v1.13.0 shipped:
+    //
+    //   npx -y engram-mcp-server         --version  ->  v1.12.0   (cached 03/04)
+    //   npx -y engram-mcp-server@latest  --version  ->  v1.13.0
+    //
+    // Both answered with the network disabled, so both are cache reads — the
+    // bare spec is not "stale until it refreshes", it is pinned to an April
+    // snapshot indefinitely.
+    //
+    // The consequence was the worst kind: `_engram_version` was stamped 1.13.0
+    // into the config beside args that launched 1.12.0. The installer reported
+    // "upgraded" truthfully about the config and falsely about the software,
+    // and every status surface Engram has agreed with it. A version stamp that
+    // does not describe the running process is worse than no stamp.
+    //
+    // Pinning makes the stamp true: what was installed is what runs.
+    //
+    // REJECTED — "@latest" in the entry. It loses on three counts. It is still
+    // a cache read (proven above), so it does not actually guarantee freshness;
+    // it lets the running version change with no config change, which destroys
+    // both `_engram_version`'s meaning and any hope of a reproducible bug
+    // report; and it puts a registry round-trip in the spawn path of a server
+    // the IDE starts on every session.
+    //
+    // THE LIMIT, stated plainly: pinning means Engram does NOT self-upgrade.
+    // A user moves to a new version by re-running the installer, which is why
+    // `--check` compares the stamp against the registry and why README's
+    // install commands all say `@latest` — that is what makes the INSTALLER
+    // itself current. It also means a machine that has never fetched the pinned
+    // version needs one online run before the server will start.
+    const baseArgs = ["-y", `engram-mcp-server@${getInstallerVersion()}`];
     if (universal) {
         baseArgs.push("--mode=universal");
     }
@@ -64,6 +100,24 @@ export function makeEngramEntry(ide: IdeDefinition, universal = false, ideKey?: 
     // /path/to/project) so the server always receives the correct project path.
     if (ide.workspaceVar) {
         baseArgs.push(`--project-root=${ide.workspaceVar}`);
+    } else if (projectRoot) {
+        // NO WORKSPACE VARIABLE, so the IDE cannot tell the server where it is.
+        // Seven of the fourteen IDEs are in this position (Windsurf, Antigravity,
+        // Claude Desktop, Cline, Roo Code, Gemini CLI, JetBrains), and until now
+        // the server had to GUESS: findProjectRoot() (src/utils.ts:157) infers
+        // from whatever cwd the IDE happened to spawn it in, and when every
+        // marker fails it lands on ~/.engram/global — one database shared by
+        // every project, which sessions.ts:227 already warns about in those
+        // words. Inference was the whole strategy and the user was never shown
+        // the answer.
+        //
+        // A literal absolute path is only correct because the caller only passes
+        // one for a PROJECT-LOCAL install, whose config file already belongs to
+        // exactly one project. Passing it on a global install would pin every
+        // project to whichever one happened to be open at install time, so
+        // performInstallationForIde passes undefined there and the runtime
+        // inference stays — correctly, because that entry really is shared.
+        baseArgs.push(`--project-root=${projectRoot}`);
     }
 
   // Per-IDE DB shard: global installs on IDEs without workspaceVar inject --ide=<key>
@@ -142,13 +196,99 @@ export function writeJson(filePath: string, data: any): void {
     // Mirrors atomicWriteJson in services/instance-registry.service.ts, which had
     // the right shape all along and was module-private, so the installer could not
     // call it. See docs/foundations/05-distribution.md F2.
+    //
+    // SENIOR REVIEW S11 — atomic-replace SILENTLY WIDENS PERMISSIONS.
+    //
+    // temp-file-plus-rename does not inherit the target's mode: the temp file
+    // is created fresh under the process umask (typically 0644) and then
+    // REPLACES the original inode. A config the user had deliberately chmod'd
+    // to 0600 comes back world-readable, with no error and nothing in the
+    // output to notice.
+    //
+    // That matters because of WHAT these targets are. ~/.claude.json is not
+    // Engram's file — it is another product's entire user state, 53 top-level
+    // keys including oauthAccount, userID and machineID, of which mcpServers is
+    // one. Downgrading it to 0644 on a shared or multi-user machine exposes
+    // another vendor's credentials as a side effect of installing Engram.
+    //
+    // The review could only grade this VERIFIED, not PROVEN, because it was
+    // read on Windows where modes are a no-op — which is exactly the platform
+    // blind spot task #101 raised, and exactly why CI now runs ubuntu and macos.
+    //
+    // Preserve the mode when there is one to preserve. chmod before rename, so
+    // the file is never visible at the wrong mode even briefly.
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    let existingMode: number | undefined;
+    try {
+        existingMode = fs.statSync(filePath).mode & 0o777;
+    } catch {
+        // No existing file — a fresh write, so there is no prior mode to keep
+        // and the umask default is the correct answer.
+    }
+
     const tmpPath = `${filePath}.tmp.${process.pid}`;
     fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2) + "\n", "utf-8");
+    if (existingMode !== undefined) {
+        // No-op on Windows, which is why this cannot be proven there.
+        try { fs.chmodSync(tmpPath, existingMode); } catch { /* best effort — never block the install */ }
+    }
     fs.renameSync(tmpPath, filePath);
 }
 
-export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
+export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded" | "repaired" | "adopted";
+
+/**
+ * Find the key under which an Engram server entry lives in an MCP server map,
+ * whatever it is called.
+ *
+ * OBSERVATION #127. This predicate existed three times, hand-copied, in
+ * index.ts at the status, list and check sites — and `addToConfig` did not use
+ * it at all, testing only `config[key].engram`. The two disagreed, so a config
+ * holding a differently-named entry (`engram-memory`, `memory`, anything the
+ * user typed) reported "installed" from status and then got a SECOND entry from
+ * install. Two entries mean two servers launched against one database, which is
+ * the exact write-lock contention the `--ide=` shard flag exists to prevent, and
+ * `--remove` deleted only the one called `engram` and left the other live.
+ *
+ * Third recurrence of the shape FR-D5 found in the installer's filename rule and
+ * #127 found again here: a rule copied to N sites with nothing that can find
+ * site N+1. One definition, every caller derives from it.
+ */
+export function findEngramEntryKey(
+    serverMap: Record<string, Record<string, unknown>> | undefined | null,
+): string | undefined {
+    if (!serverMap) return undefined;
+    // Exact key wins, so a canonical entry is never passed over for a
+    // coincidental match elsewhere in the map.
+    if (serverMap.engram) return "engram";
+    return Object.keys(serverMap).find(k => {
+        const en = serverMap[k];
+        return String(en?.command ?? "").includes("engram")
+            || (Array.isArray(en?.args) && (en.args as string[]).some(a => String(a).includes("engram")));
+    });
+}
+
+/**
+ * Compare an installed entry against the one this version would write.
+ *
+ * OBSERVATION #127. `addToConfig` decided "already installed" on the
+ * `_engram_version` stamp alone and compared neither command nor args, so an
+ * entry that was corrupt but carried the current version made a reinstall a
+ * no-op that reported success. Running the installer again is the first thing
+ * anyone does when a server will not start; it was the one action guaranteed
+ * not to help.
+ *
+ * Only fields Engram writes are compared. Anything a user added by hand is
+ * ignored here and preserved by the caller.
+ */
+function entryMatches(existing: Record<string, unknown>, expected: Record<string, unknown>): boolean {
+    const fields = new Set([...Object.keys(expected), "command", "args", "env"]);
+    for (const f of fields) {
+        if (JSON.stringify(existing?.[f]) !== JSON.stringify(expected[f])) return false;
+    }
+    return true;
+}
 
 /**
  * Add or update the Engram entry in a config file.
@@ -167,7 +307,7 @@ export type InstallResult = "added" | "upgraded" | "exists" | "legacy-upgraded";
  *   "upgraded"        — updated from an older tracked version to the current one
  *   "legacy-upgraded" — entry existed but had no _engram_version (pre-tracking era)
  */
-export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string): InstallResult {
+export function addToConfig(configPath: string, ide: IdeDefinition, universal = false, ideKey?: string, projectRoot?: string): InstallResult {
     // FR-D5 T2. This used to back up best-effort, set `config = {}`, and carry on —
     // writing a file containing ONLY the Engram entry. Measured blast radius:
     // ~/.claude.json is 40.5 KB with 53 top-level keys (oauthAccount, userID,
@@ -199,20 +339,33 @@ export function addToConfig(configPath: string, ide: IdeDefinition, universal = 
     const key = ide.configKey;
     if (!config[key]) config[key] = {};
 
-    const newEntry = makeEngramEntry(ide, universal, ideKey);
+    const newEntry = makeEngramEntry(ide, universal, ideKey, projectRoot);
     const currentVersion = newEntry._engram_version as string;
 
-    if (config[key].engram) {
-        const existingVersion = config[key].engram._engram_version as string | undefined;
+    // Locate an existing entry under ANY key, not just "engram" — see
+    // findEngramEntryKey. Writing to the key we found it under preserves a name
+    // the user chose; writing to a fixed "engram" would leave theirs behind and
+    // launch two servers on one database.
+    const existingKey = findEngramEntryKey(config[key]);
 
-        // Same version already installed — nothing to do
+    if (existingKey) {
+        const existing = config[key][existingKey] as Record<string, unknown>;
+        const existingVersion = existing._engram_version as string | undefined;
+
         if (existingVersion === currentVersion) {
-            return "exists";
+            // Same version — but is it the same ENTRY? A corrupted command or a
+            // stale --ide shard carries the current stamp perfectly well.
+            if (entryMatches(existing, newEntry)) return "exists";
+            config[key][existingKey] = { ...existing, ...newEntry };
+            writeJson(configPath, config);
+            return "repaired";
         }
 
-        // Upgrade (known older version) or legacy adoption (no _engram_version)
-        config[key].engram = newEntry;
+        // Merge rather than replace so hand-added fields on the entry survive an
+        // upgrade; every field Engram owns is overwritten by newEntry.
+        config[key][existingKey] = { ...existing, ...newEntry };
         writeJson(configPath, config);
+        if (existingKey !== "engram") return "adopted";
         return existingVersion ? "upgraded" : "legacy-upgraded";
     }
 
@@ -231,9 +384,14 @@ export function removeFromConfig(configPath: string, ide: IdeDefinition): boolea
     if (!config) return false;
 
     const key = ide.configKey;
-    if (!config[key]?.engram) return false;
+    // Same finder as install and status. This used to delete only the entry
+    // literally named "engram", so an install that had adopted a differently
+    // named entry could not be uninstalled — `--remove` reported success having
+    // left a live server behind. Observation #127.
+    const existingKey = findEngramEntryKey(config[key]);
+    if (!existingKey) return false;
 
-    delete config[key].engram;
+    delete config[key][existingKey];
 
     // Clean up empty wrapper key
     if (Object.keys(config[key]).length === 0) {
