@@ -9,7 +9,7 @@ import {
   // getCurrentSessionId is deliberately NOT imported. Its unscoped form was
   // called at 16 sites in this file and answered "the newest open session
   // belonging to anyone" — task #58. Identity comes from resolveSession().
-  now, getRepos, getProjectRoot, getDb, getServices
+  now, getRepos, getProjectRoot, getDb, getServices, getToolCallsSince
 } from "../database.js";
 import {
   normalizePath, coerceStringArray, coerceNumberArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
@@ -22,7 +22,7 @@ import { resolveSession, ambiguityNote } from "./session-identity.js";
 import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
-  MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
+  MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES, TASK_COMPACT_DESCRIPTION_CHARS,
   isValidSince, SINCE_RELATIVE, SINCE_ISO, SINCE_REJECTION,
 } from "../constants.js";
 import { pmSafe } from "../services/index.js";
@@ -479,12 +479,35 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               lock_status: lock ? { locked: true, agent_id: lock.agent_id, reason: lock.reason, locked_ago_minutes: Math.round((Date.now() - lock.locked_at) / 60_000), expires_in_minutes: Math.round((lock.expires_at - Date.now()) / 60_000) } : { locked: false },
             });
           }
+          // TASK #103 — file_path_filter is now READ.
+          //
+          // engram_memory declares it on its one flat schema and this handler
+          // ignored it; it was wired to get_decisions alone. So a caller
+          // narrowing the read got all 96 notes at 99,655 characters and
+          // overflowed the tool result — on the call made specifically to keep
+          // the read small. CLAUDE.md tells every agent to filter reads rather
+          // than pull the board whole, and on this path that instruction could
+          // not be complied with and the agent could not tell.
+          const noteTotal = repos.fileNotes.countAll();
           const notesList = repos.fileNotes.getFiltered({
             layer: params.layer as Parameters<typeof repos.fileNotes.getFiltered>[0]["layer"],
             complexity: params.complexity as Parameters<typeof repos.fileNotes.getFiltered>[0]["complexity"],
+            file_path_filter: params.file_path_filter,
+            task_focus: params.task_focus,
+            limit: params.limit,
           });
           const enrichedList = notesList.map(n => withStaleness(n, projectRoot));
-          return success({ count: enrichedList.length, stale_count: enrichedList.filter(n => n.stale).length, files: enrichedList });
+          return success({
+            count: enrichedList.length,
+            total: noteTotal,
+            stale_count: enrichedList.filter(n => n.stale).length,
+            // Say when the answer is a subset. A truncated list that looks
+            // complete is the failure mode this whole task is about.
+            ...(enrichedList.length < noteTotal
+              ? { truncated: true, hint: `Showing ${enrichedList.length} of ${noteTotal}. Narrow with file_path_filter, layer or complexity, or raise limit.` }
+              : {}),
+            files: enrichedList,
+          });
         }
 
         case "set_file_notes": {
@@ -512,7 +535,14 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             content_hash,
             executive_summary: params.executive_summary as string | null | undefined,
           });
-          acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES);
+          // timeout_minutes was advertised and read by nothing (#103) while the
+          // lock it names was always taken for the hardcoded default. Clamped:
+          // a zero or negative lease is a lock that is already expired, and a
+          // caller cannot be allowed to hold one for a week by typo.
+          const lockMinutes = params.timeout_minutes === undefined
+            ? FILE_LOCK_DEFAULT_TIMEOUT_MINUTES
+            : Math.max(1, Math.min(Math.floor(params.timeout_minutes), 24 * 60));
+          acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, lockMinutes);
           const missingExecSummary = !params.executive_summary;
           return success({
             message: `File notes saved for ${fp}.`,
@@ -811,6 +841,21 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         case "get_tasks": {
+          // TASK #103 / #68 — `query` and `compact` are now READ.
+          //
+          // Both were declared on the shared schema and neither was consumed
+          // here. MEASURED on this project's own store, 2026-08-13:
+          // get_tasks({compact:true, limit:60}) returned 120,020 characters and
+          // overflowed the tool result; a user reported 190,018 at higher
+          // limits. `compact` was accepted, ignored, and the full description
+          // of every row shipped anyway — descriptions in this store run to
+          // thousands of characters each, so "compact" was the single most
+          // load-bearing word in the call and it did nothing.
+          //
+          // CLAUDE.md instructs every agent to filter reads rather than pull
+          // the board whole. On this path that instruction could not be
+          // complied with, and the failure was always toward MORE context on
+          // exactly the calls made to save it.
           let taskQuery = "SELECT * FROM tasks WHERE 1=1";
           const taskParams: unknown[] = [];
           const statusAll = params.status === "all";
@@ -818,11 +863,48 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (params.status && !statusAll) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
           if (params.priority) { taskQuery += " AND priority = ?"; taskParams.push(params.priority); }
           if (params.tag) { taskQuery += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; taskParams.push(params.tag); }
+          // Keyword filter through fts_tasks, which is already populated and
+          // indexes title, description and tags. Same ftsEscape the `search`
+          // action uses, so one query syntax covers both.
+          if (params.query) {
+            taskQuery += " AND id IN (SELECT rowid FROM fts_tasks WHERE fts_tasks MATCH ?)";
+            taskParams.push(ftsEscape(params.query));
+          }
+          // Clamped. SQLite reads LIMIT -1 as unlimited, so an unclamped
+          // negative turns the bound into its opposite (task #44's shape).
+          const taskLimit = Math.max(1, Math.min(Math.floor(params.limit ?? 20), MAX_SEARCH_RESULTS));
           taskQuery += ` ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at ASC LIMIT ?`;
-          taskParams.push(params.limit ?? 20);
-          const tasks = db.prepare(taskQuery).all(...taskParams);
+          taskParams.push(taskLimit);
+          const taskRows = db.prepare(taskQuery).all(...taskParams) as Array<Record<string, unknown>>;
           const openCount = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status NOT IN ('done','cancelled')").get() as { c: number }).c;
-          return success({ total_open: openCount, returned: tasks.length, tasks });
+
+          // compact defaults TRUE, matching the schema's own documented
+          // default ("Return compact forms only (default: true)"). The default
+          // was already advertised; only the behaviour was missing. A caller
+          // that genuinely wants full descriptions asks for one task by filter
+          // — or passes compact:false and accepts the size.
+          const isCompactTasks = params.compact !== false;
+          const tasks = isCompactTasks
+            ? taskRows.map(t => ({
+              ...t,
+              description: typeof t.description === "string" && t.description.length > TASK_COMPACT_DESCRIPTION_CHARS
+                ? truncate(t.description, TASK_COMPACT_DESCRIPTION_CHARS)
+                : t.description,
+            }))
+            : taskRows;
+
+          return success({
+            total_open: openCount,
+            returned: tasks.length,
+            ...(isCompactTasks ? {
+              compact: true,
+              hint: `Descriptions over ${TASK_COMPACT_DESCRIPTION_CHARS} chars are truncated. Pass compact:false for full text, ideally with a filter.`,
+            } : {}),
+            ...(openCount > tasks.length && !params.status && !params.priority && !params.tag && !params.query
+              ? { truncated: true, more: openCount - tasks.length }
+              : {}),
+            tasks,
+          });
         }
 
         // ── CHECKPOINT ────────────────────────────────────────────────────────
@@ -986,11 +1068,25 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           }
           const recordedFiles = new Set((agentChanges as Array<Record<string, unknown>>).map(c => c["file_path"]));
           const unrecordedGitChanges = gitFilesChanged.filter(f => !recordedFiles.has(f));
+
+          // include_tool_log was advertised on this schema and read by nothing
+          // (#103). Its only implementation lives on session_timeline in
+          // src/tools/intelligence.ts — a module that is never registered, so
+          // the parameter was inert TWICE over. Wired here with the meaning
+          // intelligence.ts:501 already documents for it, verbatim: "Include
+          // raw tool_call_log entries if available (default: false)". Bounded,
+          // because this table gets one row per tool call and is the largest
+          // in a busy store.
+          const toolLog = params.include_tool_log
+            ? getToolCallsSince(Date.parse(sinceTimestamp), MAX_SEARCH_RESULTS)
+            : undefined;
+
           return success({
             since: sinceTimestamp,
             agent_recorded: { count: agentChanges.length, changes: agentChanges },
             new_decisions: newDecisions,
             git: includeGit ? { log: gitLog, files_changed: gitFilesChanged.length, unrecorded_changes: unrecordedGitChanges } : null,
+            ...(toolLog ? { tool_log: toolLog, tool_log_capped_at: MAX_SEARCH_RESULTS } : {}),
             summary: `${agentChanges.length} recorded changes, ${newDecisions.length} new decisions, ${gitFilesChanged.length} git file changes (${unrecordedGitChanges.length} unrecorded) since ${sinceTimestamp}.`,
           });
         }

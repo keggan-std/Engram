@@ -57,6 +57,17 @@ export const MAX_SEARCH_RESULTS = 50;
 export const DEFAULT_SEARCH_LIMIT = 8; // 8 gives headroom for noise; 50 (max) is available via explicit limit param
 export const MAX_GIT_LOG_ENTRIES = 50;
 export const MAX_RESPONSE_LENGTH = 50000;
+/**
+ * How much of a task description survives `get_tasks(compact:true)`.
+ *
+ * Task #103/#68. `compact` was declared on the schema, documented as defaulting
+ * to true, and never read — so the full description of every row shipped.
+ * MEASURED 2026-08-13: get_tasks({compact:true, limit:60}) returned 120,020
+ * characters and overflowed the tool result. Descriptions in a mature store run
+ * to several thousand characters each; 400 is enough to recognise a row and
+ * decide whether to fetch it in full.
+ */
+export const TASK_COMPACT_DESCRIPTION_CHARS = 400;
 export const DEFAULT_PAGINATION_LIMIT = 20;
 export const SNAPSHOT_TTL_MINUTES = 30;
 export const COMPACTION_THRESHOLD_SESSIONS = 50;

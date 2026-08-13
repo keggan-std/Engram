@@ -4,7 +4,7 @@
 
 import type { Database as DatabaseType } from "better-sqlite3";
 import type { FileNoteRow } from "../types.js";
-import { normalizePath } from "../utils.js";
+import { normalizePath, escapeLike } from "../utils.js";
 
 export class FileNotesRepo {
     constructor(private db: DatabaseType) { }
@@ -143,13 +143,50 @@ export class FileNotesRepo {
         ).get(normalizePath(filePath)) as FileNoteRow | undefined) ?? null;
     }
 
-    getFiltered(filters: { layer?: string; complexity?: string }): FileNoteRow[] {
+    /**
+     * Notes matching the supplied filters.
+     *
+     * TASK #103. `file_path_filter` and `limit` are new. engram_memory declares
+     * file_path_filter on its one flat schema, get_file_notes never read it —
+     * it is wired to get_decisions alone — and the unfiltered call returned all
+     * 96 notes at 99,655 characters and overflowed the tool result. The call
+     * had been made specifically to keep the read small. The failure was in the
+     * direction of MORE context, on exactly the call made to save it.
+     *
+     * The path filter is a substring LIKE with metacharacters escaped. Task #67
+     * T6 is the lesson: an unescaped `_` is a single-character wildcard and
+     * underscores are pervasive in this codebase's own filenames. Unlike T6 a
+     * substring match is what is WANTED here — "show me src/tools/" — so the
+     * fix is escaping, not json_each equality.
+     */
+    getFiltered(filters: { layer?: string; complexity?: string; file_path_filter?: string; task_focus?: string; limit?: number }): FileNoteRow[] {
         let query = "SELECT * FROM file_notes WHERE 1=1";
         const params: unknown[] = [];
 
         if (filters.layer) { query += " AND layer = ?"; params.push(filters.layer); }
         if (filters.complexity) { query += " AND complexity = ?"; params.push(filters.complexity); }
+        if (filters.file_path_filter) {
+            query += " AND file_path LIKE ? ESCAPE '\\'";
+            params.push(`%${escapeLike(filters.file_path_filter)}%`);
+        }
+        // task_focus was advertised on the tool schema AND documented in the
+        // catalog as a get_file_notes parameter, and read by nothing (#103).
+        // Wired to the meaning its name already implies — narrow the notes to
+        // those mentioning the focus — rather than deleted, because deleting
+        // touches the advertised contract that DEFERRED-CHANGES D14 gates.
+        if (filters.task_focus) {
+            const needle = `%${escapeLike(filters.task_focus)}%`;
+            query += ` AND (purpose LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\' OR executive_summary LIKE ? ESCAPE '\\' OR file_path LIKE ? ESCAPE '\\')`;
+            params.push(needle, needle, needle, needle);
+        }
         query += " ORDER BY file_path";
+        if (filters.limit !== undefined) {
+            // Clamped, not trusted. SQLite reads LIMIT -1 as unlimited, so an
+            // unclamped negative turns a bound into its opposite — the same
+            // shape as task #44.
+            query += " LIMIT ?";
+            params.push(Math.max(1, Math.floor(filters.limit)));
+        }
 
         return this.db.prepare(query).all(...params) as FileNoteRow[];
     }

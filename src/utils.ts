@@ -490,6 +490,21 @@ export function ftsEscape(query: string): string {
 }
 
 /**
+ * Escape LIKE metacharacters so a literal string matches literally.
+ *
+ * Pair with `LIKE ? ESCAPE '\'`. TASK #67 T6 is why this exists as a named
+ * helper rather than being inlined once: `_` is a single-character wildcard in
+ * SQL LIKE, underscores are pervasive in this codebase's own filenames, and
+ * the resulting over-match is invisible to the caller — decisions about
+ * file-notes.repo.ts were returned for a query about file_notes.repo.ts.
+ *
+ * Backslash first, or it would escape the escapes added after it.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
  * Get the actual modification time (Unix ms) of a file on disk.
  * Resolves relative paths against projectRoot when provided.
  * Returns null if the file does not exist or stat fails.

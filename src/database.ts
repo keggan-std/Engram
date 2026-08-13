@@ -786,3 +786,27 @@ export function logToolCall(
     }
   } catch { /* table may not exist on older schemas — always silent */ }
 }
+
+/**
+ * Tool calls logged since `sinceMs`, newest first.
+ *
+ * TASK #103's `include_tool_log`. Lives here rather than in the dispatcher
+ * because this file already owns tool_call_log's insert and its prune, and the
+ * raw-SQL ratchet (tests/codebase/maintainability.test.ts) exists to stop
+ * exactly that query being added to a dispatcher instead — it caught this one
+ * on the first run and the query moved rather than the ceiling.
+ *
+ * Bounded by `limit`, clamped. This is the largest table in a busy store: one
+ * row per tool call, pruned only every TOOL_CALL_LOG_PRUNE_INTERVAL inserts.
+ * Returns [] rather than throwing on an older schema, matching logToolCall.
+ */
+export function getToolCallsSince(sinceMs: number, limit: number): Array<Record<string, unknown>> {
+  try {
+    return getDb().prepare(
+      `SELECT id, session_id, agent_id, tool_name, called_at, outcome, notes
+         FROM tool_call_log WHERE called_at > ? ORDER BY called_at DESC LIMIT ?`
+    ).all(sinceMs, Math.max(1, Math.floor(limit))) as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
+}
