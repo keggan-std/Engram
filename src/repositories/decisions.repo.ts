@@ -113,10 +113,30 @@ export class DecisionsRepo {
         return this.db.prepare(query).all(...params) as DecisionRow[];
     }
 
+    /**
+     * Active decisions that name this exact file.
+     *
+     * TASK #67 T6. This ran `affected_files LIKE ?` with `%path%`. The value
+     * WAS bound, so it was never an injection — but LIKE metacharacters in the
+     * path went unescaped and `_` is a single-character wildcard. MEASURED:
+     * getByFile("src/pocx/file_notes.repo.ts") returned BOTH file_notes.repo.ts
+     * and file-notes.repo.ts. Underscores are pervasive in this codebase's own
+     * filenames, so it over-matched in ordinary use and the caller could not
+     * tell: decisions about a different file were presented as governing this
+     * one. It was also a substring match against a JSON array, so any path
+     * matched any longer path containing it — src/a.ts matched src/a.ts.bak.
+     *
+     * Now the same json_each pattern getFiltered uses eight lines above. No
+     * escaping needed, no substring semantics, correct by construction.
+     *
+     * Rejected: adding ESCAPE '\' and escaping the metacharacters. That fixes
+     * the wildcard and keeps the substring matching — the symptom found, not
+     * the class.
+     */
     getByFile(filePath: string): DecisionRow[] {
         return this.db.prepare(
-            "SELECT * FROM decisions WHERE affected_files LIKE ? AND status = 'active' ORDER BY timestamp DESC"
-        ).all(`%${filePath}%`) as DecisionRow[];
+            "SELECT * FROM decisions WHERE EXISTS (SELECT 1 FROM json_each(affected_files) WHERE value = ?) AND status = 'active' ORDER BY timestamp DESC"
+        ).all(filePath) as DecisionRow[];
     }
 
     createBatch(

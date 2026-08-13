@@ -379,30 +379,41 @@ describe("SnapshotRepo", () => {
         expect(repo.getCached("nonexistent")).toBeNull();
     });
 
+    // These three used hardcoded "2025-01-01T00:00:00Z" with a 60-minute TTL
+    // and asserted the value came back. They passed only because task #67 T7's
+    // defect meant getCached never looked at the TTL — so they were silently
+    // asserting "an entry a year past expiry is still served", which is not
+    // what any of their names say. Timestamps are now generated, so each test
+    // exercises the behaviour it is named for. Expiry has its own coverage in
+    // tests/storage/retrieval-integrity.test.ts.
+    const fresh = () => new Date().toISOString();
+
     it("should upsert and retrieve a cached value", () => {
         const repo = new SnapshotRepo(db);
-        repo.upsert("summary", '{"count":42}', "2025-01-01T00:00:00Z", 60);
+        const ts = fresh();
+        repo.upsert("summary", '{"count":42}', ts, 60);
 
         const cached = repo.getCached("summary");
         expect(cached).not.toBeNull();
         expect(cached!.value).toBe('{"count":42}');
-        expect(cached!.updated_at).toBe("2025-01-01T00:00:00Z");
+        expect(cached!.updated_at).toBe(ts);
     });
 
     it("should overwrite an existing cache entry on re-upsert", () => {
         const repo = new SnapshotRepo(db);
-        repo.upsert("report", "v1", "2025-01-01T00:00:00Z", 60);
-        repo.upsert("report", "v2", "2025-01-02T00:00:00Z", 60);
+        const second = fresh();
+        repo.upsert("report", "v1", fresh(), 60);
+        repo.upsert("report", "v2", second, 60);
 
         const cached = repo.getCached("report");
         expect(cached!.value).toBe("v2");
-        expect(cached!.updated_at).toBe("2025-01-02T00:00:00Z");
+        expect(cached!.updated_at).toBe(second);
     });
 
     it("different keys should be independent", () => {
         const repo = new SnapshotRepo(db);
-        repo.upsert("key-a", "value-a", "2025-01-01T00:00:00Z", 60);
-        repo.upsert("key-b", "value-b", "2025-01-01T00:00:00Z", 60);
+        repo.upsert("key-a", "value-a", fresh(), 60);
+        repo.upsert("key-b", "value-b", fresh(), 60);
 
         expect(repo.getCached("key-a")!.value).toBe("value-a");
         expect(repo.getCached("key-b")!.value).toBe("value-b");

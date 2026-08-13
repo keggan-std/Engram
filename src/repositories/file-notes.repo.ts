@@ -39,6 +39,35 @@ export class FileNotesRepo {
         const depntsArr = parseDepsField(data.dependents);
         const deps = depsArr ? JSON.stringify(depsArr.map((d: string) => normalizePath(d))) : null;
         const depnts = depntsArr ? JSON.stringify(depntsArr.map((d: string) => normalizePath(d))) : null;
+        // TASK #65 — `??` throughout, one rule.
+        //
+        // This method used to coerce with TWO different operators. mtime,
+        // branch, hash and executive_summary used `?? null`; purpose, notes,
+        // layer and complexity used `|| null`. Combined with COALESCE(?, col)
+        // in the UPDATE clause that produced two opposite behaviours in one
+        // method: MEASURED across seven fields, each set then rewritten with
+        // "", the `??` group CLEARED and the `||` group was IGNORED — the empty
+        // string collapsed to NULL, COALESCE kept the old value, and the field
+        // could never be cleared by any caller.
+        //
+        // purpose and notes are exactly the fields a later agent would want to
+        // correct after finding an earlier note wrong, and they were the ones
+        // that could not be corrected. That compounds task #64: stale content
+        // that gets re-certified as fresh was also content that could not be
+        // cleared.
+        //
+        // THE RULE, and it is now the same for every field: an explicit null
+        // clears, an omitted key preserves, "" is stored as "".
+        //
+        // Rejected: `||` throughout. Consistent, and it makes every field
+        // permanently uncorrectable — ratifying the accident as design.
+        // Rejected: leaving the split and documenting it. Documentation is not
+        // a binding per charter §7, and it does not survive the next field
+        // being added by copy-paste, which is how the split arose.
+        const purpose = data.purpose ?? null;
+        const layer = data.layer ?? null;
+        const notes = data.notes ?? null;
+        const complexity = data.complexity ?? null;
         const mtime = data.file_mtime ?? null;
         const branch = data.git_branch ?? null;
         const hash = data.content_hash ?? null;
@@ -62,13 +91,13 @@ export class FileNotesRepo {
         executive_summary = COALESCE(?, executive_summary)
     `).run(
             normalizedPath,
-            data.purpose || null, deps, depnts,
-            data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
+            purpose, deps, depnts,
+            layer, timestamp, sessionId,
+            notes, complexity, mtime, branch, hash, exec_summary,
             // Update values
-            data.purpose || null, deps, depnts,
-            data.layer || null, timestamp, sessionId,
-            data.notes || null, data.complexity || null, mtime, branch, hash, exec_summary,
+            purpose, deps, depnts,
+            layer, timestamp, sessionId,
+            notes, complexity, mtime, branch, hash, exec_summary,
         );
     }
 

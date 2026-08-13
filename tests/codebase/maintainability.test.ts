@@ -77,7 +77,12 @@ const countRawSql = (rel: string) => (read(rel).match(/\.prepare\s*\(/g) ?? []).
  * Each is a ceiling: a fall is always allowed, a rise never is.
  */
 const RAW_SQL_CEILING: Record<string, number> = {
-  "src/tools/dispatcher-memory.ts": 69,
+  // Lowered 69 -> 66 on 2026-08-13. Task #61 moved the stale-claim sweep, the
+  // agent staleness update and an agent lookup out of the dispatcher and into
+  // AgentsRepo — where releaseStale() had been sitting with zero callers while
+  // the dispatcher ran its own broken copy of the same query. Tightened in the
+  // same commit, per the note below: a ratchet never tightened is a ceiling.
+  "src/tools/dispatcher-memory.ts": 66,
   // Lowered 22 -> 21 on 2026-08-12. Tasks #32 and #33 both added work to this
   // file and both were routed through database.ts / repositories/ rather than
   // through new prepared statements — the ratchet caught two attempts to do it

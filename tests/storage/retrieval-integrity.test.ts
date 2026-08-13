@@ -281,7 +281,13 @@ describe("Field coercion is uniform", () => {
     const CLEARABLE = ["executive_summary", "git_branch", "content_hash"];
     const NOT_CLEARABLE = ["purpose", "notes", "layer", "complexity"];
 
-    it("DEFECT (task #60): upsert uses two different null coercions in one method", () => {
+    // FIXED, task #65. This asserted the split on purpose until now: `?? null`
+    // for four fields, `|| null` for the other four, in one method. Combined
+    // with COALESCE(?, col) that made "" CLEAR one group and be IGNORED by the
+    // other. purpose and notes — exactly the fields an agent would want to
+    // correct after finding an earlier note wrong — were in the uncorrectable
+    // group. The two lists above are kept as the record of which was which.
+    it("upsert uses ONE null coercion, so every field clears the same way", () => {
         const repo = new FileNotesRepo(db);
         const P = "src/coerce.ts";
         const cleared: string[] = [];
@@ -299,11 +305,26 @@ describe("Field coercion is uniform", () => {
             (after === "" ? cleared : ignored).push(field);
         }
 
-        // DEFECT: `?? null` on lines 42-45 vs `|| null` on lines 65-67 of
-        // file-notes.repo.ts. When T3 lands, ALL fields behave one way and this
-        // assertion must collapse to a single expectation.
-        expect(cleared.sort()).toEqual([...CLEARABLE].sort());
-        expect(ignored.sort()).toEqual([...NOT_CLEARABLE].sort());
+        // Collapsed to a single expectation, as task #65 requires.
+        expect(cleared.sort()).toEqual([...CLEARABLE, ...NOT_CLEARABLE].sort());
+        expect(ignored).toEqual([]);
+    });
+
+    it("an omitted key still PRESERVES — clearing must need an explicit value", () => {
+        // The other half of the rule, and the one that would break silently if
+        // someone "simplified" the fix by dropping COALESCE. Without it, every
+        // partial write would blank the fields it did not mention — which is
+        // task #64's freshness-laundering hazard with the data destroyed too.
+        const repo = new FileNotesRepo(db);
+        const P = "src/preserve.ts";
+        db.prepare("DELETE FROM file_notes WHERE file_path=?").run(P);
+        repo.upsert(P, "2026-01-01T00:00:00.000Z", 1, { purpose: "KEEP", notes: "KEEP TOO" });
+        repo.upsert(P, "2026-01-02T00:00:00.000Z", 2, { purpose: "CHANGED" });
+
+        const row = db.prepare("SELECT purpose, notes FROM file_notes WHERE file_path=?")
+            .get(P) as { purpose: string; notes: string };
+        expect(row.purpose).toBe("CHANGED");
+        expect(row.notes, "a key that was not supplied is preserved").toBe("KEEP TOO");
     });
 });
 
@@ -328,7 +349,10 @@ describe("Bounds and match semantics", () => {
         expect(Math.max(1, Math.min(-1 * 2, MAX))).toBe(1);
     });
 
-    it("DEFECT (task to file): getByFile treats '_' as a LIKE wildcard", () => {
+    // FIXED, task #67 T6. `affected_files LIKE '%path%'` bound the value — so
+    // never an injection — but left '_' as a single-character wildcard AND
+    // matched substrings of a JSON array. Now json_each equality.
+    it("getByFile matches the exact path, not a LIKE pattern", () => {
         const repo = new DecisionsRepo(db);
         const ts = new Date().toISOString();
         repo.create(1, ts, "about hyphen file", "r", ["src/file-notes.repo.ts"], null);
@@ -336,23 +360,49 @@ describe("Bounds and match semantics", () => {
 
         const got = repo.getByFile("src/file_notes.repo.ts");
 
-        // DEFECT: '_' matches any single character, so the hyphenated file is
-        // returned as though a decision governed it. Becomes toBe(1) under T6.
-        expect(got.length).toBe(2);
+        expect(got.length, "'_' is no longer a wildcard").toBe(1);
+        expect(got[0].decision).toBe("about underscore file");
     });
 
-    it("DEFECT: snapshot_cache.ttl_minutes is written and never enforced", () => {
+    it("getByFile does not match a longer path that merely contains this one", () => {
+        // The other half of T6, and the half a wildcard-only fix would miss:
+        // it was a SUBSTRING match, so src/a.ts matched src/a.ts.bak.
+        const repo = new DecisionsRepo(db);
+        const ts = new Date().toISOString();
+        repo.create(1, ts, "about the backup", "r", ["src/subset.ts.bak"], null);
+
+        expect(repo.getByFile("src/subset.ts").length).toBe(0);
+        expect(repo.getByFile("src/subset.ts.bak").length).toBe(1);
+    });
+
+    // FIXED, task #67 T7. upsert() wrote ttl_minutes on every call; getCached
+    // never read it and never compared updated_at against now, so entries were
+    // immortal and the TTL was decoration.
+    it("getCached returns null once the TTL has passed", () => {
         const snap = new SnapshotRepo(db);
         snap.upsert("k", "ORIGINAL", "2020-01-01T00:00:00.000Z", 5);
 
-        const cached = snap.getCached("k");
         const stored = db.prepare("SELECT ttl_minutes FROM snapshot_cache WHERE key='k'")
             .get() as { ttl_minutes: number };
-
         expect(stored.ttl_minutes).toBe(5);
-        // Six years past a five-minute TTL. Becomes toBeNull() under T7.
-        expect(cached).not.toBeNull();
-        expect(cached!.value).toBe("ORIGINAL");
+
+        // Six years past a five-minute TTL.
+        expect(snap.getCached("k")).toBeNull();
+    });
+
+    it("getCached still returns an entry inside its TTL", () => {
+        // The control. A TTL fix that expires everything is not a fix, and
+        // asserting only the null case above would not notice.
+        const snap = new SnapshotRepo(db);
+        snap.upsert("fresh", "CURRENT", new Date().toISOString(), 5);
+        expect(snap.getCached("fresh")?.value).toBe("CURRENT");
+    });
+
+    it("an unparseable updated_at is treated as expired, not as fresh forever", () => {
+        const snap = new SnapshotRepo(db);
+        db.prepare("INSERT OR REPLACE INTO snapshot_cache (key, value, updated_at, ttl_minutes) VALUES (?,?,?,?)")
+            .run("junk", "VALUE", "not-a-date", 5);
+        expect(snap.getCached("junk")).toBeNull();
     });
 
     it("DEFECT: deleted_at exists on four tables and no src/ code path writes it", () => {

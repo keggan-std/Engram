@@ -293,14 +293,20 @@ describe("multi-agent contract (two real processes, one project root)", () => {
         } finally { d.close(); }
     }, 60_000);
 
-    // ── 5. A dead agent's claim is unreclaimable ────────────────────────────
-    // agent_sync reclaims tasks held by stale agents (dispatcher-memory.ts:1106)
-    // but the subquery requires an `agents` row with status='working'.
-    // claim_task never creates one, and agent_sync defaults status to 'idle'
-    // (line 1101). Both conditions fail by default, so the only recovery path
-    // for a crashed claimer is release_task with force:true.
-    // PINNED AS A DEFECT.
-    it("a task claimed by an agent that never registered can never be auto-reclaimed", async () => {
+    // ── 5. A dead agent's claim is reclaimable ──────────────────────────────
+    // FIXED, task #61. This test asserted the DEFECT on purpose until now.
+    //
+    // The sweep was `... WHERE claimed_by IN (SELECT id FROM agents WHERE
+    // status = 'working' AND last_seen < ?)` and had TWO independent reasons
+    // never to match: claim_task registered nobody (it only SELECTed from
+    // `agents`, and a SELECT creates no row), and agent_sync defaults status to
+    // 'idle', so even a registered agent was invisible. The only recovery was
+    // release_task force:true, which needs a human to notice.
+    //
+    // claim_task now registers its claimer in the same transaction, and the
+    // sweep keys on LAST-SEEN AGE ALONE. Rejected: defaulting agent_sync to
+    // 'working', which would make the sweep fire on idle-but-alive agents.
+    it("claim_task registers its claimer, so the claim is recoverable at all", async () => {
         const created = await A.call("engram_memory", {
             action: "create_task", title: "orphan task", priority: "low",
         });
@@ -308,21 +314,59 @@ describe("multi-agent contract (two real processes, one project root)", () => {
         await A.call("engram_memory", { action: "claim_task", task_id: id, agent_id: "ghost-agent" });
 
         const d1 = db();
-        const registered = d1.prepare("SELECT id FROM agents WHERE id = 'ghost-agent'").all();
-        d1.close();
-        expect(registered.length, "DEFECT: claim_task does not register the claimer").toBe(0);
+        try {
+            const registered = d1.prepare("SELECT id, last_seen FROM agents WHERE id = 'ghost-agent'")
+                .all() as Array<{ id: string; last_seen: number }>;
+            expect(registered.length, "the claimer is now a row the sweep can find").toBe(1);
+            expect(registered[0].last_seen, "registered with a real heartbeat").toBeGreaterThan(0);
+        } finally { d1.close(); }
+    }, 60_000);
 
-        // Another agent syncing is what triggers the reclaim sweep.
+    it("a fresh claim SURVIVES the sweep — liveness, not a timer", async () => {
+        // The control that stops the fix being "release everything". A claimer
+        // that has just been seen must keep its claim, or the sweep is not a
+        // recovery mechanism, it is a random preemption.
+        const created = await A.call("engram_memory", {
+            action: "create_task", title: "live claim", priority: "low",
+        });
+        const id = created.task_id ?? created.id ?? created.task?.id;
+        await A.call("engram_memory", { action: "claim_task", task_id: id, agent_id: "live-agent" });
         await B.call("engram_memory", { action: "agent_sync", agent_id: "agent-B" });
 
-        const d2 = db();
+        const d = db();
         try {
-            const bRow = d2.prepare("SELECT status FROM agents WHERE id = 'agent-B'").get() as { status: string };
-            expect(bRow.status, "DEFECT: agent_sync defaults to 'idle', so the sweep can never match").toBe("idle");
+            const task = d.prepare("SELECT claimed_by FROM tasks WHERE id = ?").get(id) as { claimed_by: string | null };
+            expect(task.claimed_by, "a heartbeat seconds old is not stale").toBe("live-agent");
+        } finally { d.close(); }
+    }, 60_000);
 
-            const task = d2.prepare("SELECT claimed_by FROM tasks WHERE id = ?").get(id) as { claimed_by: string | null };
-            expect(task.claimed_by, "DEFECT: the orphaned claim survives the sweep").toBe("ghost-agent");
-        } finally { d2.close(); }
+    it("a claim held by an agent that stopped reporting IS reclaimed by the sweep", async () => {
+        const created = await A.call("engram_memory", {
+            action: "create_task", title: "crashed claimer's task", priority: "low",
+        });
+        const id = created.task_id ?? created.id ?? created.task?.id;
+        await A.call("engram_memory", { action: "claim_task", task_id: id, agent_id: "crashed-agent" });
+
+        // Simulate the crash by ageing the heartbeat past the 30-minute window.
+        // Writing the clock rather than waiting for it: the alternative is a
+        // 30-minute test, and what is under test is the predicate, not Date.
+        const dw = new Database(path.join(root, ".engram", "memory.db"));
+        dw.prepare("UPDATE agents SET last_seen = ? WHERE id = 'crashed-agent'")
+            .run(Date.now() - 31 * 60 * 1000);
+        dw.close();
+
+        const sync = await B.call("engram_memory", { action: "agent_sync", agent_id: "agent-B" });
+
+        const d = db();
+        try {
+            const task = d.prepare("SELECT claimed_by FROM tasks WHERE id = ?").get(id) as { claimed_by: string | null };
+            expect(task.claimed_by, "the orphaned claim is released").toBeNull();
+        } finally { d.close(); }
+
+        // And it is not silent — a preempted agent is not told, so the least
+        // the sweep can do is tell the caller that triggered it.
+        expect(sync.reclaimed_tasks, "the reclaim is reported, not silent").toBeTruthy();
+        expect(sync.reclaimed_tasks.map((r: { agent_id: string }) => r.agent_id)).toContain("crashed-agent");
     }, 60_000);
 
     // ── 6. Concurrent cold start ────────────────────────────────────────────

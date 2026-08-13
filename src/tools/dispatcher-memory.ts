@@ -1224,9 +1224,31 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.task_id) return error("task_id required for claim_task.");
           const agentId = params.agent_id ?? "unknown";
           const timestamp = now();
-          const result = db.prepare(
-            `UPDATE tasks SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND claimed_by IS NULL AND status NOT IN ('done', 'cancelled')`
-          ).run(agentId, Date.now(), timestamp, params.task_id);
+          // TASK #61 — register the claimer and take the claim atomically.
+          //
+          // claim_task only ever SELECTed from `agents`, and a SELECT creates
+          // no row, so after a claim the table was EMPTY and the stale-claim
+          // sweep had nothing to match on. A crashed claimer's task was then
+          // unreclaimable by anything except release_task force:true, which
+          // requires a human to notice.
+          //
+          // One transaction, not two statements: a claim recorded without its
+          // claimer is precisely the state that was broken, so it must not be
+          // reachable through a crash between them either.
+          //
+          // The compare-and-swap below is untouched. It is the one genuinely
+          // correct coordination primitive here — PROVEN 15/15 two-process
+          // races with zero double-claims — and this task is about the RELEASE
+          // path, not the acquire path.
+          let result!: { changes: number };
+          db.transaction(() => {
+            result = db.prepare(
+              `UPDATE tasks SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND claimed_by IS NULL AND status NOT IN ('done', 'cancelled')`
+            ).run(agentId, Date.now(), timestamp, params.task_id);
+            if (result.changes > 0) {
+              repos.agents.register(agentId, params.agent_name ?? agentId, Date.now());
+            }
+          })();
           if (result.changes === 0) {
             const task = db.prepare("SELECT id, status, claimed_by FROM tasks WHERE id = ?").get(params.task_id) as { id: number; status: string; claimed_by: string | null } | undefined;
             if (!task) return error(`Task #${params.task_id} not found.`);
@@ -1277,10 +1299,21 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               `INSERT INTO agents (id, name, last_seen, current_task_id, status, specializations) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), last_seen = excluded.last_seen, current_task_id = excluded.current_task_id, status = excluded.status, specializations = COALESCE(excluded.specializations, specializations)`
             ).run(params.agent_id, params.agent_name ?? params.agent_id, nowMs, params.current_task_id ?? null, params.status ?? "idle", specsJson);
           } catch { return error("Agent coordination tables not yet initialised."); }
+          // TASK #61 — the recovery sweep, now able to fire.
+          //
+          // Both statements used to live here inline and both required
+          // `status = 'working'`, a value nothing in the product ever wrote:
+          // agent_sync defaults to 'idle' (see the upsert above) and claim_task
+          // wrote no row at all. Two independent reasons the sweep was dead.
+          //
+          // Routed through AgentsRepo, which is also where releaseStale() has
+          // sat with zero callers since it was written — the method named for
+          // this job, while the dispatcher ran its own broken copy.
           const STALE_MS = 30 * 60 * 1000;
+          let reclaimed: Array<{ task_id: number; agent_id: string }> = [];
           try {
-            db.prepare(`UPDATE tasks SET claimed_by = NULL, claimed_at = NULL WHERE claimed_by IN (SELECT id FROM agents WHERE status = 'working' AND last_seen < ?)`).run(nowMs - STALE_MS);
-            db.prepare("UPDATE agents SET status = 'stale' WHERE status = 'working' AND last_seen < ?").run(nowMs - STALE_MS);
+            reclaimed = repos.agents.reclaimStaleClaims(nowMs, STALE_MS);
+            repos.agents.releaseStale(nowMs, STALE_MS);
           } catch { /* best effort */ }
           let broadcasts: unknown[] = [];
           try {
@@ -1292,7 +1325,22 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               if (!readers.includes(params.agent_id!)) { readers.push(params.agent_id!); db.prepare("UPDATE broadcasts SET read_by = ? WHERE id = ?").run(JSON.stringify(readers), b.id); }
             }
           } catch { /* best effort */ }
-          return success({ agent: db.prepare("SELECT * FROM agents WHERE id = ?").get(params.agent_id), unread_broadcasts: broadcasts, message: broadcasts.length > 0 ? `Agent "${params.agent_id}" synced. ${broadcasts.length} unread broadcast(s).` : `Agent "${params.agent_id}" synced.` });
+          // Report the reclaim. A sweep that releases another agent's claim
+          // silently is the fencing-token hazard with the evidence removed —
+          // the preempted agent cannot learn it was preempted, and neither can
+          // the one that triggered the sweep. Saying so is the cheap half of a
+          // problem whose expensive half (fencing tokens) is out of scope here.
+          return success({
+            agent: repos.agents.getById(params.agent_id),
+            unread_broadcasts: broadcasts,
+            ...(reclaimed.length ? {
+              reclaimed_tasks: reclaimed,
+              reclaim_note: `Released ${reclaimed.length} claim(s) held by agent(s) with no heartbeat for over ${STALE_MS / 60_000} minutes. If one of them is still running, it has NOT been told.`,
+            } : {}),
+            message: broadcasts.length > 0
+              ? `Agent "${params.agent_id}" synced. ${broadcasts.length} unread broadcast(s).`
+              : `Agent "${params.agent_id}" synced.`,
+          });
         }
 
         case "route_task": {
