@@ -114,9 +114,32 @@ Documents describe. **Engram itself holds the live state**, and it is more curre
 engram_session({ action: "start", agent_name: "<you>", verbosity: "summary" })
 ```
 
-Use `summary`. `verbosity:"full"` was measured at **277,120 characters** and `get_tasks` at
-`compact:true` at **190,018** (2026-08-06, observation #121) — both overflow a tool result and
-return nothing usable. Filter your reads; do not pull the board whole.
+Use `summary` — still the right default, for a different reason than before.
+
+> **Corrected 2026-08-13.** This paragraph said `verbosity:"full"` was **277,120
+> characters** and `get_tasks({compact:true})` **190,018** (2026-08-06,
+> observation #121), and that both overflow a tool result. **Both were true and
+> both are fixed** — tasks #68 and #103.
+>
+> | | Was | Now |
+> |---|---|---|
+> | `start` at `verbosity:"full"` | 59,721 tokens | **9,521** first session, **7,027** repeat |
+> | `get_tasks({compact:true, limit:60})` | 126,254 chars | **45,628** |
+>
+> `compact` was declared, documented as defaulting to true, and **never read** —
+> that is why it did not compact. `project_snapshot` embedded every file note in
+> full and duplicated decisions and conventions the same response already
+> returned as top-level siblings.
+>
+> Both are now bounded by ratchets rather than by advice:
+> [`../tests/ergonomics/session-start-cost.test.ts`](../tests/ergonomics/session-start-cost.test.ts)
+> caps each verbosity tier against a fixed fixture, and
+> [`../tests/ergonomics/schema-consumption.test.ts`](../tests/ergonomics/schema-consumption.test.ts)
+> fails if any declared parameter is read by nothing.
+
+**`summary` is still the recommendation.** `full` is bounded now, not cheap — it
+is roughly 6× `summary` and it grows with the store. Filter your reads; do not
+pull the board whole.
 
 *This section used to restate four live counts — file notes, open tasks, decisions,
 observations — and by 2026-08-06 every one of them was wrong, in the paragraph whose own first

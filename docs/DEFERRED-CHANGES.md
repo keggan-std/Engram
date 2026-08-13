@@ -2,6 +2,15 @@
 
 **Started:** 2026-08-02 · **Status:** ACTIVE — read before every release
 **Owner:** whoever is shipping next
+**Last release review:** **2026-08-13**, session 51, before `v1.14.0` — every
+entry re-checked against the tree rather than re-read. Outcome: **D5 closed**
+(its Action shipped as `src/tools/session-identity.ts`); **D8** and **D11**
+carried claims that had become false and are corrected in place; **D9**
+re-verified and found to have been fixed once and drifted again, which is now
+recorded as the finding rather than patched a third time; **D1, D2, D3, D4, D7,
+D10, D12, D13, D14 confirmed still accurate.** D14's trigger has **not** fired —
+`knip.json` still scopes to `src/**/*.ts` with no `packages/*` analysis — so
+task **#71** remains gated.
 
 > **What this file is for.** Anything switched off, worked around, narrowed, or
 > left half-done *on purpose*, with the exact condition that should switch it
@@ -187,9 +196,46 @@ notice is reported.
 
 ---
 
-## D5 — Session record attribution is narrowed, not closed *(Engram task #12)*
+## D5 — ~~Session record attribution is narrowed, not closed~~ **CLOSED** *(Engram tasks #12, #58)*
 
-**Status:** ACTIVE — **now PROVEN, reclassified CRITICAL** · **Raised:** 2026-08-02 · **Commit:** `f234052`
+**Status:** ✅ **CLOSED 2026-08-13 by session 51, commit `03fe911`** · **Raised:** 2026-08-02 · **Commit:** `f234052`
+
+> **This entry's prescribed Action was implemented as written, and its two
+> remaining factual claims are now false.** Kept rather than deleted because the
+> reasoning below is still the best statement of *why* the defect mattered.
+>
+> **What shipped.** `resolveSession()` was lifted out of `src/tools/sessions.ts`
+> into a shared module, exactly as the Action says — it is now
+> [`src/tools/session-identity.ts`](../src/tools/session-identity.ts), and
+> `dispatcher-memory.ts` resolves through it. All **16** unscoped
+> `getCurrentSessionId()` call sites are gone; the symbol is no longer imported
+> by that file at all.
+>
+> **The Action was incomplete, and this is the part worth recording.** It
+> proposed threading an optional `session_id`/`agent_name` param. Those params
+> already existed — and callers do not volunteer their identity on every write,
+> so a ladder that depends on them is a ladder nothing climbs. The missing rung
+> was that **each agent is its own server process**: the process handling A's
+> `record_decision` is the one that handled A's `session start`. Identity was
+> available the whole time and nothing read it.
+>
+> **Two claims below are now stale:**
+> 1. *"~40 call sites"* — the FR-D4 update already corrected this to 16, which
+>    was right.
+> 2. *"wiring the real agent into `logToolCall` (`database.ts`, currently
+>    hardcoded `null`)"* — **no longer true.** `logToolCall` takes an
+>    `agentName` parameter (`src/database.ts:745`) and resolves `agent_id` via
+>    `COALESCE(?, (SELECT agent_name FROM sessions WHERE id = ?))`
+>    (`src/database.ts:769-772`).
+>
+> **Binding, edited in the fixing commit as this entry required:**
+> `tests/e2e/multi-agent-wire.test.ts` test 4 asserted `toBe(sessionB)` on
+> purpose; it now asserts `sessionA` *and* `not.toBe(sessionB)`, with a new test
+> 4b proving B still wins its own writes — without which, inverting the sort to
+> `ORDER BY id ASC` would pass test 4 and break the sub-agent instead.
+>
+> **Stated limit:** a process multiplexing several agents over one server (the
+> stdio transport does not; HTTP mode could) must pass `session_id` explicitly.
 
 > **FR-D4 update, 2026-08-04.** Three things changed, and the wording above is
 > now too soft.
@@ -367,10 +413,22 @@ drift again.
 > master plan does not inherit an unexamined choice. See
 > [`foundations/09-process.md`](foundations/09-process.md) §4 T6.
 
-**What.** `RELEASE_NOTES.md` is a single-release document, currently v1.11.0. It
+> **Correction, 2026-08-13 (session 51).** The **What** below is out of date in
+> both of its factual claims, and the entry stays ACTIVE only for its *format*
+> question. VERIFIED on this branch: `RELEASE_NOTES.md` is **not** a
+> single-release document and is **not** at v1.11.0 — it opens with
+> `# Unreleased — the Foundations Review` and carries v1.13.0 and v1.12.0
+> sections beneath. On `release/1.14.0` it carries v1.14.0 as well.
+>
+> So "the fixes are recorded only in commit messages" is no longer true. What
+> remains genuinely undecided is the one thing FR-D9 raised: **Keep a Changelog
+> vs Common Changelog**, and whichever wins must record removals. That is the
+> live part of this entry; the paragraph below is kept as the original statement.
+
+**What.** ~~`RELEASE_NOTES.md` is a single-release document, currently v1.11.0. It
 has no `[Unreleased]` section, so the four P0 fixes on this branch — two of them
 **breaking** — are recorded only in commit messages, the constitution, and
-Engram.
+Engram.~~ *(superseded — see the correction above)*
 
 **Why deferred.** `project-state-tracking-design.md` §5 Tier 0.4 recommends
 adopting Keep a Changelog *with its `Removed` section used honestly*, calling it
@@ -390,16 +448,40 @@ deleted — would never have happened had removals been one line under `Removed`
 
 ## D9 — Constitution and audit metadata are now stale in three specific places
 
-**Status:** ACTIVE · **Raised:** 2026-08-02
+**Status:** ACTIVE — **but the entry is now evidence of its own thesis** · **Raised:** 2026-08-02 · **Re-verified:** 2026-08-13
 
-**What.** All three are *known* staleness, listed so they are fixed deliberately
+> **Re-verified 2026-08-13 (session 51). Rows 1 and 2 were both actioned on
+> 2026-08-07 — and row 2 has since gone stale AGAIN.** That is not a criticism of
+> whoever fixed it; it is the finding. A hand-maintained measurement inside a
+> prose document is finding F5 *by construction*: it is correct on the day it is
+> written and wrong on every day after, and nothing reports the transition.
+>
+> | Row | State 2026-08-13 | Evidence |
+> |---|---|---|
+> | 1 — header | ✅ **Fixed.** Now reads schema **V26**, matching `src/constants.ts:20` | Read both |
+> | 2 — coverage | ⚠️ **Fixed then re-drifted.** Updated to "899/899 across 55 files, 35.54% stmt / 25.55% branch" on 2026-08-07. The suite is now **1021 across 65 files** | `npx vitest run` |
+> | 3 — `docs/engram-memory/` | ⚠️ **Still open, and now further behind.** The generator exists and the directory exists; decisions **#50, #51, #52** and tasks #112-#114 were added after the last export | `ls scripts/export-memory-docs.mjs` |
+>
+> **The row-1 fix introduced a new problem that this session caused.** The header
+> now says *"@ 1.14.0-dev"*. `1.14.0` is now a **real, shipped release with
+> entirely different contents** — installer fixes cut from `main` — while this
+> branch is heading to `2.0.0`. The label is actively misleading and is corrected
+> in the constitution itself.
+>
+> **The durable fix is not to update row 2 again.** It is to stop asserting a
+> measured figure in prose that no gate reads. Either generate it the way
+> `docs/STATE.md` is generated, or date-stamp it unmistakably as a historical
+> measurement and stop presenting it in the present tense. Recorded as the
+> action below rather than done here, because it is a convention change.
+
+**What.** All three were *known* staleness, listed so they are fixed deliberately
 rather than discovered:
 
 | Where | Stale claim | Correct action |
 |---|---|---|
-| `ENGRAM_CONSTITUTION.md` header | "Version 1.0 · Covers 1.11.0, schema V24" | Bump when the fixes ship. Schema V24 is still accurate — none of the four P0 fixes needed a migration |
-| `ENGRAM_CONSTITUTION.md` §13 | Coverage "28.7% stmt / 20.2% branch" | Measured at 557 tests; the suite is now 603 and `sessions.ts`, `dispatcher-admin.ts` and `agent-rules.service.ts` all gained real coverage. **Re-run `npm run test:coverage` and update.** Not guessed at in the meantime |
-| `docs/engram-memory/` | Generated export of decisions/conventions | Decision #4 was superseded and #15 added this session. **Regenerate with `node scripts/export-memory-docs.mjs`** |
+| `ENGRAM_CONSTITUTION.md` header | ~~"Version 1.0 · Covers 1.11.0, schema V24"~~ | ✅ Done 2026-08-07. Now V26 |
+| `ENGRAM_CONSTITUTION.md` §13 | Coverage "28.7% stmt / 20.2% branch" | ~~Re-run and update~~ — done once, drifted again. **Generate it or date-stamp it; do not hand-update a third time** |
+| `docs/engram-memory/` | Generated export of decisions/conventions | Still open. **Regenerate with `node scripts/export-memory-docs.mjs`** |
 
 **Trigger.** Release, or any agent citing those numbers.
 
@@ -483,6 +565,42 @@ becomes "so it must be fine."
 >
 > Filed as Engram task **#107**. `--check` now exits non-zero on an unreadable
 > config (`2f42643`), so this state is at least machine-detectable going forward.
+
+> ### ⚠️ CORRECTION 2026-08-13 — mechanism (1) was fixed on the REVIEW LINE, not the published one
+>
+> The banner above says the bare-`npx` trap was *"Fixed at both ends in
+> `d354172`."* **That commit is not on `main`.** PROVEN:
+>
+> ```
+> git merge-base --is-ancestor d354172 main        → false
+> git show main:README.md | grep -c 'npx -y engram-mcp-server[^@]'   → 8
+> ```
+>
+> So for three days this entry recorded as fixed a trap that was still live in
+> **the README users actually read** — the one rendered on the npm page and the
+> GitHub landing page. The fix existed on a branch nobody had pulled. That is the
+> deployment gap this very entry is about, reproducing itself *inside the record
+> of the deployment gap.*
+>
+> **And the detection mechanism was broken too.** The banner leans on
+> `engram install --check` to prove the seven stale entries exist. On Windows
+> that command printed its report and then **died with exit code 127** — a libuv
+> assertion from `process.exit()` after the registry `fetch()`
+> ([nodejs/node#58091](https://github.com/nodejs/node/issues/58091)). So the
+> instrument this entry cites was itself failing on the maintainer's own
+> platform.
+>
+> **Both are fixed in `v1.14.0`**, cut from `main` precisely so they reach the
+> published line rather than waiting on `2.0.0`: `--check` exits 0, and all
+> untagged README invocations carry `@latest` except two deliberate
+> counter-examples inside the warning that explains the trap.
+>
+> **What this does NOT close.** #107's core question is unchanged and still
+> unowned: *how does a published fix reach a machine that already has the
+> vulnerable build?* The installer writes a pinned exact version, so Engram still
+> does not self-upgrade. 1.14.0 makes the gap **visible and diagnosable**; it does
+> not make it self-healing. The advisory remains the only mechanism that reaches
+> an install nobody re-runs the installer for.
 
 > **✅ The version-regression half is resolved.** PROVEN 2026-08-05:
 > `git merge-base --is-ancestor main HEAD` → true (`main` is fully merged into

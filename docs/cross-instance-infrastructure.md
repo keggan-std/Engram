@@ -1,11 +1,45 @@
 # Engram Cross-Instance Infrastructure
 
-# Engram Cross-Instance Infrastructure
+> **Status:** Implemented (main, v1.7.3+) — **one advertised guarantee CORRECTED 2026-08-13**
+> **Implemented:** March 1, 2026 (sessions #33–#36)
+> **Migration:** v17
+> **Test coverage:** 77 new tests across 4 test files *(figure not re-verified 2026-08-13)*
 
-> **Status:** Implemented (main, v1.7.3+)  
-> **Implemented:** March 1, 2026 (sessions #33–#36)  
-> **Migration:** v17  
-> **Test coverage:** 77 new tests across 4 test files
+> # ⚠️ `mark_sensitive` DOES NOT HIDE ANYTHING
+>
+> This document told you, in two places, that marking a record sensitive
+> **hides it from other instances**. It does not. If you relied on that for
+> privacy, **assume every record you marked has been readable by every sharing
+> instance the whole time.**
+>
+> **PROVEN 2026-08-13:**
+>
+> ```
+> grep -rn "filterSensitive\|isAccessApproved" src/
+>   → src/services/sensitive-data.service.ts:154  (definition)
+>   → src/services/sensitive-data.service.ts:281  (definition)
+>   → src/tools/find.ts:95                        (a comment saying they are unused)
+> ```
+>
+> **Two definitions, zero call sites.** The filter exists and is wired to no
+> read path. `src/services/sensitive-data.service.ts:11-12` says so in its own
+> header comment.
+>
+> **What `mark_sensitive` actually does:** writes a local marker row you can
+> list with `list_sensitive`. That is all. Likewise `request_access` /
+> `approve_access` are bookkeeping — no read path consults an approval, and
+> `approve_access` is an ordinary tool call with a self-supplied `resolved_by`,
+> so nothing verifies a human.
+>
+> **If you need a record not to leave this machine, the only reliable control
+> is `engram_admin(action:"set_sharing", mode:"none")`** — or not enrolling the
+> instance in sharing at all.
+>
+> The tool descriptions in `dispatcher-admin.ts` were corrected earlier and
+> already say "local bookkeeping only"; **this document was not**, which is why
+> it is corrected here rather than quietly. A privacy control that does not
+> control privacy is worse than none, because it stops the user looking for a
+> real one.
 
 ---
 
@@ -21,7 +55,7 @@ When you use Engram across multiple projects and IDEs, each project gets its own
 | What decisions did I make in another project? | `query_instance` |
 | Search "authentication" across all my projects | `search_all_instances` |
 | Import a decision from another project | `import_from_instance` |
-| Lock some decisions so other instances can't see them | `mark_sensitive` |
+| ~~Lock some decisions so other instances can't see them~~ **⚠ DOES NOT DO THIS** — see the banner | `mark_sensitive` |
 | Allow another instance to request access to locked data | `request_access` / `approve_access` |
 
 ### Design principles
@@ -500,7 +534,7 @@ No HTTP server. No sockets. Instance A opens Instance C's `.db` file directly us
 
 | Action | Params | Description |
 |--------|--------|-------------|
-| `mark_sensitive` | `{ type: string, ids: number[] }` | Lock records — hidden from all cross-instance queries |
+| `mark_sensitive` | `{ type: string, ids: number[] }` | ~~Lock records — hidden from all cross-instance queries~~ **⚠ LOCAL BOOKKEEPING ONLY. Records stay fully readable by other instances.** See the banner |
 | `unmark_sensitive` | `{ type: string, ids: number[] }` | Remove sensitivity lock |
 | `list_sensitive` | `{}` | Show all currently locked records by type |
 | `request_access` | `{ requester_instance_id, type, ids, requester_label?, reason? }` | Submit a pending access request for locked data |

@@ -1,11 +1,47 @@
 # Tripwire Patch Runbook — cherry-picking the four security fixes onto `main`
 
-**Date:** 2026-08-03 · **Status:** Verified · **Re-verified:** 2026-08-05 · **Task:** #26 (FR-0f) item 3
+**Date:** 2026-08-03 · **Status:** 🔒 **SPENT — the fixes are on `main` and published. Do not execute this procedure.**
+**Re-verified:** 2026-08-05 · **Superseded:** 2026-08-13 · **Task:** #26 (FR-0f) item 3
 **Governs:** the emergency path in [`../DEFERRED-CHANGES.md`](../DEFERRED-CHANGES.md) **D11**, decision **#19**
 **Charter:** [`00-CHARTER.md`](00-CHARTER.md) §11b.2
 
-> **This document does not carry status.** It records a verified procedure.
-> Whether the tripwire has fired lives in the Engram task board.
+> # ⛔ THIS RUNBOOK IS SPENT — 2026-08-13
+>
+> **Its purpose was to get four security fixes onto `main` in an emergency.
+> They are already there, and published.** Executing it now would attempt to
+> cherry-pick commits that are ancestors of `main`.
+>
+> **The two claims below that are actively DANGEROUS if believed, both PROVEN false:**
+>
+> | Where | Claims | Actually |
+> |---|---|---|
+> | §0 line 22 | *"`main` gained a commit touching `src/` since 2026-08-03: ❌ No. `main` is still `1afe18f`"* | **Five such commits.** `git log main --oneline --since=2026-08-03 -- src/` returns 5. `main` is `f47df04` |
+> | §5 | *"`main` is still vulnerable to N1, confirmed by inspection"*, quoting a live `README_URL = https://raw.githubusercontent.com/…` | **The fetch is GONE from `main`.** `git show main:src/services/agent-rules.service.ts \| grep -c githubusercontent` → **0** |
+>
+> **`main`'s own `SECURITY.md` now discloses what it previously denied** —
+> `git show main:SECURITY.md` line 190: *"an undisclosed outbound call this
+> section previously denied."*
+>
+> **§0 is the sharpest lesson here and it should outlive the document.** That
+> section exists *because* §7 warns this runbook rots the moment `main` moves.
+> It rotted anyway, in exactly that way, one week later — a re-verification
+> section that itself went unverified. A doc that knows how it will fail still
+> fails that way unless something mechanical checks it.
+>
+> **What is still live:** nothing in this file. The remaining distribution
+> problem — how a published fix reaches a machine that already has the
+> vulnerable build — is Engram task **#107** and `DEFERRED-CHANGES.md` **D11**,
+> not this runbook.
+>
+> Kept rather than archived because the *procedure* is a good worked example of
+> a verified cherry-pick, and because §6.1's finding — that Recipe A is a minor
+> rather than a patch because `f234052` requires `agent_name` — is reused by the
+> 2.0.0 planning. **Read it as history. Do not run it.**
+
+> **This document does not carry status.** ~~It records a verified procedure.
+> Whether the tripwire has fired lives in the Engram task board.~~ *(That was
+> true when written. The banner above supersedes it: the document turned out to
+> carry status in two places, and both went false.)*
 
 ---
 

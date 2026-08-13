@@ -1,11 +1,44 @@
 # Domain 10 — Public Surface
 
-**Date:** 2026-08-05 · **Status:** Complete · **Engram decision:** #29
+**Date:** 2026-08-05 · **Status:** Complete — **central finding EXPIRED 2026-08-07, banner added 2026-08-13**
+**Engram decision:** #29
 **Charter:** [`00-CHARTER.md`](00-CHARTER.md) §6 domain 10 — *"README, SECURITY.md, licence,
 contribution, issue/advisory process, what is public and what is not. Owns what a stranger
 sees."*
 
-> **This document does not carry status.** Progress lives in the Engram task board.
+> # ⚠️ THE CENTRAL FINDING HAS EXPIRED — and this document's own kill switch said it would
+>
+> **§9 kill switch 4 reads:** *"If a release ships before T1 lands, T1 is moot and this
+> document's central finding expires."* **A release shipped.** v1.13.0 was published
+> 2026-08-07. The switch fired and nothing acted on it for six days — in the domain doc
+> that owns *"what a stranger sees."*
+>
+> **The three claims below that are now FALSE, each PROVEN:**
+>
+> | Where | Claims | Actually |
+> |---|---|---|
+> | §0 (below) | The published `SECURITY.md` **denies** the outbound fetch, and *"it is live right now"* | **It discloses it.** `git show main:SECURITY.md` line 190: *"an undisclosed outbound call this section previously denied"* |
+> | §2 | `npm view engram-mcp-server version` → **1.12.0** | **1.13.0**, and it is `dist-tags.latest` |
+> | §2 | *"That correction has never been pushed"* | Pushed and published. `main` is `f47df04`; `git show main:src/services/agent-rules.service.ts \| grep -c githubusercontent` → **0** |
+>
+> **The finding was correct when written, and acting on it is what made it false.**
+> That is the good outcome, not a defect in the analysis. What *is* a defect is
+> that the expiry was pre-registered in this very file and still had to be found
+> by a sweep six days later.
+>
+> **The one part that did NOT expire** is §0's structural point: nothing gates the
+> content of `README.md`, `SECURITY.md`, `LICENSE`, `CONTRIBUTING.md` or `llms.txt`.
+> Still true — and this banner exists because of it. A generated surface for the
+> public docs is the missing mechanism.
+>
+> **Related and still open:** the README trap this domain owns was fixed on the
+> review line in `d354172` and **that commit is not on `main`** — `main`'s README
+> carried eight untagged `npx -y engram-mcp-server` invocations until `v1.14.0`.
+> See `DEFERRED-CHANGES.md` **D11**'s 2026-08-13 correction.
+
+> **This document does not carry status.** ~~Progress lives in the Engram task board.~~
+> *(It turned out to carry status in three places, all of which went false. The
+> banner above supersedes this line.)*
 
 ---
 

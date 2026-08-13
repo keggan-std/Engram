@@ -71,7 +71,7 @@ Counted with `.prepare(` — better-sqlite3's only statement entry point.
 
 | Live file | `getRepos()` | `.prepare(` | Bypass |
 |---|---|---|---|
-| `src/tools/dispatcher-memory.ts` | 2 | 69 | **97%** |
+| `src/tools/dispatcher-memory.ts` | 2 | 66 | **97%** |
 | `src/tools/dispatcher-admin.ts` | 1 | 22 | **96%** |
 | `src/tools/sessions.ts` | 4 | 8 | 67% |
 | `src/tools/find.ts` | 0 | 0 | — |

@@ -351,9 +351,13 @@ would be contaminated by a file it is told to read first.
 **Why the leak was accepted rather than removed.** Convention #7's rule must be
 known *before* a session's first write, and every other route to it is itself a
 write — so the one channel that cannot be closed by ordering is this one.
-Malformed writes have already cost 31 records 34 fields, and the server-side
-rejection is still open (task #91). A declared channel is cheaper than a
-corrupted row.
+Malformed writes have already cost 31 records 34 fields, and ~~the server-side
+rejection is still open (task #91)~~ **the server-side rejection SHIPPED**
+(tasks #77/#91; `src/write-integrity.ts`, wired into every write dispatcher —
+`log.warn("Rejected malformed write", …)` at `src/tools/dispatcher-admin.ts:137`).
+Corrected 2026-08-13. The argument below is unaffected: a declared channel is
+still cheaper than a corrupted row, and the detector bounds the damage rather
+than removing the channel.
 
 **The mitigation is §10.4a's own**, applied unchanged: the file *declares itself*
 at the point of reading rather than instructing agents not to read it, because
@@ -424,8 +428,13 @@ Written now, while it is still easy to be honest.
 3. **If Phase 0 measurements show the action surface is not colliding**, the surface
    reduction is off the table — settled input 2 applies to us too.
 4. **If this review is still running when a security fix needs shipping, the fix wins.**
-   Published v1.12.0 currently carries all four P0 findings — see
-   [D11](../DEFERRED-CHANGES.md).
+   ~~Published v1.12.0 currently carries all four P0 findings~~ — **FIRED AND
+   HONOURED 2026-08-07.** v1.13.0 shipped all four while the review continued,
+   which is the switch working as designed. PROVEN: npm `latest` is 1.13.0,
+   `main` is `f47df04`, and `git show main:src/services/agent-rules.service.ts |
+   grep -c githubusercontent` returns **0**. The rule stays in force for the
+   next one — and it fired a second time on 2026-08-13, producing `v1.14.0` off
+   `main` rather than waiting for `2.0.0`. See [D11](../DEFERRED-CHANGES.md).
 
 ---
 
@@ -461,7 +470,8 @@ uniform, the dashboard breaks and nothing currently reports it. Close that gap
 | Branch | Role |
 |---|---|
 | `main` | The published line. **Always releasable.** Tripwire patch releases come off *here*, never off the review line |
-| `v2-foundations` | Integration branch for the whole review (currently named `review/engram-audit` — the name no longer describes the contents, which is the drift this project keeps finding) |
+| `v2-foundations` | Integration branch for the whole review. ~~(currently named `review/engram-audit` — the name no longer describes the contents, which is the drift this project keeps finding)~~ **Renamed; corrected 2026-08-13.** `git branch -a` shows no `review/engram-audit`. The parenthetical outlived the drift it described, which is the same defect one level up |
+| `release/1.14.0` | Cut from `main` 2026-08-13. Installer fixes only, non-breaking — the tripwire rule above, applied a second time |
 | `fr/d1-durability`, `fr/d2-trust`, … | One per domain, merged back with a real diff |
 
 Ten reviewable units instead of one twenty-commit blob.

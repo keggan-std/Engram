@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `cf56d4e`
+**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `420224b`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,10 +20,10 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `cf56d4e` — docs(reports): session 50 handoff, and regenerate STATE |
+| **Working branch** | `v2-foundations` @ `420224b` — docs: correct three master-plan claims that outlived their subject, and draft the advisory |
 | **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **2 file(s)** — `docs/ENGRAM-MASTER-PLAN.md`, `docs/reports/2026-08-13-security-advisory-DRAFT.md` |
+| **Uncommitted** | **10 file(s)** — `docs/DEFERRED-CHANGES.md`, `docs/ENGRAM_CONSTITUTION.md`, `docs/README.md`, `docs/STATE.md` … |
 | **Store** | schema V26 · 51 sessions · 52 decisions · 146 observations · 96 file notes |
 
 **Latest active decision — #52:** v1.14.0 is cut from main as a narrow non-breaking release carrying only the installer fixes, rather than merging v2-foundations to main as 2.0.0.
@@ -36,7 +36,7 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **51** | `claude-opus-5-session-51` | _(in progress)_ |
+| **51** | `claude-opus-5-session-51` | Prepared v1.14.0 on release/1.14.0, cut from main rather than merging v2-foundations, because merging is breaking (agent_name required on start, absent from main) and Release B's own targets have not… |
 | **50** | `claude-opus-5-session-50` | Cleared handoff #23's entire named batch plus #68 and the reported installer CLI defects. |
 | **49** | `claude-opus-5-session-49` | Board 70 to 54 open: 16 rows closed, 10 already-shipped. |
 
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**49 open tasks.** The ones that gate everything else:
+**50 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|

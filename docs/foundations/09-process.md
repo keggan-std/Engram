@@ -557,8 +557,16 @@ FR-D7 measured at 21.1%.
 3. **Convention enforceability.** Every packaged PM convention must be classified as
    `UNENFORCED` against a task or name a mechanism that is resolved in source.
 4. **Two pinned `DEFECT`s**, per the D3/D4/D6/D7 precedent: STATE.md is ungated (#74), and
-   the surface generator holds exactly one `.description` reference (#75). Fixing either
+   ~~the surface generator holds exactly one `.description` reference (#75)~~. Fixing either
    **breaks the suite**, forcing the assertion to be edited in the commit a human reviews.
+
+   > **The #75 pin fired as designed, 2026-08-13.** The generator now reads Zod
+   > `_def.description` and renders a Description column, so both assertions were
+   > inverted in the fixing commit (`8a623e6`) — see
+   > [`../../tests/process/anti-drift.test.ts`](../../tests/process/anti-drift.test.ts),
+   > which now reads *"FIXED, task #75"*. **This is the mechanism working**: the
+   > pin made the fix impossible to land silently. #74 (STATE.md ungated) is
+   > still open and still pinned.
 
 **Proven to fail, not assumed to.** A binding that cannot fail is not a binding, so it was
 tested against the condition it exists to catch:

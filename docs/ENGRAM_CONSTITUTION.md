@@ -1,6 +1,6 @@
 # Engram Constitution — What Is Here, Why, and Where
 
-**Version:** 1.1 · **Date:** 2026-08-02 · **Last verified:** 2026-08-07 · **Covers:** `engram-mcp-server` @ 1.14.0-dev (published `latest` is 1.13.0), schema V26
+**Version:** 1.1 · **Date:** 2026-08-02 · **Last verified:** 2026-08-07 · **Covers:** `engram-mcp-server` @ 2.0.0-dev on `v2-foundations` (published `latest` is 1.13.0; `v1.14.0` is cut from `main` on branch `release/1.14.0`), schema V26
 
 > **Header corrected 2026-08-07.** It read "1.11.0, schema V24" — two releases and two
 > schema revisions behind — while being the document that tells a reader not to trust the
@@ -50,7 +50,7 @@ IDE spawns:  npx engram-mcp-server [--ide=<key>] [--mode=universal|http]
              (SQL only)                    (business logic, I/O)
                     │
                     ▼
-        .engram/memory[-<ide>].db  (SQLite, WAL, 24 migrations)
+        .engram/memory[-<ide>].db  (SQLite, WAL, 26 migrations)
 ```
 
 ### 3. The four architectural laws
@@ -70,7 +70,7 @@ These are followed consistently. Breaking one is a bug, not a style choice.
 src/
 ├── index.ts              ← entrypoint; CLI branching; the only file that registers tools
 ├── database.ts           ← composition root: open DB, migrate, build repos + services
-├── migrations.ts         ← 24 versioned migrations; the entire schema history
+├── migrations.ts         ← 26 versioned migrations; the entire schema history
 ├── constants.ts          ← every tunable, config key name, and detection marker
 ├── types.ts              ← all row shapes and enum unions
 ├── utils.ts              ← coercion, project-root detection, file scan, git shell wrappers
@@ -125,7 +125,7 @@ packages/
   - `SQLITE_BUSY` is explicitly **not** treated as corruption ("FLAW-3 fix"). Do not re-conflate them.
   - **Corruption recovery is destructive.** A corrupt main DB is renamed `.corrupt.<ts>.bak` and replaced with an *empty* one. Warning to stderr only, no prompt. Coverage on this path: **3%**.
   - `queryAll/queryOne/execute/executeMany` take raw SQL strings — an unguarded escape hatch around the repository layer. No current caller abuses it. Watch it.
-  - `getCurrentSessionId(agentName?)` (line 375) duplicates `SessionsRepo.getOpenSessionId()`. Both now take an optional agent scope (§12.1). **The unscoped form is still what ~40 call sites in `dispatcher-memory.ts` use to stamp `session_id` on records** — and since sessions are no longer force-closed on start, several may be open at once. Pass an agent name wherever identity is available.
+  - `getCurrentSessionId(agentName?)` (line 375) duplicates `SessionsRepo.getOpenSessionId()`. Both now take an optional agent scope (§12.1). ~~**The unscoped form is still what ~40 call sites in `dispatcher-memory.ts` use to stamp `session_id` on records**~~ **FIXED 2026-08-13, tasks #58/#12.** The real count was **16**, not ~40, and it is now **zero**: `dispatcher-memory.ts` does not import `getCurrentSessionId` at all. Identity resolves through [`src/tools/session-identity.ts`](../src/tools/session-identity.ts), whose third rung is *the session this server process started* — deterministic, because an MCP server is spawned per client.
 
 #### `migrations.ts` (823) — Schema history
 - **What:** 24 sequential migrations, V1 → V24, plus the runner.
@@ -137,7 +137,7 @@ packages/
   - **No test migrates a DB containing data.** Branch coverage 33%. See audit §5.
 
 #### `constants.ts` (231) — Tunables
-Holds `SERVER_VERSION` (read from `package.json` at import), `DB_VERSION = 24`, all limits, `EXCLUDED_DIRS`, `STRONG_/SOFT_PROJECT_MARKERS`, `BLOCKED_PATH_PATTERNS`, `LAYER_PATTERNS`, `PHASE_MAP`, and every `CFG_*` config-key name. **`.engram` was deliberately removed from `STRONG_PROJECT_MARKERS`** in v1.9.1 — it was self-referential.
+Holds `SERVER_VERSION` (read from `package.json` at import), `DB_VERSION = 26`, all limits, `EXCLUDED_DIRS`, `STRONG_/SOFT_PROJECT_MARKERS`, `BLOCKED_PATH_PATTERNS`, `LAYER_PATTERNS`, `PHASE_MAP`, and every `CFG_*` config-key name. **`.engram` was deliberately removed from `STRONG_PROJECT_MARKERS`** in v1.9.1 — it was self-referential.
 
 The security-relevant config keys (see §9): `http_token`, `sharing_mode`, `sharing_types`, `sensitive_keys`, `instance_id`, `machine_id`, `instance_visible`.
 
@@ -155,10 +155,10 @@ Lazy singleton over `~/.engram/global.db` with its own hand-rolled schema. **No 
 
 ### 7. Tools (`src/tools/`) — read this before touching anything here
 
-> **Only 4 of the 20 files in `src/tools/` are reachable.** `index.ts` imports exactly:
+> **Only 5 of the 20 files in `src/tools/` are reachable** (was 4; `session-identity.ts` joined them 2026-08-13). `index.ts` imports exactly:
 > `registerSessionDispatcher` (`sessions.ts`), `registerMemoryDispatcher` (`dispatcher-memory.ts`), `registerAdminDispatcher` (`dispatcher-admin.ts`), `registerFindTool` (`find.ts`).
 >
-> The other **15 files (4,057 lines, 22% of `src/`) are dead** — verified zero external references. They are v1.6-era predecessors whose logic was copy-pasted into the dispatchers.
+> The other **15 files are dead** — verified zero external references, and re-counted 2026-08-13. They are v1.6-era predecessors whose logic was copy-pasted into the dispatchers. The line/percentage figures that used to appear here are dropped rather than re-measured: they were a hand-maintained number in prose, which is the D9 defect this document has now paid for three times.
 >
 > **Do not delete them yet.** They hold validation the live code lost. See §8.
 
@@ -220,7 +220,7 @@ One class per table, constructed once by `createRepositories(db)` in `index.ts` 
 | File | L | Owns | Watch for |
 |---|---|---|---|
 | `sessions.repo.ts` | 158 | sessions: create/close/autoClose/getOpenSessions/history/duration | `getOpenSessionId(agentName?)` takes an agent scope; `close`/`autoClose` guard on `ended_at IS NULL` and return whether they acted; `create` writes `parent_session_id` (§12.1). `countBySession(id, table)` still interpolates the table name; only ever called with the literal `"decisions"` |
-| `decisions.repo.ts` | 173 | decisions + supersession + `depends_on` graph | `findSimilar` builds an FTS string but passes it as a **bound param** — safe. `getByFile` doesn't escape LIKE metacharacters |
+| `decisions.repo.ts` | 173 | decisions + supersession + `depends_on` graph | `findSimilar` builds an FTS string but passes it as a **bound param** — safe. ~~`getByFile` doesn't escape LIKE metacharacters~~ — **fixed, task #67 T6:** now `EXISTS (SELECT 1 FROM json_each(affected_files) WHERE value = ?)`, which removes both the `_` wildcard and the substring match |
 | `changes.repo.ts` | 101 | per-file change log | `recordBulk` correctly transactional. `insertCompacted`/`deleteNonCompacted` are only atomic because the *caller* wraps them |
 | `file-notes.repo.ts` | 141 | file metadata, staleness hashes | `upsert` uses `COALESCE(?, col)` so partial updates don't clobber. Defensively re-parses JSON strings (universal-mode fallout) |
 | `tasks.repo.ts` | 142 | task board | `update()`'s dynamic SET uses only **compile-time literals** — the safe version of the pattern |
@@ -229,9 +229,9 @@ One class per table, constructed once by `createRepositories(db)` in `index.ts` 
 | `conventions.repo.ts` | 94 | conventions | FTS-focused query falls back to `getActive` on failure |
 | `broadcasts.repo.ts` | 57 | agent messaging | `markRead` is a **read-modify-write with no transaction** — concurrent marks lose updates |
 | `config.repo.ts` | 53 | key/value settings | `get`/`getAll` swallow errors (pre-migration tolerance) — masks real SQL errors identically |
-| `agents.repo.ts` | 42 | agent heartbeats | `releaseStale` needs consistent ms epochs from callers |
+| `agents.repo.ts` | 130 | agent heartbeats + stale-claim recovery | `register()` is called by `claim_task` in the same transaction as the claim, and `reclaimStaleClaims()` keys on last-seen age alone (task #61). `releaseStale` still needs consistent ms epochs from callers |
 | `milestones.repo.ts` | 34 | milestones | Simplest file. No dynamic SQL |
-| `snapshot.repo.ts` | 22 | snapshot cache | Stores `ttlMinutes` but **never enforces it** — expiry lives in the caller |
+| `snapshot.repo.ts` | 50 | snapshot cache | ~~Stores `ttlMinutes` but **never enforces it**~~ — **enforced since task #67 T7.** `getCached` compares `updated_at + ttl_minutes` against now; an unparseable date is treated as expired |
 | `index.ts` | 69 | barrel + `createRepositories` | The only file importing individual repo classes. Clean composition root |
 
 ---
@@ -322,7 +322,7 @@ Full analysis in [`engram-deep-audit-2026-08-02.md`](engram-deep-audit-2026-08-0
 | `end` / `handoff` / `acknowledge_handoff` resolve via `resolveSession()`: explicit `session_id` → caller's `agent_name` → newest-open, and the last rung reports `session_resolution` rather than guessing silently | `sessions.ts` |
 | `parent_session_id` is **written** on sub-agent start (explicit param, else inferred as the newest open session of another agent). The column existed unused since the V1 baseline | `sessions.repo.ts` `create()`, `sessions.ts` |
 
-**Consequence for the rest of the codebase:** more than one session can now be open at a time. The ~40 unscoped `getCurrentSessionId()` call sites in `dispatcher-memory.ts` still stamp records with the *newest open* session, so record attribution under concurrency is narrowed but not closed — that needs a caller-supplied handle on the memory surface and is tracked separately, not silently absorbed here.
+**Consequence for the rest of the codebase:** more than one session can now be open at a time. ~~The ~40 unscoped `getCurrentSessionId()` call sites in `dispatcher-memory.ts` still stamp records with the *newest open* session, so record attribution under concurrency is narrowed but not closed.~~ **CLOSED 2026-08-13 (tasks #58/#12, commit `03fe911`).** The count was 16, and the fix was not the caller-supplied handle predicted here — those parameters already existed and callers do not volunteer identity on every write. The missing fact was that **each agent is its own server process**, so the process handling a write is the one that opened the session. See [`DEFERRED-CHANGES.md`](DEFERRED-CHANGES.md) **D5**.
 
 #### 12.1b `pending_work` and handoffs were unscoped *(CRITICAL — **FIXED**, was proven)*
 
@@ -417,7 +417,15 @@ A corrupt main DB is renamed and replaced with an empty one. Warning to stderr o
 
 ### 13. Test posture
 
-**899/899 pass** across 55 files, ~42s, zero skipped. Coverage **35.54% stmt / 25.55% branch / 53.24% func** — PROVEN by `npx vitest run --coverage` on 2026-08-07.
+**1021/1021 pass** across **65 files**, zero skipped. Coverage **35.21% stmt / 26.18% branch / 50.76% func** — PROVEN by `npx vitest run --coverage` on **2026-08-13**.
+
+> **Do not hand-update this figure a fourth time.** It has now drifted and been
+> corrected three times (570 → 899 → 1021). A measured number living in prose
+> that no gate reads is finding F5 by construction: right on the day it is
+> written, wrong every day after, with nothing reporting the transition. Either
+> generate this line the way `docs/STATE.md` is generated, or state it as a
+> dated historical measurement and stop writing it in the present tense.
+> Recorded in [`DEFERRED-CHANGES.md`](DEFERRED-CHANGES.md) **D9**.
 
 > These figures were **570 tests / 28.7% / 20.2%** until 2026-08-07, which understated a
 > project that had grown by 329 tests. A stale number that flatters is a known trap; a
