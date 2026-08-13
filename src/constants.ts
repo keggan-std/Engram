@@ -68,6 +68,16 @@ export const MAX_RESPONSE_LENGTH = 50000;
  * decide whether to fetch it in full.
  */
 export const TASK_COMPACT_DESCRIPTION_CHARS = 400;
+/**
+ * How much of a task description or decision rationale survives session start.
+ *
+ * Task #68. `verbosity:"full"` returned 59,721 tokens against a documented
+ * ~730 (81.8x), and the payload GREW with the store — a memory tool got more
+ * expensive to orient in the more it had remembered. Tighter than the
+ * get_tasks bound above because session start is unavoidable and automatic,
+ * where get_tasks is a call an agent chose to make.
+ */
+export const SESSION_START_BODY_CHARS = 240;
 export const DEFAULT_PAGINATION_LIMIT = 20;
 export const SNAPSHOT_TTL_MINUTES = 30;
 export const COMPACTION_THRESHOLD_SESSIONS = 50;

@@ -302,6 +302,25 @@ export interface ProjectSnapshot {
   generated_at: string;
 }
 
+/**
+ * The bounded form of ProjectSnapshot returned at session start (task #68).
+ *
+ * Deliberately NOT a subset type of ProjectSnapshot. The two answer different
+ * questions — "give me the project" versus "orient me cheaply" — and making one
+ * a Partial of the other is what let the expensive answer be served to the
+ * cheap question in the first place.
+ */
+export interface ProjectSnapshotDigest {
+  project_root: string;
+  total_files: number;
+  layer_distribution: Record<string, number>;
+  top_level_entries: string[];
+  file_notes_count: number;
+  file_notes_by_layer: Record<string, number>;
+  generated_at: string;
+  hint: string;
+}
+
 export interface MemoryStats {
   total_sessions: number;
   total_changes: number;

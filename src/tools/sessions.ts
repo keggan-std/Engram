@@ -8,7 +8,7 @@ import { z } from "zod";
 // file is resolved through resolveSession() below, which is agent-scoped. The
 // global helper remains for legacy call sites that have no identity available.
 import { now, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, reinitDatabase } from "../database.js";
-import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP } from "../constants.js";
+import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP, SESSION_START_BODY_CHARS } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
@@ -84,11 +84,16 @@ export function registerSessionDispatcher(server: McpServer): void {
         parent_session_id: z.number().int().optional().describe("The orchestrator's session_id. For: start with agent_role='sub'. Omit to infer the most recent open session belonging to another agent."),
         project_root: z.string().optional().describe("Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location."),
         resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
-        verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. nano=counts+rules only (~10 tokens), minimal=counts+agent_rules, summary=default, full=everything."),
+        // Figures MEASURED 2026-08-13 by docs/foundations/measurements/measure-session-cost.mjs
+        // against this repo's real store, and bounded by tests/ergonomics/session-start-cost.test.ts.
+        // They were previously guesses and had drifted up to 81.8x (task #68) —
+        // an agent reads this string at the moment it picks the parameter, so a
+        // wrong number here is not documentation debt, it is misdirection.
+        verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. Measured on a mature store: nano=counts+rules only (~700 tokens), minimal=counts+agent_rules (~1,300 repeat / ~3,400 first), summary=default (~1,600 repeat / ~3,800 first), full=everything, bounded (~7,000 repeat / ~9,500 first). Figures scale with store size; prefer summary."),
         focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
-        agent_role: z.enum(["primary", "sub"]).optional().default("primary").describe("'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~300-500 tokens)."),
+        agent_role: z.enum(["primary", "sub"]).optional().default("primary").describe("'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~120 tokens measured; the claim was 300-500 and it was the only tier that OVERstated its own cost)."),
         task_id: z.number().int().optional().describe("Task ID to scope context around. Required when agent_role='sub'."),
-        intent: z.enum(["full_context", "quick_op", "phase_work"]).optional().default("full_context").describe("Session start intent. For: start. full_context=current behavior (default, ~730 tokens); quick_op=minimal (session_id+rules+catalog only, ~200 tokens); phase_work=full context + current phase knowledge for PM-Full (~900 tokens)."),
+        intent: z.enum(["full_context", "quick_op", "phase_work"]).optional().default("full_context").describe("Session start intent. For: start. Cost is dominated by `verbosity`, not by this. full_context=default; quick_op=session_id+rules+catalog only (~700 tokens repeat, ~2,800 on an agent's first ever session, when the full tool catalog is delivered once); phase_work=full context + current phase knowledge for PM-Full."),
         // end params
         summary: z.string().optional().describe("Session accomplishments summary. Required for: end."),
         tags: coerceStringArray().optional().describe("Tags for session. For: end."),
@@ -547,8 +552,32 @@ Actions:
 
           // full verbosity
           let projectSnapshot = null;
-          try { projectSnapshot = services.scan.getOrRefresh(projectRoot); } catch { /* best effort */ }
-          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: activeDecisions, active_conventions: capConventions(activeConventions.length + 10), open_tasks: openTasks, project_snapshot: projectSnapshot, git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
+          // TASK #68 — digest(), not getOrRefresh(). The raw snapshot embeds
+          // fileNotes.getAll(), so this one field was 153,194 of the 246,118
+          // characters a full session start returned, and it grows with the
+          // store. It also duplicated recent_decisions and active_conventions,
+          // both already top-level siblings in this same response.
+          try { projectSnapshot = services.scan.digest(projectRoot); } catch { /* best effort */ }
+          // TASK #68 — `full` means every CATEGORY, in a bounded form. It used
+          // to mean every category unbounded, which is a different promise and
+          // one that grows with the store: task descriptions and decision
+          // rationales in this repo run to several thousand characters each,
+          // and 15 tasks plus 20 decisions of raw body was the bulk of what
+          // remained after project_snapshot was cut.
+          //
+          // Truncated, not dropped. The id and title are what an orienting
+          // agent needs to decide what to fetch; the body is what it fetches,
+          // through get_tasks / get_decisions, which is where a filter exists.
+          const clip = (s: unknown) =>
+            typeof s === "string" && s.length > SESSION_START_BODY_CHARS ? truncate(s, SESSION_START_BODY_CHARS) : s;
+          const boundedTasks = openTasks.map(t => ({ ...t, description: clip(t.description) }));
+          const boundedDecisions = activeDecisions.map(d => ({ ...d, rationale: clip(d.rationale), decision: clip(d.decision) }));
+          const clippedBodies = openTasks.filter(t => typeof t.description === "string" && t.description.length > SESSION_START_BODY_CHARS).length
+            + activeDecisions.filter(d => typeof d.rationale === "string" && d.rationale.length > SESSION_START_BODY_CHARS).length;
+
+          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: boundedDecisions, active_conventions: capConventions(activeConventions.length + 10), open_tasks: boundedTasks, project_snapshot: projectSnapshot,
+            ...(clippedBodies ? { bodies_truncated: clippedBodies, bodies_note: `${clippedBodies} task/decision bodies were clipped to ${SESSION_START_BODY_CHARS} chars. Fetch one in full with engram_memory(action:'get_tasks', query:'…', compact:false) or get_decisions.` } : {}),
+            git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
         }
 
         case "end": {
