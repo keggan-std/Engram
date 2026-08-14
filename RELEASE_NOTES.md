@@ -1,8 +1,8 @@
 # Unreleased — the Foundations Review
 
-**Status:** **NOT RELEASED.** `package.json` is still `1.13.0`, which is what npm serves.
+**Status:** **NOT RELEASED.** `package.json` is `1.14.0`, which is what npm serves — that is v1.14.0's number, not this section's. Nothing below the next heading has shipped.
 **Targets:** `2.0.0` — Release B in [`docs/ENGRAM-MASTER-PLAN.md`](docs/ENGRAM-MASTER-PLAN.md) §7, breaking, "ships when its targets land." Several have not.
-**Branch:** `v2-foundations` · **Date:** 2026-08-07
+**Branch:** `v2-foundations` · **Date:** 2026-08-07 · **Rebased onto v1.14.0:** 2026-08-14
 
 > **Why this is not a version heading.** Bumping `package.json` would claim a release that
 > is not ready — the master plan gates 2.0.0 on targets still open on the board. A version
@@ -231,6 +231,141 @@ restored:
 > generated files matched their generators and that CI steps were mirrored, and **not one
 > checked whether a sentence was true.** Five of the eleven findings were that exact shape.
 > The new assertions are the beginning of the other half.
+
+---
+
+# v1.14.0 — The installer tells the truth about what is on your machine
+
+**Released:** v1.14.0 — August 13, 2026 · **Base:** v1.13.0
+
+## Overview
+
+`v1.13.0` shipped a working product with a broken **`--check`**. On Windows the
+command printed its entire report correctly and then **died with exit code 127**,
+and the report it printed described one install per IDE on machines that have
+several. This release fixes the command you run to find out whether the other
+fixes arrived.
+
+Everything here is installer-side. **No schema change, no MCP tool-contract
+change, no migration.** Upgrading is safe from any 1.x.
+
+---
+
+## `install --check` crashed on Windows after printing its report
+
+```
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+```
+
+**Cause.** `--check` fetches the npm registry to compare versions, then called
+`process.exit()`. Node's built-in `fetch` (undici) keeps the connection alive
+after the body resolves, and `process.exit()` races its teardown — upstream
+[nodejs/node#58091](https://github.com/nodejs/node/issues/58091) and
+[#64322](https://github.com/nodejs/node/issues/64322). It reproduces only on
+Windows, and the upstream fix has been stalled in review since January 2025, so
+there is no Node version to wait for.
+
+**Fix.** `--check` now sets `process.exitCode` and returns, letting Node drain
+its own handles. Rejected the common workaround of sleeping ~100 ms before
+exiting: it trades a crash for a race that is quieter and still wrong.
+
+Exit codes are unchanged and still meaningful: `0` for success, `1` when a config
+exists but cannot be parsed. *"Update available"* stays `0` on purpose — a gate
+that goes red on every release is one a developer switches off inside a week.
+
+## One IDE is not one install
+
+The interactive installer asked for a single status per IDE and took the first
+config path that matched. On a machine with four Android Studio channels that is
+not a summary, it is a coin toss: three real installs went unmentioned and the
+one named was whichever path happened to be reached first.
+
+It now reads the same discovery engine `--check` uses, and gained:
+
+- **Multi-select.** `--check` could offer *"update all"* or *"pick one"*. Faced
+  with ten outdated installs, picking one meant running the command ten times.
+- **A details view** — every instance with its scope, mode, config file, project
+  root and the database it will open.
+- **Shortened paths that stay distinguishable.** `$HOME` collapses to `~` and the
+  middle is elided, **never the tail** — sibling configs differ only in their
+  second-to-last segment, so a tail-truncating shortener would render four
+  channels identical.
+- **Deduplicated commands.** `--check` printed four *identical* update commands.
+  It now prints one and lists the paths it covers.
+
+## "installed" with no version
+
+An entry written before Engram stamped versions displayed as `v?`. That is
+honest and unreadable — it reads as a broken installer rather than as *"older
+than every stamped release"*. It is now **`unversioned (pre-1.9)`** everywhere,
+in `--check` and in the install menus, which previously disagreed about the same
+state.
+
+## `--help` printed a command the README warns against
+
+The usage line said `npx -y engram-mcp-server install`. npx caches by package
+name, so the untagged form re-runs whatever version it downloaded first — the
+trap `README.md` documents and every command in it avoids. The help text now
+carries `@latest`.
+
+## `remove_hooks` never removed anything
+
+`engram_admin(action:"remove_hooks")` matched on a `\n---\n\n` terminator that
+its own hook content never emits, so the regex matched nothing and the block
+survived every removal, while the call reported success. The CLI and MCP paths
+also used **different markers** and each refused to recognise the other's hook.
+Both now share one marker and one recogniser.
+
+## `engines` said Node 18, and Node 18 cannot run Engram
+
+v1.13.0 and earlier published `"node": ">=18.0.0"`. **PROVEN** by reading the
+installed dependency trees: `better-sqlite3@12.11.1` declares
+`20.x || 22.x || 23.x || 24.x || 25.x || 26.x` and `open@11` declares `>=20`. A
+user on Node 18 got an `EBADENGINE` warning and then a **native build failure on
+the dependency that *is* the database** — an install that cannot possibly work,
+advertised as supported. CI could not catch it: the matrix is 20.x and 22.x.
+
+Now `>=20.0.0`. Note that `better-sqlite3` enumerates majors rather than using a
+floor, so 19 and 21 are excluded too.
+
+## `better-sqlite3` floor raised to `^12.11.1` — WAL corruption
+
+Not a routine bump. `12.6.2` bundled **SQLite 3.51.2**, which carries a
+WAL-reset database-corruption bug fixed in **3.51.3**
+([sqlite.org/changes.html](https://sqlite.org/changes.html), 2026-03-13).
+
+Engram runs in WAL mode and is explicitly a multi-agent, multi-IDE tool, so the
+trigger — two or more connections writing or checkpointing the same file at the
+same instant — **is its normal operating mode**, not a corner case. `12.11.1`
+bundles 3.53.2, verified by querying `sqlite_version()`.
+
+## The published `package.json` carried the wrong release notes
+
+`prepack` injects the changelog into `package.json` at publish time, and nothing
+put it back — there was no `postpack`. The consequence was that a **stale value
+sat committed in the file**: the v1.14.0 tree carried v1.13.0's notes, 6,320
+characters of them, and nothing reported it because `prepack` silently
+overwrites the field anyway. The injector now writes a backup, `postpack`
+restores it, and the committed value is removed with a note saying never to
+commit one.
+
+## Also
+
+- The two generated-surface gates are wired as npm scripts (`surface:check`,
+  `http-surface:check`). The generators shipped in v1.13.0; the scripts to run
+  them did not, so nothing invoked them on the published line.
+- Five type errors in the test suite are fixed, including one that was a real
+  defect: a task-status assertion used `"in-progress"` on both the write and the
+  read, so it passed by writing and reading the same wrong string and never
+  exercised the actual `in_progress` literal.
+
+## Not in this release
+
+The larger work on the `v2-foundations` branch — memory attribution under
+concurrency, session-start payload bounds, and the schema-honesty gates — is
+**not** here. It contains breaking changes and ships as `2.0.0` when its targets
+land. This release is deliberately narrow: the fixes a user needs in order to
+receive the next one.
 
 ---
 
