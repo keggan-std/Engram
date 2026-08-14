@@ -31,7 +31,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -79,7 +79,12 @@ function runCli(args: string[], cwd: string, extraEnv: Record<string, string> = 
 }
 
 function makeProject(): string {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "engram-install-e2e-"));
+    // realpathSync for the same reason as discovery-and-ledger.test.ts: macOS
+    // hands back "/var/folders/..." where "/var" is a symlink to "/private/var",
+    // and the CLI records the canonical form. Nothing here compares an absolute
+    // path today, so this is prevention rather than a fix — but the two suites
+    // build their fixtures the same way and should not drift on it.
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "engram-install-e2e-")));
     mkdirSync(path.join(dir, "__home"), { recursive: true });
     // A project marker, so detectProjectRootForDisplay resolves here with high
     // confidence rather than walking up into the real filesystem.

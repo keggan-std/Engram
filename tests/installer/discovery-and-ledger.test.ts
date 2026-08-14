@@ -31,7 +31,7 @@
 
 import { describe, it, expect, beforeAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -57,7 +57,13 @@ function runCli(args: string[], cwd: string, home: string) {
 
 /** A project with its own HOME. Returns { root, home }. */
 function makeProject(): { root: string; home: string } {
-    const dir = mkdtempSync(path.join(os.tmpdir(), "engram-discovery-"));
+    // realpathSync, because on macOS os.tmpdir() is "/var/folders/..." and
+    // "/var" is a symlink to "/private/var". The CLI canonicalises the project
+    // root it records — correctly; a config file should not carry a symlinked
+    // path — so the fixture must compare against the canonical form or it is
+    // asserting that the installer failed to do its job. Windows and Linux
+    // return the same string either way, so this is not a platform branch.
+    const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), "engram-discovery-")));
     const home = path.join(dir, "__home");
     mkdirSync(home, { recursive: true });
     const root = path.join(dir, "proj");
