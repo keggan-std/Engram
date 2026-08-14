@@ -35,6 +35,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { appDataDir } from "../../src/installer/ide-configs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(here, "..", "..", "dist", "index.js");
@@ -481,8 +482,12 @@ describe("auto-detect asks rather than assumes when Cline/Roo Code could be the 
             // Cline's extension globalStorage directory existing is the only
             // fact detectVscodeExtensionAmbiguity() has to go on — it does not
             // require an MCP settings file to already be there.
+            // appDataDir(), not a hand-written "<home>/AppData/Roaming" — the
+            // child resolves this per-platform, so spelling out the Windows
+            // layout created a directory nothing on POSIX ever looked at.
+            const appdata = appDataDir(path.join(dir, "__home"), path.join(dir, "__home", "AppData", "Roaming"));
             mkdirSync(
-                path.join(dir, "__home", "AppData", "Roaming", "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+                path.join(appdata, "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
                 { recursive: true },
             );
             const r = runCli(["install", "--yes"], dir, { TERM_PROGRAM: "vscode" });
@@ -493,7 +498,7 @@ describe("auto-detect asks rather than assumes when Cline/Roo Code could be the 
 
             // And it still did something useful rather than just warning and
             // exiting: the documented fallback is VS Code, applied and said so.
-            const written = path.join(dir, "__home", "AppData", "Roaming", "Code", "User", "mcp.json");
+            const written = path.join(appdata, "Code", "User", "mcp.json");
             expect(existsSync(written), `expected VS Code's config at ${written}\n${out}`).toBe(true);
         } finally { rmSync(dir, { recursive: true, force: true }); }
     });

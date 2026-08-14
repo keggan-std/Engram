@@ -21,12 +21,21 @@ const IS_MAC = process.platform === "darwin";
  * accidentally gave the correct value on Linux but the WRONG value on macOS
  * (~/.config instead of ~/Library/Application Support).  This broke VS Code,
  * Cline, and any other path that hangs off the AppData root on Mac.
+ *
+ * Exported as a PURE function of its inputs, not just as the constant below,
+ * because the installer test suites spawn the CLI against a fake HOME and then
+ * have to predict where it wrote. They used to spell the Windows layout out by
+ * hand — `<home>/AppData/Roaming/...` — which passed on Windows and failed on
+ * every POSIX runner, because the rule existed in two places and only one of
+ * them knew about macOS and Linux. There is one rule now, and it lives here.
  */
-const APPDATA: string = IS_WINDOWS
-    ? (process.env.APPDATA ?? path.join(HOME, "AppData", "Roaming"))
-    : IS_MAC
-        ? path.join(HOME, "Library", "Application Support")
-        : path.join(HOME, ".config"); // Linux / other POSIX
+export function appDataDir(home: string, appdataEnv?: string): string {
+    if (IS_WINDOWS) return appdataEnv ?? path.join(home, "AppData", "Roaming");
+    if (IS_MAC) return path.join(home, "Library", "Application Support");
+    return path.join(home, ".config"); // Linux / other POSIX
+}
+
+const APPDATA: string = appDataDir(HOME, process.env.APPDATA);
 
 export interface IdeDefinition {
     name: string;

@@ -35,6 +35,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { appDataDir } from "../../src/installer/ide-configs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.join(here, "..", "..", "dist", "index.js");
@@ -231,7 +232,11 @@ describe("the server is told where the project is, not left to infer it", () => 
             const r = runCli(["install", "--ide", "roocode", "--global", "--yes"], root, home);
             expect(r.status).toBe(0);
 
-            const cfgPath = path.join(home, "AppData", "Roaming", "Code", "User", "globalStorage",
+            // appDataDir(), not a hand-written "<home>/AppData/Roaming" — the
+            // child resolves this per-platform and spelling it out here made
+            // the assertion Windows-only.
+            const cfgPath = path.join(appDataDir(home, path.join(home, "AppData", "Roaming")),
+                "Code", "User", "globalStorage",
                 "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json");
             const args: string[] = JSON.parse(readFileSync(cfgPath, "utf-8")).mcpServers.engram.args;
             expect(args.filter(a => a.startsWith("--project-root=")), `global entry pinned a project root: ${JSON.stringify(args)}`).toEqual([]);

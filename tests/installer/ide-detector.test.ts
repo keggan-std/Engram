@@ -93,22 +93,37 @@ describe("detectCurrentIde", () => {
 });
 
 // ─── detectVscodeExtensionAmbiguity: paths are captured at module load,
-//     so each case reloads the module fresh against a scoped APPDATA. ───────
+//     so each case reloads the module fresh against a scoped home. ──────────
+//
+// APPDATA alone is not enough to scope this. ide-configs.ts only consults
+// %APPDATA% on Windows; on macOS and Linux the same directory hangs off
+// os.homedir(), which reads $HOME (POSIX) or %USERPROFILE% (Windows). Setting
+// only APPDATA left every POSIX runner probing the REAL home directory, so
+// the fixture directories these cases create were never the ones looked at
+// and all four assertions came back []. Scope all three, and derive the
+// expected location from appDataDir() rather than restating the layout.
 
 describe("detectVscodeExtensionAmbiguity", () => {
     let tmpDir: string;
-    let originalAppdata: string | undefined;
+    let globalStorage: string;
+    const originalEnv: Record<string, string | undefined> = {};
 
-    beforeEach(() => {
+    beforeEach(async () => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "engram-ambig-"));
-        originalAppdata = process.env.APPDATA;
+        for (const key of ["APPDATA", "HOME", "USERPROFILE"]) originalEnv[key] = process.env[key];
         process.env.APPDATA = path.join(tmpDir, "AppData", "Roaming");
+        process.env.HOME = tmpDir;
+        process.env.USERPROFILE = tmpDir;
         vi.resetModules();
+        const { appDataDir } = await import("../../src/installer/ide-configs.js");
+        globalStorage = path.join(appDataDir(tmpDir, process.env.APPDATA), "Code", "User", "globalStorage");
     });
 
     afterEach(() => {
-        if (originalAppdata === undefined) delete process.env.APPDATA;
-        else process.env.APPDATA = originalAppdata;
+        for (const [key, value] of Object.entries(originalEnv)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
         fs.rmSync(tmpDir, { recursive: true, force: true });
         vi.resetModules();
     });
@@ -119,27 +134,20 @@ describe("detectVscodeExtensionAmbiguity", () => {
     });
 
     it("flags Cline when its extension's globalStorage directory exists, even with no MCP settings file written yet", async () => {
-        fs.mkdirSync(
-            path.join(process.env.APPDATA!, "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
-            { recursive: true },
-        );
+        fs.mkdirSync(path.join(globalStorage, "saoudrizwan.claude-dev"), { recursive: true });
         const { detectVscodeExtensionAmbiguity } = await import("../../src/installer/ide-detector.js");
         expect(detectVscodeExtensionAmbiguity()).toEqual(["cline"]);
     });
 
     it("flags Roo Code when its extension's globalStorage directory exists", async () => {
-        fs.mkdirSync(
-            path.join(process.env.APPDATA!, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline"),
-            { recursive: true },
-        );
+        fs.mkdirSync(path.join(globalStorage, "rooveterinaryinc.roo-cline"), { recursive: true });
         const { detectVscodeExtensionAmbiguity } = await import("../../src/installer/ide-detector.js");
         expect(detectVscodeExtensionAmbiguity()).toEqual(["roocode"]);
     });
 
     it("flags both when both extensions are installed", async () => {
-        const base = path.join(process.env.APPDATA!, "Code", "User", "globalStorage");
-        fs.mkdirSync(path.join(base, "saoudrizwan.claude-dev"), { recursive: true });
-        fs.mkdirSync(path.join(base, "rooveterinaryinc.roo-cline"), { recursive: true });
+        fs.mkdirSync(path.join(globalStorage, "saoudrizwan.claude-dev"), { recursive: true });
+        fs.mkdirSync(path.join(globalStorage, "rooveterinaryinc.roo-cline"), { recursive: true });
         const { detectVscodeExtensionAmbiguity } = await import("../../src/installer/ide-detector.js");
         expect(detectVscodeExtensionAmbiguity()).toEqual(["cline", "roocode"]);
     });
@@ -148,7 +156,7 @@ describe("detectVscodeExtensionAmbiguity", () => {
         // Sanity check on the mechanism itself: creating the exact settings
         // file (not just its parent) must also be detected, since the
         // directory check walks up FROM that path.
-        const settingsDir = path.join(process.env.APPDATA!, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings");
+        const settingsDir = path.join(globalStorage, "saoudrizwan.claude-dev", "settings");
         fs.mkdirSync(settingsDir, { recursive: true });
         fs.writeFileSync(path.join(settingsDir, "cline_mcp_settings.json"), "{}");
         const { detectVscodeExtensionAmbiguity } = await import("../../src/installer/ide-detector.js");

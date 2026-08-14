@@ -112,7 +112,14 @@ describe("abbreviatePath", () => {
     });
 
     it("leaves a short absolute path alone", () => {
-        expect(abbreviatePath("C:\\x\\mcp.json")).toBe(path.resolve("C:\\x\\mcp.json"));
+        // Built from the filesystem root rather than written as "C:\x\mcp.json".
+        // That literal is only absolute on Windows; on POSIX path.resolve()
+        // prefixed the CWD, and since CI's checkout lives under the runner's
+        // home directory, abbreviatePath() then collapsed the prefix to "~"
+        // and the assertion compared two different things.
+        const shortAbsolute = path.join(path.parse(process.cwd()).root, "x", "mcp.json");
+        expect(shortAbsolute).toBe(path.resolve(shortAbsolute));
+        expect(abbreviatePath(shortAbsolute)).toBe(shortAbsolute);
     });
 });
 
