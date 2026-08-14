@@ -1,6 +1,6 @@
 # Project State — read this first
 
-**Generated:** 2026-08-13 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `75c595b`
+**Generated:** 2026-08-14 · **Source:** Engram `memory.db` · **Branch:** `v2-foundations` @ `38c822f`
 
 > **Generated artifact — never hand-edit.** Produced by
 > [`scripts/generate-state.mjs`](../scripts/generate-state.mjs) from Engram's own memory.
@@ -20,13 +20,13 @@
 
 | | |
 |---|---|
-| **Working branch** | `v2-foundations` @ `75c595b` — docs: a pre-release staleness sweep, and two documents that were lying about security |
-| **Published line** | `main` @ `f47df04` — docs(README): two claims that would have rendered false on the npm page |
+| **Working branch** | `v2-foundations` @ `38c822f` — docs(security): the out-of-scope list contradicted the overview it sits under |
+| **Published line** | `main` @ `b4ed1d2` — Merge pull request #8 — bring main current: Foundations Review + v1.14.0 |
 | **Pushed?** | pushed — upstream `origin/v2-foundations` |
-| **Uncommitted** | **1 file(s)** — `docs/reports/2026-08-14-session-51-52-handoff.md` |
-| **Store** | schema V26 · 53 sessions · 52 decisions · 146 observations · 96 file notes |
+| **Uncommitted** | clean |
+| **Store** | schema V26 · 54 sessions · 53 decisions · 146 observations · 96 file notes |
 
-**Latest active decision — #52:** v1.14.0 is cut from main as a narrow non-breaking release carrying only the installer fixes, rather than merging v2-foundations to main as 2.0.0.
+**Latest active decision — #53:** The app-data path rule is exported once from ide-configs.ts as appDataDir(home, appdataEnv), and the installer test suites call it instead of restating the Windows layout.
 
 **In progress:** #42 FR-D2 T5/T7 — correct the 19 drifted security claims, write down the refusals, gate the claim text
 
@@ -36,9 +36,9 @@
 
 | # | Agent | Did what |
 |---|---|---|
-| **53** | `claude-opus-5-session-53` | _(in progress)_ |
+| **54** | `claude-opus-5-session-53` | _(in progress)_ |
+| **53** | `claude-opus-5-session-53` | Finalized the v1.14.0 release. Verified from the registry that all 15 install entries now report v1.14.0, up from 13 of 13 stale — the first time a published fix in this project reached every install… |
 | **52** | `claude-opus-5-session-52` | v1.14.0 published and verified against the registry rather than the tree that built it. |
-| **51** | `claude-opus-5-session-51` | Prepared v1.14.0 on release/1.14.0, cut from main rather than merging v2-foundations, because merging is breaking (agent_name required on start, absent from main) and Release B's own targets have not… |
 
 Summaries above are the **first sentence** of a much longer record — sessions have no
 `headline` field yet (schema gap 1). Full text: `engram_session(action:"get_history")`.
@@ -47,7 +47,7 @@ Summaries above are the **first sentence** of a much longer record — sessions 
 
 ## Open and blocked
 
-**50 open tasks.** The ones that gate everything else:
+**49 open tasks.** The ones that gate everything else:
 
 | # | Task | State |
 |---|---|---|

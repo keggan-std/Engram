@@ -107,7 +107,10 @@ The following are **not** considered security vulnerabilities for Engram:
 - Vulnerabilities in `better-sqlite3`, `zod`, or `@modelcontextprotocol/sdk`
   that are not exploitable through Engram's use of those libraries — report
   those directly to the respective package maintainers
-- Denial-of-service via large inputs (Engram is not a public service)
+- Denial-of-service via large inputs **against the local stdio surface**, where
+  the caller is the user's own agent. Resource-exhaustion reports against the
+  opt-in dashboard server **are** in scope — the Overview says an HTTP server
+  ships, and an unqualified "Engram is not a public service" contradicted it
 - Issues that require the attacker to already have write access to `.engram/`
   or `~/.engram/` (if you own those dirs you own the data)
 - Scanner findings without a demonstrated exploit path
