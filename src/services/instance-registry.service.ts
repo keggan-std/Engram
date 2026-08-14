@@ -26,6 +26,7 @@ import {
   PRUNE_THRESHOLD_MS,
   DEFAULT_SHARING_MODE,
   DEFAULT_SHARING_TYPES,
+  QUERYABLE_TABLES,
   DB_VERSION,
   SERVER_VERSION,
   DB_DIR_NAME,
@@ -162,15 +163,44 @@ export class InstanceRegistryService {
 
   // ─── Build Entry ──────────────────────────────────────────────────
 
+  /**
+   * Read sharing_types out of config, tolerating absent or unparseable values.
+   *
+   * FR-D2 F4: also DROPS any stored type outside QUERYABLE_TABLES. setSharing
+   * now refuses to write one, but stores written by an earlier version still
+   * hold them, and the registry entry is what other instances read to decide
+   * what to ask for. Advertising a type no reader will serve is at best a
+   * broken promise and at worst — before searchAll was fixed — the thing that
+   * made it readable. Filtering on read closes that without a migration.
+   *
+   * Extracted because the parse was copy-pasted at two call sites with no
+   * shared owner, the same shape FR-D5 found in the installer's filename rule.
+   */
+  private readSharingTypes(): string[] {
+    const raw = this.config.get(CFG_SHARING_TYPES);
+    let parsed: unknown;
+    try {
+      parsed = raw ? JSON.parse(raw) : DEFAULT_SHARING_TYPES;
+    } catch {
+      return [...DEFAULT_SHARING_TYPES];
+    }
+    if (!Array.isArray(parsed)) return [...DEFAULT_SHARING_TYPES];
+
+    const kept = parsed.filter((t): t is string => typeof t === "string" && QUERYABLE_TABLES.has(t));
+    if (kept.length !== parsed.length) {
+      const dropped = parsed.filter(t => !kept.includes(t as string));
+      log.warn(
+        `[registry] Ignoring ${dropped.length} stored sharing type(s) that are not shareable: ` +
+        `${dropped.map(d => JSON.stringify(d)).join(", ")}. ` +
+        `Shareable types: ${[...QUERYABLE_TABLES].join(", ")}.`
+      );
+    }
+    return kept;
+  }
+
   /** Build this instance's registry entry from config + live data */
   private buildEntry(): InstanceEntry {
-    const sharingTypesRaw = this.config.get(CFG_SHARING_TYPES);
-    let sharingTypes: string[];
-    try {
-      sharingTypes = sharingTypesRaw ? JSON.parse(sharingTypesRaw) : DEFAULT_SHARING_TYPES;
-    } catch {
-      sharingTypes = DEFAULT_SHARING_TYPES;
-    }
+    const sharingTypes = this.readSharingTypes();
 
     return {
       instance_id: this.getInstanceId(),
@@ -265,12 +295,7 @@ export class InstanceRegistryService {
         existing.visible = this.isVisible();
         // Refresh sharing config in case it changed
         existing.sharing_mode = (this.config.get(CFG_SHARING_MODE) ?? DEFAULT_SHARING_MODE) as SharingMode;
-        const sharingTypesRaw = this.config.get(CFG_SHARING_TYPES);
-        try {
-          existing.sharing_types = sharingTypesRaw ? JSON.parse(sharingTypesRaw) : DEFAULT_SHARING_TYPES;
-        } catch {
-          existing.sharing_types = DEFAULT_SHARING_TYPES;
-        }
+        existing.sharing_types = this.readSharingTypes();
         // Refresh db_path if missing — entries written by older Engram versions lacked this field
         if (!existing.db_path) {
           existing.db_path = path.join(this.projectRoot, DB_DIR_NAME, this.dbFileName);
@@ -492,6 +517,22 @@ export class InstanceRegistryService {
    * Writes to both config table and registry.
    */
   setSharing(mode: SharingMode, types?: string[]): void {
+    // FR-D2 F4. This used to store `types` verbatim, so a name that no reader
+    // recognises — `observations`, `audit_log`, anything — became a stored
+    // promise to share it. checkPermission then refused that name while
+    // searchAll, which skipped the whitelist, honoured it. Refusing at the
+    // write is the half that gives the user an error instead of a silent
+    // discrepancy between what the registry advertises and what it serves.
+    if (types) {
+      const invalid = types.filter(t => !QUERYABLE_TABLES.has(t));
+      if (invalid.length > 0) {
+        throw new Error(
+          `Cannot share ${invalid.map(t => `'${t}'`).join(", ")} — not a shareable type. ` +
+          `Valid types: ${[...QUERYABLE_TABLES].join(", ")}.`
+        );
+      }
+    }
+
     const ts = new Date().toISOString();
     this.config.set(CFG_SHARING_MODE, mode, ts);
     if (types) {

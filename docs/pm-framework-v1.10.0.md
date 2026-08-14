@@ -1,7 +1,7 @@
 # PM Framework v1.10.0 — Full Feature Reference
 
 **Shipped in:** Engram v1.10.0 (March 4, 2026)  
-**Implementation plan:** [pm-framework-integration-plan-v2.md](./pm-framework-integration-plan-v2.md)  
+**Implementation plan:** [pm-framework-integration-plan-v2.md](archive/pm-framework-integration-plan-v2.md)  
 **Status:** ✅ Complete (Steps 0–9)
 
 ---

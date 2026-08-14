@@ -11,10 +11,11 @@ import * as path from "path";
 import * as fs from "fs";
 import { fileURLToPath } from "url";
 import type { WebSocketServer } from "ws";
-import { bearerAuth } from "./http-auth.js";
+import { bearerAuth, isLocalHostHeader } from "./http-auth.js";
 import { broadcaster } from "./ws-broadcaster.js";
 import { getDb } from "./database.js";
 import { SERVER_VERSION } from "./constants.js";
+import { log } from "./logger.js";
 
 // ─── Route imports ────────────────────────────────────────────────────────────
 import { sessionsRouter } from "./http-routes/sessions.routes.js";
@@ -51,6 +52,45 @@ export function createHttpServer(options: HttpServerOptions) {
   const bc = options.broadcaster ?? broadcaster;
 
   const app = express();
+
+  // ─── Host allow-list: DNS rebinding (FR-D2 T6) ────────────────────
+  //
+  // MUST come before CORS, the JSON body parser and every route, including
+  // /health and the static bundle — those are exactly what a rebinding attack
+  // reaches, since everything under /api is already behind the bearer token.
+  //
+  // CORS DOES NOT COVER THIS, which is why the block below is not redundant
+  // with the cors() call underneath it. In a DNS rebinding attack the browser
+  // believes it is talking to the attacker's origin and is therefore making a
+  // SAME-ORIGIN request: it sends no Origin header, and the CORS middleware has
+  // nothing to reject. What identifies the attack is the Host header, which
+  // still carries the attacker's hostname because that is what was resolved.
+  // Checking Host is the only thing that sees it.
+  //
+  // "It only binds to loopback" has now failed three times inside MCP itself:
+  // CVE-2025-49596 (MCP Inspector, CVSS 9.4, RCE via DNS rebinding) and
+  // CVE-2025-66416/66414, where Anthropic's own Python and TypeScript SDKs
+  // shipped DNS-rebinding protection OFF BY DEFAULT (CVSS 7.6, fixed in 1.23.0).
+  //
+  // CALIBRATED, and the calibration is load-bearing: both MCP CVEs required an
+  // UNAUTHENTICATED localhost server. Ours authenticates /api by bearer header
+  // and /ws by token, so what rebinding actually reached here was /health and a
+  // static asset bundle. Real, small, and stated at its true size — this is a
+  // few lines of defence in depth, not a patch for an RCE we had.
+  // Only the HOSTNAME is checked; the port is stripped and ignored. The port
+  // defends against nothing here — rebinding turns on which NAME resolved to
+  // this socket — and pinning it breaks every legitimate caller that reaches
+  // the server on a port this factory was not told about, which includes
+  // supertest's ephemeral binding and any future dynamic-port path.
+  app.use((req, res, next) => {
+    if (isLocalHostHeader(req.headers.host)) return next();
+    log.warn(`[Dashboard] Refused request with foreign Host header: ${JSON.stringify(req.headers.host)}`);
+    res.status(403).json({
+      ok: false,
+      error: "FORBIDDEN_HOST",
+      message: "This server accepts requests addressed to localhost only.",
+    });
+  });
 
   // ─── CORS: allow localhost only ───────────────────────────────────
   app.use(cors({

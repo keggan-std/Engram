@@ -2,22 +2,62 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # The review line and its per-domain branches are included deliberately.
+    # With `main` alone, every gate in this file — the capability surface and
+    # now the golden-fixture migration test — would sit idle for the entire
+    # Foundations Review and only fire at merge, which is the one moment a
+    # failure is most expensive and least expected.
+    branches: [main, develop, v2-foundations, "fr/**"]
   pull_request:
-    branches: [main]
+    branches: [main, develop, v2-foundations]
 
 jobs:
   test:
-    name: Test (Node ${{ matrix.node-version }})
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
 
+    # PLATFORM COVERAGE — added 2026-08-07, task #101.
+    #
+    # This job ran `ubuntu-latest` only, so `IS_WINDOWS` and `IS_MAC` in
+    # src/installer/ide-configs.ts were ALWAYS false in CI. Every Windows
+    # %APPDATA% path, every macOS ~/Library/Application Support path, and the
+    # `cmd /c` npx wrapper were dead in CI — for a tool whose first act on a
+    # user's machine is writing platform-specific config paths. The area has
+    # already shipped a wrong macOS value once (ide-configs.ts:20-24).
+    #
+    # Deliberately NOT the full cross product. os × node-version would be six
+    # jobs to answer two independent questions, and the Node question does not
+    # become more interesting on a second OS. Ubuntu carries the version matrix;
+    # Windows and macOS each run once on the version we publish against.
+    #
+    # No new `run:` step is introduced here on purpose:
+    # tests/process/ci-parity.test.ts fails the suite if a gate exists only in a
+    # workflow file, and it exempts exactly `npm ci`, `npm run build`, `npm test`.
+    # Running the whole suite per platform keeps this job inside that contract
+    # and costs less than carving out a platform-only subset would.
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         node-version: [20.x, 22.x]
+        include:
+          - os: windows-latest
+            node-version: 22.x
+          - os: macos-latest
+            node-version: 22.x
 
     steps:
+      # fetch-depth: 0 so `main` is a real ref in the checkout.
+      # tests/process/register-truth.test.ts asserts that the published line is
+      # an ancestor of this branch — senior review S2, where release/1.13.0 was
+      # cut from main, published, and never merged back, leaving a branch that
+      # would have REVERTED the release if merged. With the default shallow
+      # checkout that ref does not exist and the assertion cannot run; it fails
+      # loudly rather than skipping, so removing this line breaks the build
+      # instead of silently disarming the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -34,21 +74,33 @@ jobs:
       - name: Run tests
         run: npm test
 
-  # Added in v1.13.0. Until this release the published line ran build + test
-  # only, so the capability-surface, HTTP-surface and dead-code gates existed
-  # solely on an unpushed review branch and had never executed here at all.
+  # Reached the published line in v1.13.0. Until that release `main` ran build
+  # + test only, so every gate below existed solely on an unpushed review
+  # branch and had never executed where it was needed. The two workflows
+  # diverged for 69 commits and nothing compared them.
   #
-  # The two generator gates ALSO run inside `npm test`
-  # (tests/process/ci-parity.test.ts). That is what makes them impossible to
-  # lose to a workflow edit, which is exactly how they came to be missing:
-  # two branches carried two different workflow files and nothing compared
-  # them. This job exists to isolate the failure and to give knip a home.
+  # This job is no longer the only place these gates run, and must not become
+  # so again. The two generator --check gates ALSO run inside `npm test`
+  # (tests/process/ci-parity.test.ts), which BOTH workflows invoke, so deleting
+  # this job cannot silence them. That test also fails if a `run:` step is added
+  # here without being mirrored or classified. See ENGRAM-MASTER-PLAN.md §2.3.
+  # This job exists to isolate the failure and to give knip a home.
   surface:
     name: Capability surface
     runs-on: ubuntu-latest
 
     steps:
+      # fetch-depth: 0 so `main` is a real ref in the checkout.
+      # tests/process/register-truth.test.ts asserts that the published line is
+      # an ancestor of this branch — senior review S2, where release/1.13.0 was
+      # cut from main, published, and never merged back, leaving a branch that
+      # would have REVERTED the release if merged. With the default shallow
+      # checkout that ref does not exist and the assertion cannot run; it fails
+      # loudly rather than skipping, so removing this line breaks the build
+      # instead of silently disarming the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -63,17 +115,20 @@ jobs:
         run: npm run build
 
       # Regenerates docs/CAPABILITY-SURFACE.md from the Zod schemas and fails if
-      # it differs from what is committed, so a removed action, a dropped enum
-      # or a loosened bound blocks the merge instead of shipping unnoticed.
+      # it differs from what is committed. This is what makes a removed action, a
+      # dropped enum or a loosened bound block the merge instead of shipping
+      # unnoticed — the failure mode that cost this project ten features.
       - name: Check capability surface is up to date
         run: node scripts/generate-capability-surface.mjs --check
 
-      # The other half of the contract: this gates the HTTP API the dashboard
-      # consumes.
+      # The other half of the contract. CAPABILITY-SURFACE.md gates the MCP tool
+      # surface; this gates the HTTP API the dashboard consumes. Without it, a
+      # response-envelope change in FR-D6 breaks packages/engram-dashboard and
+      # nothing reports it until someone opens the dashboard.
       - name: Check HTTP surface is up to date
         run: node scripts/generate-http-surface.mjs --check
 
-      # Dead-code detection. knip.json is scoped to src/; packages/* are
-      # separate build entry points and are not analysed here.
+      # Dead-code detection. knip.json is scoped to src/; packages/* are separate
+      # build entry points and would drown the signal.
       - name: Check for dead code
         run: npx -y knip@5 --no-progress

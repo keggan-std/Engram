@@ -22,11 +22,11 @@ produces a diff. The surface is the contract; the version is not part of it.
 
 | Tool | Actions | Parameters |
 |---|---|---|
-| `engram_session` | 5 | 16 |
-| `engram_memory` | 38 | 78 |
+| `engram_session` | 5 | 18 |
+| `engram_memory` | 39 | 78 |
 | `engram_admin` | 37 | 31 |
 | `engram_find` | 3 | 4 |
-| **total** | **83** | **129** |
+| **total** | **84** | **131** |
 
 ## `engram_admin`
 
@@ -34,39 +34,41 @@ produces a diff. The surface is the contract; the version is not part of it.
 
 `backup` · `restore` · `list_backups` · `export` · `import` · `compact` · `clear` · `stats` · `health` · `config` · `scan_project` · `install_hooks` · `remove_hooks` · `generate_report` · `get_global_knowledge` · `discover_instances` · `get_instance_info` · `set_sharing` · `query_instance` · `search_all_instances` · `import_from_instance` · `set_instance_label` · `set_visibility` · `mark_sensitive` · `unmark_sensitive` · `list_sensitive` · `request_access` · `approve_access` · `deny_access` · `list_access_requests` · `enable_pm` · `disable_pm` · `enable_pm_lite` · `disable_pm_lite` · `decline_pm` · `reset_pm_offer` · `pm_status`
 
-| Parameter | Type | Required | Constraints |
-|---|---|---|---|
-| `action` | enum | **yes** | values: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, install_hooks, remove_hooks, generate_report, get_global_knowledge, discover_instances, get_instance_info, set_sharing, query_instance, search_all_instances, import_from_instance, set_instance_label, set_visibility, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status |
-| `confirm` | string | no | — |
-| `dry_run` | boolean | no | — |
-| `force_refresh` | boolean | no | — |
-| `ids` | array<number> | no | coerced |
-| `include_offline` | boolean | no | — |
-| `include_stale` | boolean | no | — |
-| `input_path` | string | no | — |
-| `instance_id` | string | no | — |
-| `keep_sessions` | number | no | int |
-| `key` | string | no | — |
-| `label` | string | no | — |
-| `limit` | number | no | int |
-| `max_age_days` | number | no | int |
-| `max_depth` | number | no | int |
-| `mode` | string | no | — |
-| `output_path` | string | no | — |
-| `prune_old` | boolean | no | — |
-| `query` | string | no | — |
-| `query_type` | string | no | — |
-| `reason` | string | no | — |
-| `request_id` | number | no | int |
-| `requester_instance_id` | string | no | — |
-| `requester_label` | string | no | — |
-| `resolved_by` | string | no | — |
-| `scope` | string | no | — |
-| `status` | string | no | — |
-| `type` | string | no | — |
-| `types` | array<string> | no | coerced |
-| `value` | string | no | — |
-| `visible` | union | no | — |
+| Parameter | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `action` | enum | **yes** | values: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, install_hooks, remove_hooks, generate_report, get_global_knowledge, discover_instances, get_instance_info, set_sharing, query_instance, search_all_instances, import_from_instance, set_instance_label, set_visibility, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status | Admin operation to perform. |
+| `confirm` | string | no | — | Safety confirmation string for destructive ops. |
+| `dry_run` | boolean | no | — | — |
+| `force_refresh` | boolean | no | — | — |
+| `ids` | array<number> | no | coerced | Record IDs for selective import. |
+| `include_offline` | boolean | no | — | Include permanently enrolled instances that are currently offline (default true). |
+| `include_stale` | boolean | no | — | Include stale/stopped instances in discovery. |
+| `input_path` | string | no | — | — |
+| `instance_id` | string | no | — | Target instance UUID for cross-instance queries. |
+| `keep_sessions` | number | no | int | — |
+| `key` | string | no | — | — |
+| `label` | string | no | — | Human-readable instance label. |
+| `limit` | number | no | int | Max results to return. |
+| `max_age_days` | number | no | int | — |
+| `max_depth` | number | no | int | — |
+| `mode` | string | no | — | Sharing mode: none, read, or full. |
+| `output_path` | string | no | — | — |
+| `prune_old` | boolean | no | — | — |
+| `query` | string | no | — | Search query for cross-instance search. |
+| `query_type` | string | no | — | Memory type to query for query_instance: decisions, conventions, file_notes, tasks, sessions, changes. Alias for type when using query_instance. |
+| `reason` | string | no | — | Reason for access request. |
+| `request_id` | number | no | int | Access request ID for approve/deny. |
+| `requester_instance_id` | string | no | — | Instance ID of the requester. |
+| `requester_label` | string | no | — | Human-readable label of the requester. |
+| `resolved_by` | string | no | — | Who approved/denied (default: human). |
+| `scope` | string | no | — | — |
+| `status` | string | no | — | Filter by status. |
+| `type` | string | no | — | Memory type: decisions, conventions, file_notes, tasks, sessions, changes. Used by mark_sensitive, unmark_sensitive, list_sensitive, import_from_instance. |
+| `types` | array<string> | no | coerced | Sharing types array: decisions, conventions, file_notes, tasks, etc. |
+| `value` | string | no | — | — |
+| `visible` | union | no | — | Visibility toggle for set_visibility: true = permanently enrolled in dashboard, false = heartbeat-only (default). |
+
+> **No description** (11 of 31): `dry_run`, `force_refresh`, `input_path`, `keep_sessions`, `key`, `max_age_days`, `max_depth`, `output_path`, `prune_old`, `scope`, `value`
 
 > **Unbounded** (no min/max, accepts any value of its type): `output_path`, `input_path`, `confirm`, `keep_sessions`, `max_age_days`, `scope`, `key`, `value`, `max_depth`, `instance_id`, `type`, `query_type`, `query`, `limit`, `mode`, `label`, `status`, `reason`, `request_id`, `resolved_by`, `requester_instance_id`, `requester_label`
 
@@ -76,101 +78,103 @@ produces a diff. The surface is the contract; the version is not part of it.
 
 `search` · `discover` · `lint`
 
-| Parameter | Type | Required | Constraints |
-|---|---|---|---|
-| `action` | enum | no | values: search, discover, lint; default "search" |
-| `content` | string | no | — |
-| `file_path` | string | no | — |
-| `query` | string | no | — |
+| Parameter | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `action` | enum | no | values: search, discover, lint; default "search" | 'search'/'discover' = catalog lookup (default). 'lint' = check content against conventions. |
+| `content` | string | no | — | Code/text content to lint. For: lint. |
+| `file_path` | string | no | — | Optional file path for context. For: lint. |
+| `query` | string | no | — | Keyword query for search action. |
 
 > **Unbounded** (no min/max, accepts any value of its type): `query`, `content`, `file_path`
 
 ## `engram_memory`
 
-**Actions (38):**
+**Actions (39):**
 
-`get_file_notes` · `set_file_notes` · `set_file_notes_batch` · `record_change` · `get_file_history` · `begin_work` · `record_decision` · `record_decisions_batch` · `get_decisions` · `update_decision` · `add_convention` · `get_conventions` · `toggle_convention` · `create_task` · `update_task` · `get_tasks` · `checkpoint` · `get_checkpoint` · `search` · `what_changed` · `get_dependency_map` · `record_milestone` · `get_milestones` · `schedule_event` · `get_scheduled_events` · `update_scheduled_event` · `acknowledge_event` · `check_events` · `dump` · `claim_task` · `release_task` · `agent_sync` · `get_agents` · `broadcast` · `route_task` · `record_observation` · `get_observations` · `get_knowledge`
+`get_file_notes` · `set_file_notes` · `set_file_notes_batch` · `record_change` · `get_file_history` · `begin_work` · `record_decision` · `record_decisions_batch` · `get_decisions` · `update_decision` · `add_convention` · `get_conventions` · `toggle_convention` · `create_task` · `update_task` · `get_tasks` · `checkpoint` · `get_checkpoint` · `search` · `what_changed` · `get_dependency_map` · `record_milestone` · `get_milestones` · `schedule_event` · `get_scheduled_events` · `update_scheduled_event` · `acknowledge_event` · `check_events` · `dump` · `claim_task` · `release_task` · `agent_sync` · `get_agents` · `broadcast` · `route_task` · `record_observation` · `get_observations` · `update_observation` · `get_knowledge`
 
-| Parameter | Type | Required | Constraints |
-|---|---|---|---|
-| `action` | enum | **yes** | values: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history, begin_work, record_decision, record_decisions_batch, get_decisions, update_decision, add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks, checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone, get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event, check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task, record_observation, get_observations, get_knowledge |
-| `action_data` | string | no | — |
-| `action_summary` | string | no | — |
-| `add_blocked_by` | array<number> | no | coerced |
-| `add_blocks` | array<number> | no | coerced |
-| `affected_files` | array<string> | no | coerced |
-| `agent_id` | string | no | — |
-| `agent_name` | string | no | — |
-| `approved` | boolean | no | — |
-| `assigned_files` | array<string> | no | coerced |
-| `blocked_by` | array<number> | no | coerced |
-| `category` | string | no | — |
-| `changes` | array<object> | no | — |
-| `compact` | boolean | no | — |
-| `complexity` | string | no | — |
-| `content` | string | no | — |
-| `context_chars` | number | no | int |
-| `context_tokens_used` | number | no | int |
-| `context_window_total` | number | no | int |
-| `current_task_id` | number | no | int |
-| `current_understanding` | string | no | — |
-| `decision` | string | no | — |
-| `decisions` | array<object> | no | — |
-| `dependencies` | array<string> | no | coerced |
-| `dependents` | array<string> | no | coerced |
-| `depends_on` | array<number> | no | coerced |
-| `depth` | number | no | int |
-| `description` | string | no | — |
-| `enforced` | boolean | no | — |
-| `examples` | array<string> | no | coerced |
-| `executive_summary` | string | no | — |
-| `expires_in_minutes` | number | no | int |
-| `export_global` | boolean | no | — |
-| `file_path` | string | no | — |
-| `file_path_filter` | string | no | — |
-| `files` | array<object> | no | — |
-| `force` | boolean | no | — |
-| `from_agent` | string | no | — |
-| `hint` | string | no | — |
-| `id` | number | no | int |
-| `include_disabled` | boolean | no | — |
-| `include_done` | boolean | no | — |
-| `include_git` | boolean | no | — |
-| `include_tool_log` | boolean | no | — |
-| `knowledge_type` | enum | no | values: principles, phase_info, checklist, instructions, estimation, conventions, all |
-| `layer` | string | no | — |
-| `limit` | number | no | int |
-| `message` | string | no | — |
-| `note` | string | no | — |
-| `notes` | string | no | — |
-| `observation_category` | enum | no | values: finding, pattern, concern, idea, friction, behavior, other |
-| `owner` | string | no | — |
-| `phase` | number | no | int |
-| `priority` | enum | no | values: critical, high, medium, low |
-| `progress` | string | no | — |
-| `purpose` | string | no | — |
-| `query` | string | no | — |
-| `rationale` | string | no | — |
-| `recurrence` | string | no | — |
-| `relevant_files` | array<string> | no | coerced |
-| `requires_approval` | boolean | no | — |
-| `rule` | string | no | — |
-| `scope` | string | no | — |
-| `session_id` | number | no | int |
-| `since` | string | no | — |
-| `specializations` | array<string> | no | coerced |
-| `status` | string | no | — |
-| `supersedes` | number | no | int |
-| `tag` | string | no | — |
-| `tags` | array<string> | no | coerced |
-| `target_agent` | string | no | — |
-| `task_focus` | string | no | — |
-| `task_id` | number | no | int |
-| `timeout_minutes` | number | no | int |
-| `title` | string | no | — |
-| `trigger_type` | string | no | — |
-| `trigger_value` | string | no | — |
-| `version` | string | no | — |
+| Parameter | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `action` | enum | **yes** | values: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history, begin_work, record_decision, record_decisions_batch, get_decisions, update_decision, add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks, checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone, get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event, check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task, record_observation, get_observations, update_observation, get_knowledge | Memory operation to perform. |
+| `action_data` | string | no | — | — |
+| `action_summary` | string | no | — | — |
+| `add_blocked_by` | array<number> | no | coerced | — |
+| `add_blocks` | array<number> | no | coerced | — |
+| `affected_files` | array<string> | no | coerced | — |
+| `agent_id` | string | no | — | — |
+| `agent_name` | string | no | — | — |
+| `approved` | boolean | no | — | — |
+| `assigned_files` | array<string> | no | coerced | — |
+| `blocked_by` | array<number> | no | coerced | — |
+| `category` | string | no | — | — |
+| `changes` | array<object> | no | — | — |
+| `compact` | boolean | no | — | Return compact forms only (default: true). |
+| `complexity` | string | no | — | — |
+| `content` | string | no | — | — |
+| `context_chars` | number | no | int | — |
+| `context_tokens_used` | number | no | int | — |
+| `context_window_total` | number | no | int | — |
+| `current_task_id` | number | no | int | — |
+| `current_understanding` | string | no | — | — |
+| `decision` | string | no | — | — |
+| `decisions` | array<object> | no | — | — |
+| `dependencies` | array<string> | no | coerced | — |
+| `dependents` | array<string> | no | coerced | — |
+| `depends_on` | array<number> | no | coerced | — |
+| `depth` | number | no | int | — |
+| `description` | string | no | — | — |
+| `enforced` | boolean | no | — | — |
+| `examples` | array<string> | no | coerced | — |
+| `executive_summary` | string | no | — | 2-3 sentence micro summary for fast Tier-1 reads (set_file_notes). |
+| `expires_in_minutes` | number | no | int | — |
+| `export_global` | boolean | no | — | — |
+| `file_path` | string | no | — | — |
+| `file_path_filter` | string | no | — | — |
+| `files` | array<object> | no | — | — |
+| `force` | boolean | no | — | — |
+| `from_agent` | string | no | — | — |
+| `hint` | string | no | — | — |
+| `id` | number | no | int | — |
+| `include_disabled` | boolean | no | — | — |
+| `include_done` | boolean | no | — | — |
+| `include_git` | boolean | no | — | — |
+| `include_tool_log` | boolean | no | — | — |
+| `knowledge_type` | enum | no | values: principles, phase_info, checklist, instructions, estimation, conventions, all | — |
+| `layer` | string | no | — | — |
+| `limit` | number | no | int | — |
+| `message` | string | no | — | — |
+| `note` | string | no | — | — |
+| `notes` | string | no | — | — |
+| `observation_category` | enum | no | values: finding, pattern, concern, idea, friction, behavior, other | Category for record_observation. |
+| `owner` | string | no | — | — |
+| `phase` | number | no | int | Phase number 1-6 for phase_info, checklist, or instructions. |
+| `priority` | enum | no | values: critical, high, medium, low | — |
+| `progress` | string | no | — | — |
+| `purpose` | string | no | — | — |
+| `query` | string | no | — | — |
+| `rationale` | string | no | — | — |
+| `recurrence` | string | no | — | — |
+| `relevant_files` | array<string> | no | coerced | — |
+| `requires_approval` | boolean | no | — | — |
+| `rule` | string | no | — | — |
+| `scope` | string | no | — | — |
+| `session_id` | number | no | int | — |
+| `since` | string | no | coerced | — |
+| `specializations` | array<string> | no | coerced | — |
+| `status` | string | no | — | — |
+| `supersedes` | number | no | int | — |
+| `tag` | string | no | — | — |
+| `tags` | array<string> | no | coerced | — |
+| `target_agent` | string | no | — | — |
+| `task_focus` | string | no | — | — |
+| `task_id` | number | no | int | — |
+| `timeout_minutes` | number | no | int | — |
+| `title` | string | no | — | — |
+| `trigger_type` | string | no | — | — |
+| `trigger_value` | string | no | — | — |
+| `version` | string | no | — | — |
+
+> **No description** (73 of 78): `action_data`, `action_summary`, `add_blocked_by`, `add_blocks`, `affected_files`, `agent_id`, `agent_name`, `approved`, `assigned_files`, `blocked_by`, `category`, `changes`, `complexity`, `content`, `context_chars`, `context_tokens_used`, `context_window_total`, `current_task_id`, `current_understanding`, `decision`, `decisions`, `dependencies`, `dependents`, `depends_on`, `depth`, `description`, `enforced`, `examples`, `expires_in_minutes`, `export_global`, `file_path`, `file_path_filter`, `files`, `force`, `from_agent`, `hint`, `id`, `include_disabled`, `include_done`, `include_git`, `include_tool_log`, `knowledge_type`, `layer`, `limit`, `message`, `note`, `notes`, `owner`, `priority`, `progress`, `purpose`, `query`, `rationale`, `recurrence`, `relevant_files`, `requires_approval`, `rule`, `scope`, `session_id`, `since`, `specializations`, `status`, `supersedes`, `tag`, `tags`, `target_agent`, `task_focus`, `task_id`, `timeout_minutes`, `title`, `trigger_type`, `trigger_value`, `version`
 
 > **Unbounded** (no min/max, accepts any value of its type): `file_path`, `layer`, `complexity`, `purpose`, `notes`, `executive_summary`, `task_focus`, `description`, `agent_id`, `decision`, `rationale`, `status`, `supersedes`, `tag`, `file_path_filter`, `limit`, `id`, `category`, `rule`, `title`, `owner`, `current_understanding`, `progress`, `query`, `scope`, `context_chars`, `since`, `depth`, `version`, `trigger_type`, `trigger_value`, `action_summary`, `action_data`, `recurrence`, `note`, `context_tokens_used`, `context_window_total`, `content`, `hint`, `task_id`, `agent_name`, `current_task_id`, `from_agent`, `message`, `target_agent`, `expires_in_minutes`, `timeout_minutes`, `session_id`, `phase`
 
@@ -180,26 +184,30 @@ produces a diff. The surface is the contract; the version is not part of it.
 
 `start` · `end` · `get_history` · `handoff` · `acknowledge_handoff`
 
-| Parameter | Type | Required | Constraints |
-|---|---|---|---|
-| `action` | enum | **yes** | values: start, end, get_history, handoff, acknowledge_handoff |
-| `agent_name` | string | no | — |
-| `agent_role` | enum | no | values: primary, sub; default "primary" |
-| `focus` | string | no | — |
-| `id` | number | no | int |
-| `intent` | enum | no | values: full_context, quick_op, phase_work; default "full_context" |
-| `limit` | number | no | int; min 1; max 50 |
-| `next_agent_instructions` | string | no | — |
-| `offset` | number | no | int; min 0 |
-| `project_root` | string | no | — |
-| `reason` | string | no | — |
-| `resume_task` | string | no | — |
-| `summary` | string | no | — |
-| `tags` | array<string> | no | coerced |
-| `task_id` | number | no | int |
-| `verbosity` | enum | no | values: full, summary, minimal, nano |
+| Parameter | Type | Required | Constraints | Description |
+|---|---|---|---|---|
+| `action` | enum | **yes** | values: start, end, get_history, handoff, acknowledge_handoff | Session operation to perform. |
+| `agent_name` | string | no | — | Your agent identifier. REQUIRED for: start — sessions are owned by an agent and an unnamed session cannot be told apart from anyone else's. Pass the same name on 'end'/'handoff' to operate on your own session. |
+| `agent_role` | enum | no | values: primary, sub; default "primary" | 'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~120 tokens measured; the claim was 300-500 and it was the only tier that OVERstated its own cost). |
+| `focus` | string | no | — | Topic/keywords to filter context. For: start. |
+| `id` | number | no | int | Handoff ID. For: acknowledge_handoff. |
+| `intent` | enum | no | values: full_context, quick_op, phase_work; default "full_context" | Session start intent. For: start. Cost is dominated by `verbosity`, not by this. full_context=default; quick_op=session_id+rules+catalog only (~700 tokens repeat, ~2,800 on an agent's first ever session, when the full tool catalog is delivered once); phase_work=full context + current phase knowledge for PM-Full. |
+| `limit` | number | no | int; min 1; max 50 | — |
+| `next_agent_instructions` | string | no | — | — |
+| `offset` | number | no | int; min 0 | — |
+| `parent_session_id` | number | no | int | The orchestrator's session_id. For: start with agent_role='sub'. Omit to infer the most recent open session belonging to another agent. |
+| `project_root` | string | no | — | Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location. |
+| `reason` | string | no | — | Why handing off. For: handoff. |
+| `resume_task` | string | no | — | Task title to focus context on. For: start. |
+| `session_id` | number | no | int | The session handle returned by start. For: end, handoff, acknowledge_handoff. Pass it when other agents may also have sessions open — without it the newest open session is used. |
+| `summary` | string | no | — | Session accomplishments summary. Required for: end. |
+| `tags` | array<string> | no | coerced | Tags for session. For: end. |
+| `task_id` | number | no | int | Task ID to scope context around. Required when agent_role='sub'. |
+| `verbosity` | enum | no | values: full, summary, minimal, nano | Response detail level. For: start. Measured on a mature store: nano=counts+rules only (~700 tokens), minimal=counts+agent_rules (~1,300 repeat / ~3,400 first), summary=default (~1,600 repeat / ~3,800 first), full=everything, bounded (~7,000 repeat / ~9,500 first). Figures scale with store size; prefer summary. |
 
-> **Unbounded** (no min/max, accepts any value of its type): `agent_name`, `project_root`, `resume_task`, `focus`, `task_id`, `summary`, `reason`, `next_agent_instructions`, `id`
+> **No description** (3 of 18): `limit`, `next_agent_instructions`, `offset`
+
+> **Unbounded** (no min/max, accepts any value of its type): `agent_name`, `session_id`, `parent_session_id`, `project_root`, `resume_task`, `focus`, `task_id`, `summary`, `reason`, `next_agent_instructions`, `id`
 
 ---
 

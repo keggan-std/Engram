@@ -1,0 +1,14 @@
+{
+    "//": "Dogfooding config: this repo runs its OWN build, not the published package. Pointing this at `npx engram-mcp-server` means local fixes are never exercised by the live server — which is how audit N3 stayed observable for four unprompted incidents while a fix sat in dist/. Run `npm run build` after changing src/, then reload the MCP server. Switch back to npx only to verify a release.",
+    "mcpServers": {
+        "engram": {
+            "type": "stdio",
+            "command": "node",
+            "args": [
+                "d:\\Projects\\Engram Production\\Engram\\dist\\index.js",
+                "--project-root",
+                "d:\\Projects\\Engram Production\\Engram"
+            ]
+        }
+    }
+}

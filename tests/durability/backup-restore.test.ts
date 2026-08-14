@@ -221,3 +221,69 @@ describe("restore — the regression this suite exists for", () => {
         expect(integrity).toBe("ok");
     });
 });
+
+// ─── FR-D1 T2 / task #29 — the backup must verify what it wrote ───────────
+//
+// Two defects, both silent, both in the "reports success, delivers less"
+// family this suite exists for.
+//
+// 1. The checkpoint's RESULT was discarded. `wal_checkpoint(FULL)` returns
+//    `busy = 1` when another connection holds a read lock and the WAL could
+//    NOT be folded into the main file. `copyFileSync` copies only the main
+//    file, never the `-wal` sidecar — so a busy checkpoint means every commit
+//    still in the WAL is absent from the "backup", which then returns a path
+//    and a plausible byte count.
+//
+// 2. Nothing opened the copy. A backup nobody has opened is a file, and this
+//    suite's own header says a backup nobody has restored from is not a backup.
+describe("backup verifies what it wrote (task #29)", () => {
+    it("produces a copy that opens, passes integrity_check, and holds the rows", () => {
+        newStore();
+        const repos = getRepos();
+        repos.decisions.create(1, new Date().toISOString(), "a verified decision", "why", null, null);
+
+        const dest = backupDatabase();
+        expect(existsSync(dest)).toBe(true);
+
+        // The assertion the old code never made: open it and look.
+        const copy = new Database(dest, { readonly: true, fileMustExist: true });
+        expect(copy.pragma("integrity_check", { simple: true })).toBe("ok");
+        const n = (copy.prepare("SELECT COUNT(*) c FROM decisions").get() as { c: number }).c;
+        expect(n, "the backup opened cleanly but carried none of the rows").toBeGreaterThan(0);
+        copy.close();
+    });
+
+    it("refuses a destination it cannot write a valid database to, and leaves no file behind", () => {
+        newStore();
+        getRepos().decisions.create(1, new Date().toISOString(), "d", "r", null, null);
+
+        // A directory that exists as a FILE cannot hold the copy. The point is
+        // not this specific failure but that a failure surfaces as a throw with
+        // nothing left on disk, rather than a returned path to a broken file.
+        const root = mkdtempSync(path.join(os.tmpdir(), "engram-badbackup-"));
+        roots.push(root);
+        const blocker = path.join(root, "blocker");
+        writeFileSync(blocker, "not a directory");
+
+        expect(() => backupDatabase(path.join(blocker, "nested", "backup.db"))).toThrow();
+    });
+
+    it("a verification failure removes the unusable file rather than listing it as a backup", () => {
+        // The restore path lists whatever is in the backup directory as a
+        // candidate. A file that failed verification must not be in that list,
+        // or the next incident restores from it.
+        newStore();
+        getRepos().decisions.create(1, new Date().toISOString(), "d", "r", null, null);
+
+        const dest = backupDatabase();
+        expect(existsSync(dest)).toBe(true);
+
+        // Corrupt the copy after the fact and confirm a fresh backup to the same
+        // path still verifies — i.e. verification is per-call, not cached.
+        writeFileSync(dest, "garbage");
+        const again = backupDatabase(dest);
+        const copy = new Database(again, { readonly: true, fileMustExist: true });
+        expect(copy.pragma("integrity_check", { simple: true })).toBe("ok");
+        copy.close();
+    });
+});

@@ -206,21 +206,8 @@ describe("MCP wire contract (real stdio against dist/)", () => {
     }, 30_000);
 
     it("pins the error envelope: bare prose, isError:true — the recorded asymmetry", async () => {
-        // PROBE CHANGED FOR v1.13.0, and the reason is itself a finding.
-        //
-        // Upstream this probe was `end` with session_id 999999, which relies on
-        // `end` REJECTING an unknown session_id. That rejection
-        // (`if (!sessionRow) return error(...)`) arrives with the session-identity
-        // fix f234052, and f234052 makes `agent_name` REQUIRED on session start —
-        // a breaking change that is deliberately NOT in this release. So on this
-        // tree the original probe returns success and the assertion below would
-        // fail for a reason that has nothing to do with the envelope.
-        //
-        // `acknowledge_handoff` with an unknown id errors on both trees, so the
-        // envelope pin is preserved exactly. See the DEFECT pin directly below
-        // for the behaviour this release actually has.
         const raw = await client.callRaw("engram_session", {
-            action: "acknowledge_handoff", id: 999_999,
+            action: "end", session_id: 999_999, summary: "no such session",
         });
 
         expect(raw.isError).toBe(true);
@@ -235,27 +222,6 @@ describe("MCP wire contract (real stdio against dist/)", () => {
         // envelope, change this line, and say so in the commit.
         expect(() => JSON.parse(raw.content[0].text)).toThrow();
         expect(raw.content[0].text).toContain("999999");
-    }, 30_000);
-
-    it("DEFECT: `end` ignores session_id and closes the newest open session", async () => {
-        // Audit finding N3, shipped as-is in v1.13.0 and pinned so it is visible.
-        //
-        // src/tools/sessions.ts `case "end"` resolves the session with
-        // getCurrentSessionId() and never reads params.session_id at all. So a
-        // caller that passes a session_id — including one that does not exist —
-        // gets a SUCCESS envelope for having closed somebody else's session.
-        //
-        // This was assessed as a data-integrity defect rather than an
-        // exploitable one, which is why it does not travel in this release: the
-        // fix requires agent_name on session start and is therefore a major.
-        // It lands in 2.0.0. When it does, THIS ASSERTION FAILS and must be
-        // edited in the same commit — which is the entire point of pinning it.
-        const raw = await client.callRaw("engram_session", {
-            action: "end", session_id: 999_999, summary: "no such session",
-        });
-
-        expect(raw.isError).toBeUndefined();
-        expect(raw.content[0].text).not.toContain("999999");
     }, 30_000);
 
     it("returns every failure class through the same flat channel", async () => {

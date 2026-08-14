@@ -6,7 +6,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { makeEngramEntry, addToConfig, removeFromConfig, readJson } from "../../src/installer/config-writer.js";
+import { makeEngramEntry, addToConfig, removeFromConfig, readJson, getInstallerVersion } from "../../src/installer/config-writer.js";
+
+// The npm spec every written entry launches. PINNED on purpose — npx caches per
+// exact spec string, so a bare "engram-mcp-server" serves whatever it first
+// cached, forever. Derived from getInstallerVersion() rather than hardcoded so
+// a release does not have to edit these assertions.
+const SPEC = `engram-mcp-server@${getInstallerVersion()}`;
 import { IDE_CONFIGS, type IdeDefinition } from "../../src/installer/ide-configs.js";
 
 // Use a temp directory for test config files
@@ -27,7 +33,7 @@ describe("makeEngramEntry", () => {
         const entry = makeEngramEntry(IDE_CONFIGS.cursor);
         expect(entry.command).toBe("npx");
         // Cursor has workspaceVar="${workspaceFolder}", so --project-root is injected
-        expect(entry.args).toEqual(["-y", "engram-mcp-server", "--project-root=${workspaceFolder}"]);
+        expect(entry.args).toEqual(["-y", SPEC, "--project-root=${workspaceFolder}"]);
         expect(entry.type).toBeUndefined();
     });
 
@@ -58,7 +64,7 @@ describe("makeEngramEntry", () => {
         };
         const entry = makeEngramEntry(windowsIde);
         expect(entry.command).toBe("cmd");
-        expect(entry.args).toEqual(["/c", "npx", "-y", "engram-mcp-server"]);
+        expect(entry.args).toEqual(["/c", "npx", "-y", SPEC]);
         expect(entry.type).toBe("stdio");
     });
 });

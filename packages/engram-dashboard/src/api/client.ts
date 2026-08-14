@@ -18,13 +18,32 @@ export function getToken(): string | null {
   // Fallback: read from URL on first load, then persist in sessionStorage
   const fromSession = sessionStorage.getItem("engram_token");
   if (fromSession) { _token = fromSession; return _token; }
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get("token");
+
+  // FR-D2 T6. Prefer the URL FRAGMENT over the query string. A fragment is
+  // never transmitted: it does not appear in the request line, so it cannot
+  // reach the server's access log, and it is stripped from the Referer header
+  // of every subresource request the page makes.
+  //
+  // The query form was scrubbed from the address bar below, which reads like a
+  // fix and is not one — by the time this code runs the token has already been
+  // sent to the server in the GET line and is already in the Referer of
+  // anything the page loaded first. Portainer GHSA-jvp4-q659-95mj is the worked
+  // example: JWTs harvested from ?token= via logs and Referer, and an injected
+  // meta referrer tag forces full-URL leakage. This dashboard RENDERS MEMORY
+  // CONTENT, so that injection primitive points straight at our own token.
+  //
+  // The query string is still ACCEPTED so a newer bundle keeps working against
+  // an older server that only knows how to emit it.
+  const fromHash = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("token");
+  const fromQuery = new URLSearchParams(window.location.search).get("token");
+  const fromUrl = fromHash ?? fromQuery;
+
   if (fromUrl) {
     sessionStorage.setItem("engram_token", fromUrl);
-    // Remove token from URL bar without reload
+    // Clear both carriers from the address bar so a copied link is inert.
     const url = new URL(window.location.href);
     url.searchParams.delete("token");
+    url.hash = "";
     history.replaceState({}, "", url.toString());
     _token = fromUrl;
     return _token;

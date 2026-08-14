@@ -138,69 +138,176 @@ All data lives in a local SQLite WAL database. There is no telemetry, no externa
 
 ## Installation
 
-Engram is published to the npm registry. **You do not need to download or compile any code.** Your IDE will download and run the latest version automatically using `npx`.
+Engram is published to the npm registry. **You do not need to download or
+compile any code.** Your IDE launches it with `npx`.
+
+> **Always install with `@latest`.** Every command below says
+> `engram-mcp-server@latest`, and the `@latest` is not decoration — see
+> [Upgrading](#upgrading) for the measurement that made it mandatory. Without
+> it, `npx` can silently run a version it cached months ago.
 
 ### Prerequisites
 
-Engram uses **SQLite** for persistent storage via the `better-sqlite3` library, which includes a native C++ addon. On most systems this is handled automatically via prebuilt binaries. However, if no prebuilt binary matches your platform, npm will attempt to compile from source — which requires:
+- **Node.js v20 or newer.** This is a hard floor, not a recommendation:
+  `better-sqlite3@12` declares `20.x || 22.x || 23.x || 24.x || 25.x` and
+  `open@11` declares `>=20`. On Node 18 you get `EBADENGINE` followed by a
+  native build failure in the dependency that *is* the database. Releases up
+  to and including v1.13.0 wrongly advertised v18+.
 
-- **Windows:** [Node.js](https://nodejs.org) (v18+) and [Windows Build Tools](https://github.com/nodejs/node-gyp#on-windows) (Visual C++ Build Tools + Python). Install them with:
-    ```bash
-    npm install -g windows-build-tools
-    ```
-    Or install **"Desktop development with C++"** via the [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
+Engram stores data in **SQLite** via `better-sqlite3`, which ships a native
+C++ addon. Prebuilt binaries cover most platforms. If none matches yours, npm
+compiles from source, which needs:
+
+- **Windows:** [Node.js](https://nodejs.org) v20+ and Visual C++ Build Tools +
+  Python — install **"Desktop development with C++"** from the
+  [Visual Studio Installer](https://visualstudio.microsoft.com/downloads/).
 - **Mac:** Xcode Command Line Tools (`xcode-select --install`)
-- **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
+- **Linux:** `build-essential` and `python3`
+  (`sudo apt install build-essential python3`)
 
-### Option 1: The Magic Installer (Interactive)
+### Option 1: The Magic Installer (Interactive) — **use this one**
 
-Run this single command in your terminal. It will automatically detect your IDE and safely inject the configuration:
+Detects your IDE and injects the configuration safely. Install in
+**universal mode**, which is the recommended setup:
 
 ```bash
-npx -y engram-mcp-server --install
+npx -y engram-mcp-server@latest --install --universal
 ```
 
-**Universal mode** (~80 token single-tool schema — recommended for token-conscious setups):
+Universal mode exposes Engram as a **single `engram` tool with an ~80-token
+schema** instead of four dispatcher tools. Every action is still available —
+you call `engram({action:"record_decision", ...})` instead of
+`engram_memory({action:"record_decision", ...})`, and a BM25 resolver forgives
+near-miss action names. Nothing is given up: the universal catalogs and the
+four-tool action enums were compared programmatically and match exactly, **39
+of 39** memory actions and **37 of 37** admin actions reachable.
+
+> **One naming difference worth knowing.** `action:"search"` resolves to
+> *memory* search in universal mode, because the resolver checks the memory
+> dispatcher before the find dispatcher. To search the **tool catalog** — what
+> `engram_find({action:"search"})` does in four-tool mode — use its alias:
+> `engram({action:"discover", query:"..."})`.
+
+If you would rather have the four separate tools, see
+[Classic four-tool mode](#classic-mode) at the end of this section.
+
+**Non-interactive (CI/CD / scripting):**
 
 ```bash
-npx -y engram-mcp-server --install --universal
-```
-
-**Non-interactive mode (CI/CD / Scripting):**
-
-```bash
-npx -y engram-mcp-server install --ide vscode --yes
-npx -y engram-mcp-server install --ide vscode --universal --yes
+npx -y engram-mcp-server@latest install --ide vscode --universal --yes
 ```
 
 **Clean removal:**
 
 ```bash
-npx -y engram-mcp-server install --remove --ide claudecode
+npx -y engram-mcp-server@latest install --remove --ide claudecode
 ```
 
-**Check installed version vs npm latest:**
+**Check what is installed against what npm has:**
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
+```
+
+`--check` searches **this project first** — climbing up to four parent
+directories, so it works from `src/` and not only from the repo root — and then
+the machine. For each install it prints the config file, the version stamped in
+it, whether that version is behind npm, and **where that install's memory
+database is**. When something is out of date it offers to update it rather than
+making you retype a command per install.
+
+```bash
+npx -y engram-mcp-server@latest --check --scope local    # just this project and its parents
+npx -y engram-mcp-server@latest --check --scope global   # just user-level IDE configs
+npx -y engram-mcp-server@latest --check --walk-up 0      # do not climb at all
+```
+
+**Installing without being listed.** Every install is recorded in
+`~/.engram/installs.json` so `--check` can find it again — including installs
+into a custom directory, which no config scan could rediscover. `--isolated`
+skips that record:
+
+```bash
+npx -y engram-mcp-server@latest install --ide cursor --local --isolated
+```
+
+The install still happens; it simply will not appear in `--check`. The installer
+prints the config path when you use it, because that path becomes the only
+record — write it down.
+
+**Nothing is written before you have seen it.** An interactive project-local
+install shows the IDE, the mode, the config file, the database location and
+whether it will be findable, then offers *Install / change directory / toggle
+isolation / abort*. Answer with the arrow keys or the number keys.
+
+<a id="upgrading"></a>
+### Upgrading
+
+**Re-run the installer with `@latest`:**
+
+```bash
+npx -y engram-mcp-server@latest --install
+npx -y engram-mcp-server@latest --check   # confirm
+```
+
+Engram does not upgrade itself. The entry the installer writes into your IDE
+config pins an exact version — `engram-mcp-server@1.13.0`, not a floating tag —
+so the version recorded in the config is the version that runs. Moving to a new
+release is a deliberate act: run the command above.
+
+> **Why `@latest` is mandatory, measured rather than assumed.** `npx` caches
+> per **exact spec string** and will reuse that cache instead of asking the
+> registry. On the author's machine the day after v1.13.0 was published:
+>
+> ```
+> npx -y engram-mcp-server         --version   ->  v1.12.0   (cached in April)
+> npx -y engram-mcp-server@latest  --version   ->  v1.13.0
+> ```
+>
+> Both answer with the network disabled, so both are cache reads — the bare
+> spec is not "stale until it refreshes", it is pinned to an old snapshot
+> indefinitely. A user who ran the old README's bare command would keep
+> installing the version they first cached, forever, while the installer
+> cheerfully reported success.
+>
+> Releases up to v1.13.0 also wrote that bare spec into the IDE config itself,
+> so the config could record `_engram_version: "1.13.0"` beside arguments that
+> launched 1.12.0. Re-running the installer with `@latest` repairs such an
+> entry.
+
+**If `--check` still reports an old version after upgrading**, you have a
+stale `npx` cache or a global install shadowing it. Clear both:
+
+```bash
+npm cache clean --force
+npm install -g engram-mcp-server@latest   # only if you use the global install
 ```
 
 ### Option 2: Global Install (Windows Fallback)
 
-If `npx -y engram-mcp-server --install` fails on Windows, install globally first then run the installer:
+If `npx -y engram-mcp-server@latest --install` fails on Windows, install globally first, then run the installer from the global copy:
 
 ```bash
-npm install -g engram-mcp-server
+npm install -g engram-mcp-server@latest
 engram install --ide <your-ide>
 ```
+
+`@latest` matters here too: `npm install -g engram-mcp-server` on a machine
+that already has an older global copy is not guaranteed to move you forward,
+and `engram --version` will keep reporting the old number. To upgrade a global
+install later, re-run `npm install -g engram-mcp-server@latest`.
 
 Available `--ide` values: `vscode`, `cursor`, `windsurf`, `antigravity`, `claudecode`, `claudedesktop`, `visualstudio`, `cline`, `roocode`, `geminicli`, `firebasestudio`, `trae`, `jetbrains`, `androidstudio`
 
 > **Note:** During install you may see `npm warn deprecated prebuild-install@7.1.3`. This is a cosmetic warning from a transitive dependency used to download SQLite prebuilt binaries. It does not affect functionality and is safe to ignore.
 
-### Option 3: Universal Mode — Built-In Single-Tool Mode (v1.7+)
+### Option 3: Universal Mode written by hand (reference)
 
-Starting with v1.7.0, the main server itself can expose a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
+This is what `--install --universal` in [Option 1](#installation) writes for
+you. Use it if you configure MCP servers by hand, or to check what the
+installer produced.
+
+Since v1.7.0 the main server itself exposes a **single `engram` tool** (~80 token schema) via the `--mode=universal` flag — no separate proxy package needed. BM25 fuzzy routing and `discover` action built in.
 
 **VS Code Copilot** (`.vscode/mcp.json`):
 
@@ -236,6 +343,7 @@ Or set `ENGRAM_MODE=universal` as an environment variable instead of using the f
 >
 > **Use Option 3 (`--mode=universal`) instead.** It is built into this package,
 > gives the same single-tool surface, and needs nothing extra installed.
+> See [`docs/foundations/10-public-surface.md`](docs/foundations/10-public-surface.md) §2.4.
 
 The original separate proxy package design, for maximum token efficiency.
 
@@ -393,20 +501,32 @@ If you prefer to configure manually, find your IDE below. Each entry shows the c
 <details>
 <summary><strong>Antigravity IDE (Gemini)</strong></summary>
 
-**Global** — `~/.gemini/antigravity/mcp_config.json`:
+**Global** — `~/.gemini/config/mcp_config.json`
+**Project** — `.agents/mcp_config.json` in your workspace:
 
 ```json
 {
     "mcpServers": {
         "engram": {
             "command": "npx",
-            "args": ["-y", "engram-mcp-server", "--project-root=/absolute/path/to/your/project"]
+            "args": ["-y", "engram-mcp-server", "--mode=universal", "--project-root=/absolute/path/to/your/project"]
         }
     }
 }
 ```
 
-> Antigravity IDE (the desktop app) uses a separate config file from the Gemini CLI. Replace `/absolute/path/to/your/project` with your project path. Antigravity does not expand workspace-folder variables in MCP args.
+> **Corrected in v1.14.0.** Releases up to and including v1.13.0 wrote this entry
+> to `~/.gemini/antigravity/mcp_config.json`, which Antigravity does not read —
+> so the installer reported success and Engram never appeared. The paths above
+> are the ones [Antigravity's own MCP documentation](https://antigravity.google/docs/mcp)
+> gives. If you installed with an earlier version, run
+> `npx -y engram-mcp-server@latest install --remove --ide antigravity` to clear
+> the stale entry (the old path is still searched, for exactly this reason) and
+> then install again.
+
+> Antigravity does not expand workspace-folder variables in MCP args, so
+> `--project-root` must be a real absolute path. A project-local install writes
+> one for you.
 
 </details>
 
@@ -694,18 +814,52 @@ The installer automatically discovers all installed Android Studio versions and 
 
 </details>
 
+<a id="classic-mode"></a>
+### Classic four-tool mode — only if you want the explicit tool surface
+
+Everything above installs **universal mode**, and that is the recommendation.
+This section is here for people who want to explore the alternative.
+
+Drop `--universal` and the installer registers Engram as **four separate
+dispatcher tools** — `engram_session`, `engram_memory`, `engram_admin`,
+`engram_find`:
+
+```bash
+npx -y engram-mcp-server@latest --install
+npx -y engram-mcp-server@latest install --ide vscode --yes      # non-interactive
+```
+
+**What the four-tool surface costs and buys:**
+
+| | Universal (`--universal`) | Classic (no flag) |
+|---|---|---|
+| Schema tokens, every request | ~80 | ~1,600 |
+| Actions reachable | 39 memory + 37 admin + 5 session | identical |
+| Call shape | `engram({action:"get_tasks"})` | `engram_memory({action:"get_tasks"})` |
+| `action:"search"` | memory search (use `discover` for the catalog) | unambiguous — separate tools |
+| Agent picks the wrong tool | impossible — there is one | possible |
+
+The ~1,600 figure is the schema cost paid on **every** request for the life of
+the session, not once. That is the whole reason universal mode leads this
+section. Choose classic if you specifically want each dispatcher's parameter
+documentation in front of the agent, or if you are debugging which dispatcher
+an action lands in.
+
+Switching later is just a re-install with or without the flag — the database is
+untouched either way.
+
 ### Verifying Your Installation
 
 After installing, verify Engram is working by running:
 
 ```bash
-npx -y engram-mcp-server --check
+npx -y engram-mcp-server@latest --check
 ```
 
 Or use the MCP Inspector for a full interactive test:
 
 ```bash
-npx @modelcontextprotocol/inspector npx -y engram-mcp-server
+npx @modelcontextprotocol/inspector npx -y engram-mcp-server@latest
 ```
 
 In your IDE, open the AI chat and ask the agent to call `engram_session(action:"start")`. If it returns a session ID and tool catalog, Engram is running correctly.
@@ -816,57 +970,100 @@ No cloud. No telemetry. No authentication surface. Memory lives in a local SQLit
 
 ---
 
-## Dashboard
+## Dashboard — repository-only, not part of the npm package
 
-Engram ships with a built-in **visual dashboard** — a React SPA that gives you a live window into your agent's memory without touching the CLI.
+> **This is a development tool for people working on Engram itself, and it is
+> not finished.** It is documented here so the `packages/` directory is not a
+> mystery, not because it is a feature you are meant to use.
+>
+> **It does not ship to npm.** `package.json`'s `files` field is
+> `["dist/", "SECURITY.md", "THIRD-PARTY-NOTICES.md"]`; `packages/` is not in
+> it, and `npm pack` produces no dashboard files. If you installed Engram with
+> `npx` or `npm install -g`, **you do not have the dashboard and no command in
+> this section will work for you.** Running the server with `--mode=dashboard`
+> in that case serves an API-only stub page, because `http-server.ts` resolves
+> `../packages/engram-dashboard/dist` relative to `dist/` and that path does
+> not exist in an installed package.
+>
+> Until v1.13.0 this section claimed the opposite — "Engram **ships with** a
+> built-in visual dashboard" and "the dashboard **is included in the
+> package**". Both were false for every user who did not clone the repository.
+> They are corrected rather than quietly deleted, and
+> `tests/public-surface/public-surface.test.ts` now fails the build if the
+> README claims the dashboard ships while `npm pack` disagrees.
 
-### Starting the Dashboard
+### Running it from a clone
 
 ```bash
+git clone https://github.com/keggan-std/Engram.git
+cd Engram
+npm install
 npm run dashboard
 ```
 
-This builds the server, installs dashboard dependencies, and starts both the API and the Vite dev server concurrently. The terminal prints the full URL including the auth token:
+`npm run dashboard` is a **repository script**. It builds the server, installs
+the dashboard's own frontend dependencies, and runs the API and the Vite dev
+server together. The terminal prints a URL with the auth token in the
+fragment:
 
 ```
 [api]  Engram HTTP server running on port 7432
 [ui]   VITE ready in 320ms
 
-  ➜  Local:   http://localhost:5173?token=<token>
+  ➜  Local:   http://localhost:5173#token=<token>
 ```
 
-Open the printed URL directly — the token is embedded in the link and required for access.
+Open that URL as printed — the token is required. It travels in the URL
+**fragment** (`#token=`), which browsers never transmit, so it does not reach
+an access log and is stripped from `Referer`. The page moves it into
+`sessionStorage` and clears the address bar, so a copied link is inert.
 
-> **Security note:** The dashboard is intended for local development. The token prevents other local processes from reading your memory data. Do not expose ports `5173` or `7432` to a network.
+### What the token does and does not do
 
-### Pages
+- It stops **a web page you visit** from reading your memory. That is the real
+  threat: any site you browse can issue requests to `localhost`, and without
+  the token they would succeed. Requests are also refused unless addressed to
+  `localhost` by name, which is what closes DNS rebinding.
+- It does **not** stop another process running as **you**. `.engram/token` is
+  mode `0600`, which excludes other *users*, not other *processes under your
+  own account* — and file modes are a no-op on Windows.
+- There is **no encryption at rest or in transit**. The database and the token
+  are plain files; dashboard traffic is plain HTTP over loopback.
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** | Overview — session count, task totals, decisions, and change volume at a glance. Clickable stat cards navigate to the relevant page. Instance cards show per-database stats with expand/collapse. Activity chart displays recent change volume. |
-| **Tasks** | All persistent work items with status, priority, and tags. |
-| **Decisions** | Architectural decisions with rationale, affected files, and dependency chains. |
-| **Changes** | Full change history — every file edit recorded by agents and git hooks. |
-| **Conventions** | Project standards enforced every session. |
-| **File Notes** | Agent-generated file intelligence — purpose, layer, complexity, and executive summary. |
-| **Sessions** | Past session summaries with agent names and timestamps. |
-| **Events** | Scheduled and triggered events, including context-pressure warnings. |
-| **Milestones** | Named project milestones. |
-| **Audit** | Raw event log for debugging and auditing. |
-| **Settings** | Runtime config management — view and update config keys live. |
+Do not expose ports `5173` or `7432` to a network.
 
-### Dashboard Features
+### State of the implementation
 
-- **Live updates** — WebSocket connection delivers real-time pushes when any memory record changes. A live badge in the header shows connection status.
-- **Cmd+K palette** — keyboard-driven quick navigation to any page.
-- **Theme toggle** — dark/light mode, persisted to `localStorage`.
-- **Toast notifications** — non-blocking feedback for actions and live events.
-- **Detail panel** — click any table row to expand full content in a side panel.
-- **Token auth** — every HTTP request and WebSocket connection is validated against the `?token=<value>` query parameter.
+The pages below exist and render. The dashboard is nonetheless **not
+considered complete**, it is outside the `knip` dead-code gate (`knip.json` is
+scoped to `src/**`), its dependencies are not covered by this project's
+dependency auditing, and its correctness has never been reviewed. Treat
+anything it displays as informational.
+
+| Page | Shows |
+|------|-------|
+| **Dashboard** | Session, task, decision and change counts; per-database instance cards; recent change volume |
+| **Tasks** | Work items with status, priority, tags |
+| **Decisions** | Architectural decisions with rationale and affected files |
+| **Changes** | File-edit history recorded by agents and git hooks |
+| **Conventions** | Project standards |
+| **File Notes** | Per-file purpose, layer, complexity, summary |
+| **Sessions** | Past session summaries |
+| **Events** | Scheduled and triggered events |
+| **Milestones** | Named milestones |
+| **Audit** | Raw event log |
+| **Settings** | Runtime config keys |
+
+Live updates arrive over a WebSocket. HTTP requests authenticate with
+`Authorization: Bearer <token>`; the WebSocket upgrade accepts the token via
+`Sec-WebSocket-Protocol` or, for older bundles, a `?token=` query parameter.
+Comparison is constant-time, and a foreign `Host` header is refused with `403`.
 
 ### Requirements
 
-The dashboard is included in the package but its frontend dependencies are installed on first run. Node.js v18+ and an internet connection for the initial `npm install` are required. Subsequent runs use the cached install.
+Node.js **v20+** and, for the first run only, an internet connection so the
+dashboard's frontend dependencies can be installed. A working clone of this
+repository is required — see the banner above.
 
 ---
 
@@ -917,12 +1114,43 @@ Engram v1.7.0 exposes **4 dispatcher tools** (or 1 tool in `--mode=universal`). 
 
 | Action                       | Purpose                                                                                                                                                        |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `start`                      | Begin a session. Returns context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth.     |
-| `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. |
-| `end`                        | End session with a summary. Warns on unclosed claimed tasks.                                                                                                   |
+| `start`                      | Begin a session. **`agent_name` is required.** Returns `session_id`, context, agent rules, tool catalog, handoff_pending, abandoned_work, suggested_focus. Pass `verbosity` to control response depth. |
+| `start` + `agent_role:"sub"` | **v1.7** Sub-agent mode. Pass `task_id` to receive focused context (~300-500t): task details, relevant files, matching decisions, and capped conventions only. Records `parent_session_id`. |
+| `end`                        | End session with a summary. Pass `session_id` (or `agent_name`) to say which session. Warns on unclosed claimed tasks.                                        |
 | `get_history`                | Retrieve past session summaries.                                                                                                                               |
 | `handoff`                    | Package open tasks, git branch, and instructions for the next agent.                                                                                           |
 | `acknowledge_handoff`        | Clear a pending handoff from future start responses.                                                                                                           |
+
+#### Session ownership under concurrency
+
+A session belongs to exactly one agent. Starting a session retires **only your own**
+previous session — an orchestrator and the sub-agents it spawns stay open side by
+side, and no agent can close or overwrite another's record.
+
+Three rules follow from that:
+
+1. **`agent_name` is required on `start`** and should be stable across sessions.
+   It is the identity everything else is scoped by.
+2. **`start` returns a `session_id`.** Pass it back as `session_id` on `end`,
+   `handoff`, and `acknowledge_handoff` when other agents may be running. Passing
+   your `agent_name` instead resolves to your own newest open session. With
+   neither, the newest open session of any agent is used and the response says so
+   in `session_resolution`.
+3. **A sub-agent session records `parent_session_id`**, inferred from the most
+   recent open session belonging to another agent, or set explicitly by passing
+   `parent_session_id`.
+
+```js
+// Orchestrator
+const { session_id } = engram_session({ action: "start", agent_name: "lead" });
+
+// Sub-agent — does not disturb the orchestrator's session
+engram_session({ action: "start", agent_name: "sub-1", agent_role: "sub", task_id: 42,
+                 parent_session_id: session_id });
+
+// Each closes its own
+engram_session({ action: "end", session_id, summary: "..." });
+```
 
 ### `engram_memory` — All Memory Operations
 
@@ -1064,13 +1292,16 @@ Multi-step plans, analyses, proposals → write to `docs/<name>.md`. Chat gets s
 1. Record unrecorded changes
 2. Mark done tasks: `engram_memory({ action: "update_task", id: N, status: "done" })`
 3. Create tasks for incomplete work
-4. `engram_session({ action: "end", summary: "files touched, pending work, blockers" })`
+4. `engram_session({ action: "end", session_id: <from start>, summary: "files touched, pending work, blockers" })`
 
 ### Sub-Agent Sessions (v1.7+)
 ```js
-engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42 })
+engram_session({ action: "start", agent_name: "sub-agent-X", agent_role: "sub", task_id: 42,
+                 parent_session_id: <orchestrator's session_id> })
 ```
 Returns only the assigned task, its file notes, matching decisions, and up to 5 conventions (~300–500 tokens). Sub-agents still call `record_change` and `session end` as normal.
+
+`agent_name` is required and must be unique per agent — it is what stops concurrent agents from closing each other's sessions. Pass your own `session_id` on `end`.
 
 <!-- ENGRAM_INSTRUCTIONS_END -->
 
@@ -1230,7 +1461,7 @@ operable program or batch file.
 **Fix — use a global install instead of `npx`:**
 
 ```bash
-npm install -g engram-mcp-server
+npm install -g engram-mcp-server@latest
 ```
 
 Then update your MCP config to use the binary directly:

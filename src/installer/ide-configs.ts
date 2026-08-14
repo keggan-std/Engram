@@ -21,12 +21,21 @@ const IS_MAC = process.platform === "darwin";
  * accidentally gave the correct value on Linux but the WRONG value on macOS
  * (~/.config instead of ~/Library/Application Support).  This broke VS Code,
  * Cline, and any other path that hangs off the AppData root on Mac.
+ *
+ * Exported as a PURE function of its inputs, not just as the constant below,
+ * because the installer test suites spawn the CLI against a fake HOME and then
+ * have to predict where it wrote. They used to spell the Windows layout out by
+ * hand — `<home>/AppData/Roaming/...` — which passed on Windows and failed on
+ * every POSIX runner, because the rule existed in two places and only one of
+ * them knew about macOS and Linux. There is one rule now, and it lives here.
  */
-const APPDATA: string = IS_WINDOWS
-    ? (process.env.APPDATA ?? path.join(HOME, "AppData", "Roaming"))
-    : IS_MAC
-        ? path.join(HOME, "Library", "Application Support")
-        : path.join(HOME, ".config"); // Linux / other POSIX
+export function appDataDir(home: string, appdataEnv?: string): string {
+    if (IS_WINDOWS) return appdataEnv ?? path.join(home, "AppData", "Roaming");
+    if (IS_MAC) return path.join(home, "Library", "Application Support");
+    return path.join(home, ".config"); // Linux / other POSIX
+}
+
+const APPDATA: string = appDataDir(HOME, process.env.APPDATA);
 
 export interface IdeDefinition {
     name: string;
@@ -91,6 +100,12 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // the server always receives the correct project root without heuristics.
         workspaceVar: "${workspaceFolder}",
         scopes: {
+            // TASK #110 (item 1): REPORTED, not VERIFIED. No vendor doc states
+            // this exact OS-specific path — VS Code's own docs only say "in
+            // your user profile folder", reachable via the "MCP: Open User
+            // Configuration" command. This is plausible by settings.json
+            // convention (same directory VS Code's other user settings live
+            // in) and has not been confirmed against a canonical source.
             global: [
                 path.join(APPDATA, "Code", "User", "mcp.json"),
             ],
@@ -137,16 +152,38 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // No envVar — Gemini CLI only expands real OS env vars ($VAR or ${VAR} syntax);
         // setting ${workspaceFolder} would pass the literal string instead of the resolved path.
         //
-        // No localDirs — Antigravity is an IDE, not a CLI. It always reads the global user-level
-        // config (~/.gemini/settings.json). Project-local .gemini/settings.json is only read by
-        // the Gemini CLI tool when invoked from a terminal inside a project directory, NOT by the IDE.
-        // The Engram database location (per-project) is handled at session start by findProjectRoot()
-        // and the project_root_required fallback (v1.9.1) — it is orthogonal to MCP config placement.
+        // CORRECTED 2026-08-11, and this entry could not install Engram at all before.
+        //
+        // VERIFIED against https://antigravity.google/docs/mcp, which states:
+        // "The configuration file is located globally at ~/.gemini/config/mcp_config.json
+        // (or locally in your workspace under .agents/mcp_config.json)."
+        //
+        // Two errors, and the comment that used to sit here contained a third.
+        //  1. The global path was ~/.gemini/antigravity/mcp_config.json — a
+        //     directory Antigravity does not read. Recorded here as
+        //     "user-verified", which it was: the file existed on one machine.
+        //     What was never verified is that the IDE reads it, and it does not.
+        //     An install written there was silent, successful and inert.
+        //  2. localDirs was deliberately omitted, on the stated reasoning that
+        //     "Antigravity is an IDE, not a CLI" and so reads only the global
+        //     file. The vendor documents a project-local path in the same
+        //     sentence as the global one.
+        //  3. That same comment named ~/.gemini/settings.json as the file it
+        //     reads, which is Gemini CLI's config and disagrees with the path
+        //     the entry itself declared. Three sources of truth in one entry,
+        //     none of them the vendor.
+        //
+        // The old path is kept as a SEARCH path so `--check` and `--remove` can
+        // still find and clean up the inert entries earlier versions wrote.
+        // Writing always targets scopes.global[0], so a fresh install cannot
+        // land there again.
         scopes: {
-            // User-verified: ~/.gemini/antigravity/mcp_config.json
-            // This is the Antigravity desktop IDE app path — distinct from Gemini CLI.
-            // Source: user-verified on Windows (C:\Users\~ RG\.gemini\antigravity\mcp_config.json)
-            global: [path.join(HOME, ".gemini", "antigravity", "mcp_config.json")],
+            global: [
+                path.join(HOME, ".gemini", "config", "mcp_config.json"),
+                path.join(HOME, ".gemini", "antigravity", "mcp_config.json"), // legacy, search only
+            ],
+            localDirs: [".agents"],
+            localFile: "mcp_config.json",
         },
     },
 
@@ -208,7 +245,13 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
             //   Windows : %APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json
             //   macOS   : ~/Library/Application Support/Code/User/globalStorage/.../cline_mcp_settings.json
             //   Linux   : ~/.config/Code/User/globalStorage/.../cline_mcp_settings.json
-            // Source: confirmed from cline/cline disk.ts GlobalFileNames.mcpSettings
+            //
+            // TASK #110 (item 4): "confirmed" below overstated what a 2026-08-11
+            // audit could establish — this path is corroborated only by
+            // third-party docs describing cline/cline's disk.ts
+            // GlobalFileNames.mcpSettings; no canonical vendor page was found
+            // that states it directly. REPORTED, not VERIFIED.
+            // Source: cline/cline disk.ts GlobalFileNames.mcpSettings (third-party corroboration)
             global: [
                 path.join(APPDATA, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
             ],
@@ -267,6 +310,11 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         // FLAW-4 FIX: Trae officially supports ${workspaceFolder} in args/command fields.
         // Source: https://docs.trae.ai/ide/add-mcp-servers
         workspaceVar: "${workspaceFolder}",
+        // TASK #110 (item 3): only the project-level path (.trae/mcp.json) is
+        // vendor-documented. A user-level config may also exist alongside it —
+        // two fetches of the vendor page truncated before confirming — so no
+        // `global` entry is declared here rather than guess one. REPORTED, not
+        // VERIFIED: workspaceVar above is the one confirmed claim in this entry.
         scopes: {
             localDirs: [".trae"],
         },
@@ -300,8 +348,14 @@ export const IDE_CONFIGS: Record<string, IdeDefinition> = {
         configKey: "mcpServers",
         requiresType: false,
         requiresCmdWrapper: false,
-        // Android Studio requires `enabled: true` in each MCP server entry.
-        // Without it, the server may be ignored by Gemini Agent mode.
+        // TASK #110 (item 5): the justification this comment used to give —
+        // "without it, the server may be ignored by Gemini Agent mode" — was
+        // itself unverified and, per a 2026-08-11 audit, wrong: the vendor
+        // documents `enabled` as OPTIONAL, defaulting to true, and omits it
+        // from its own example entry. Kept anyway because setting it is
+        // harmless and matches the actual mcp.json entries this config key was
+        // verified against (see the file-level comment above) — just not for
+        // the reason originally written here.
         extraEntryFields: { enabled: true },
         // Config path is versioned: %APPDATA%\Google\AndroidStudio<VERSION>\mcp.json
         // Multiple versions can coexist. `resolveGlobalPaths` discovers all of them

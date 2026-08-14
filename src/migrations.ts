@@ -775,42 +775,325 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 25,
+    description: "Repair decisions.superseded_by — clear it on rows that were never superseded",
+    up: (db) => {
+      // DecisionsRepo.create() bound the `supersedes` argument to the NEW row's
+      // `superseded_by` column. That column means "the decision that replaced
+      // this one", so the new, authoritative decision was left pointing
+      // backwards at the one it replaced — `status:'active'` and
+      // `superseded_by:<older id>` simultaneously, which is self-contradictory.
+      //
+      // The write path is fixed in decisions.repo.ts. This repairs databases
+      // that already recorded a superseding decision.
+      //
+      // Only a row whose status is actually 'superseded' may carry the pointer.
+      // Idempotent, and a no-op on any database that never used `supersedes`.
+      db.exec(`
+        UPDATE decisions
+           SET superseded_by = NULL
+         WHERE superseded_by IS NOT NULL
+           AND status <> 'superseded';
+      `);
+    },
+  },
+  {
+    version: 26,
+    description: "Populate fts_file_notes — it has never had triggers, so file-note search always returned nothing",
+    up: (db) => {
+      // V2 created fts_file_notes and then omitted file_notes from BOTH the
+      // trigger block and the backfill that every other content table got.
+      // Nothing in src/ has ever written to it either, so the inverted index
+      // has been empty since the table was created and both read paths
+      // (intelligence.ts, dispatcher-memory.ts `search`) returned no file-note
+      // hits and reported no error.
+      //
+      // PROVEN on a real store before this migration was written: fts5 keeps
+      // its baseline 2 rows in fts_file_notes_data where the six working
+      // shadows hold 13 to 64, and `MATCH 'the'` returned 0 against 96 base
+      // rows of which 70 contain the word.
+      //
+      // DO NOT verify this by comparing row counts or column values between
+      // file_notes and fts_file_notes. For an external-content table those
+      // reads are served THROUGH the base table by rowid, so they agree
+      // perfectly whether or not an index exists — 96 vs 96 and zero drift
+      // across 288 field comparisons, all of it tautological. Only a MATCH
+      // query or the _data row count touches the actual index.
+      //
+      // Three things differ from a straight copy of the other six:
+      //
+      // 1. No content_rowid. file_notes is keyed `file_path TEXT PRIMARY KEY`
+      //    and has no `id` column, so the implicit rowid is correct here.
+      //    Adding content_rowid='id' to match the others would not compile.
+      //
+      // 2. executive_summary joins the indexed columns. Agent rule AR-06
+      //    requires every agent to write it, and it was the one required field
+      //    that restoring the triggers alone would have left unsearchable.
+      //    fts5 columns cannot be ALTERed, hence the drop and recreate — which
+      //    costs nothing, the table being empty.
+      //
+      // 3. Soft-deleted rows are kept OUT of the index rather than filtered at
+      //    read time. file_notes.deleted_at exists (V19) and is currently
+      //    written by nothing in src/, so this is precautionary: if soft delete
+      //    is ever wired up, search must not resurrect deleted notes. REJECTED
+      //    the alternative of indexing everything and adding
+      //    `AND deleted_at IS NULL` to each reader — that is the rule copied to
+      //    N call sites with nothing to catch site N+1, the exact shape FR-D5
+      //    found in the installer and #127 found again in addToConfig. One
+      //    trigger enforces it for every reader, present and future.
+      //
+      // The UPDATE trigger uses `INSERT ... SELECT ... WHERE` rather than two
+      // WHEN-guarded triggers. SQLite does not define the firing order of two
+      // triggers of the same kind on the same table, so a WHEN pair could run
+      // insert-before-delete on an ordinary edit and silently unindex the row —
+      // reintroducing this very bug, intermittently. One trigger, ordered
+      // statements, each self-guarding.
+      //
+      // Idempotent by construction: the drop precedes every create.
+      db.exec(`
+        DROP TRIGGER IF EXISTS trg_file_notes_ai;
+        DROP TRIGGER IF EXISTS trg_file_notes_au;
+        DROP TRIGGER IF EXISTS trg_file_notes_ad;
+        DROP TABLE IF EXISTS fts_file_notes;
+
+        CREATE VIRTUAL TABLE fts_file_notes USING fts5(
+          file_path,
+          purpose,
+          notes,
+          executive_summary,
+          content='file_notes'
+        );
+
+        CREATE TRIGGER trg_file_notes_ai AFTER INSERT ON file_notes BEGIN
+          INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+            SELECT new.rowid, new.file_path, new.purpose, new.notes, new.executive_summary
+             WHERE new.deleted_at IS NULL;
+        END;
+
+        CREATE TRIGGER trg_file_notes_au AFTER UPDATE ON file_notes BEGIN
+          INSERT INTO fts_file_notes(fts_file_notes, rowid, file_path, purpose, notes, executive_summary)
+            SELECT 'delete', old.rowid, old.file_path, old.purpose, old.notes, old.executive_summary
+             WHERE old.deleted_at IS NULL;
+          INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+            SELECT new.rowid, new.file_path, new.purpose, new.notes, new.executive_summary
+             WHERE new.deleted_at IS NULL;
+        END;
+
+        CREATE TRIGGER trg_file_notes_ad AFTER DELETE ON file_notes BEGIN
+          INSERT INTO fts_file_notes(fts_file_notes, rowid, file_path, purpose, notes, executive_summary)
+            SELECT 'delete', old.rowid, old.file_path, old.purpose, old.notes, old.executive_summary
+             WHERE old.deleted_at IS NULL;
+        END;
+
+        INSERT INTO fts_file_notes(rowid, file_path, purpose, notes, executive_summary)
+          SELECT rowid, file_path, purpose, notes, executive_summary
+            FROM file_notes
+           WHERE deleted_at IS NULL;
+      `);
+
+      // ── The same defect, one table over ────────────────────────────────
+      //
+      // Found by the derived assertion in tests/storage/fts-file-notes.test.ts,
+      // not by looking: fts_events (V4, content='scheduled_events') has exactly
+      // one trigger, fts_events_insert. It indexes on INSERT and then never
+      // hears about an UPDATE or a DELETE.
+      //
+      // That is worse than an index that is merely stale. For an external-
+      // content table the index holds rowids and the COLUMNS are read back
+      // through the base table, so after an edit the terms point at a row whose
+      // text no longer contains them, and after a delete they point at a row
+      // that is gone. `update_scheduled_event` and `acknowledge_event` are both
+      // live actions, so both happen in normal use.
+      //
+      // Fixed here rather than filed, because it is the same finding: the
+      // trigger set is the thing nobody checks, and the test that now checks it
+      // is in this commit.
+      db.exec(`
+        DROP TRIGGER IF EXISTS fts_events_update;
+        DROP TRIGGER IF EXISTS fts_events_delete;
+
+        CREATE TRIGGER fts_events_update AFTER UPDATE ON scheduled_events BEGIN
+          INSERT INTO fts_events(fts_events, rowid, title, description, action_summary)
+            VALUES('delete', old.id, old.title, old.description, old.action_summary);
+          INSERT INTO fts_events(rowid, title, description, action_summary)
+            VALUES (new.id, new.title, new.description, new.action_summary);
+        END;
+
+        CREATE TRIGGER fts_events_delete AFTER DELETE ON scheduled_events BEGIN
+          INSERT INTO fts_events(fts_events, rowid, title, description, action_summary)
+            VALUES('delete', old.id, old.title, old.description, old.action_summary);
+        END;
+      `);
+
+      // Rebuild rather than backfill: unlike file_notes this index is not
+      // empty, it is WRONG — every row edited or deleted since V4 left terms
+      // behind. 'rebuild' discards and regenerates from the content table,
+      // which is the only way to drop entries whose original values are no
+      // longer recoverable.
+      db.exec(`INSERT INTO fts_events(fts_events) VALUES('rebuild');`);
+    },
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────
 
 export function runMigrations(db: DatabaseType): void {
+  runMigrationsTo(db, Number.POSITIVE_INFINITY);
+}
+
+/**
+ * Run the chain up to and including `targetVersion`, then stop.
+ *
+ * `runMigrations` is this function with no ceiling, so there is exactly one
+ * implementation of the chain and a partial run cannot drift from a full one.
+ *
+ * This exists for ONE reason: building a database that is genuinely at an
+ * historical schema version, so a test can migrate REAL data forward through
+ * the real chain. Every other suite starts from an empty database at head,
+ * which is why V2, V23, V24 and V25 — the four migrations that mutate
+ * pre-existing rows — had never executed against a row they were written to
+ * touch. See tests/migrations/upgrade-path.test.ts.
+ *
+ * Not for production use: the server always migrates to head.
+ */
+export function runMigrationsTo(db: DatabaseType, targetVersion: number): void {
   // Ensure schema_meta table exists
   db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
 
-  // Get current version
-  const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
-  const currentVersion = row ? parseInt(row.value, 10) : 0;
+  const readVersion = (): number => {
+    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : 0;
+  };
+  const pendingFrom = (from: number) =>
+    migrations.filter(m => m.version > from && m.version <= targetVersion);
 
-  // Filter migrations that need to run
-  const pendingMigrations = migrations.filter(m => m.version > currentVersion);
+  // ─── FR-D1 T4 / task #31 — refuse a database from the future ────────
+  //
+  // A store written by a NEWER Engram than this one is not something this
+  // binary can understand, and the failure is silent in the worst possible
+  // direction: every migration is already applied, so the chain has nothing to
+  // do, the fast path below returns cleanly, and the server proceeds to read
+  // and WRITE a schema whose columns and constraints it does not know. Columns
+  // added by the newer version are never populated; NOT NULL columns it does
+  // not know about make writes fail in ways that read as corruption; and the
+  // downgrade is silent, so the user's first evidence is damaged data.
+  //
+  // This is a realistic path, not a hypothetical: `npx` pins per exact spec
+  // string, IDE configs pin an exact version (task #107), and a machine can
+  // easily run two Engram versions against one project — a globally installed
+  // 1.12.0 in one IDE and 1.14.0 in another. Whichever starts first migrates;
+  // the older one then opens a future database.
+  //
+  // Refusing is the whole fix. There is no safe automatic action: down-migration
+  // is not implemented and never will be for a store whose newer schema this
+  // binary has no definition of. So it throws with both versions and the one
+  // instruction that resolves it.
+  //
+  // REJECTED — warn and continue: that is exactly today's behaviour with a log
+  // line attached, and FR-D6 T6 established that IDE MCP hosts discard stderr,
+  // so the warning reaches nobody while the writes still land. REJECTED —
+  // open read-only: a memory server that silently stops recording is the
+  // inert-surface defect this review exists to stop, and the agent would go on
+  // believing its writes succeeded.
+  {
+    const current = readVersion();
+    const head = migrations.length > 0 ? migrations[migrations.length - 1].version : 0;
+    if (current > head) {
+      throw new Error(
+        `Engram database is at schema v${current}, but this build only knows up to v${head}. ` +
+        `It was written by a newer version of Engram, and running this one against it would ` +
+        `write rows this build cannot describe. Nothing has been changed. ` +
+        `Upgrade Engram (npx -y engram-mcp-server@latest install --check --update), ` +
+        `or point this build at a different project.`,
+      );
+    }
+  }
 
-  if (pendingMigrations.length === 0) {
+  // ─── FAST PATH, deliberately unlocked ──────────────────────────────
+  // The overwhelmingly common case is a server starting against a database
+  // already at head, and that case must not take a write lock: BEGIN IMMEDIATE
+  // blocks every other writer, and paying that on every process start to guard
+  // a first-run-only race would be a worse trade than the race. A stale read
+  // here is safe because the slow path re-reads under the lock.
+  if (pendingFrom(readVersion()).length === 0) {
     return; // Already up to date
   }
 
-  log.info(`Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  // ─── SLOW PATH: one BEGIN IMMEDIATE around read-version → run-chain ──
+  //
+  // Task #59, PROVEN: two servers cold-starting on the same fresh project both
+  // read version 0, both run the whole chain, and the loser dies on V22's
+  // unconditional `ALTER TABLE file_notes ADD COLUMN git_branch` with
+  // "duplicate column name: git_branch". The DATA survives — the PROCESS does
+  // not, and IDE MCP hosts discard stderr, so from the user's side Engram is
+  // simply absent. First run only; a restart succeeds because the chain is
+  // complete by then. Reachable by opening a fresh project in two IDEs, or by
+  // an orchestrator and a sub-agent both spawning servers.
+  //
+  // The version read MUST be inside the lock. That is the whole fix: the loser
+  // blocks at BEGIN IMMEDIATE, and when it finally reads, it reads the winner's
+  // committed version and finds nothing to do.
+  //
+  // REJECTED — make all migrations idempotent: 26 retrofits, each a chance to
+  // introduce the bug being fixed, and it must be remembered by every future
+  // author forever. REJECTED — shard the database per process: `--ide=<key>`
+  // already does this and it is why the collision is rare, but it solves cold
+  // start by abandoning the domain, since two agents in one IDE is the
+  // SUPPORTED topology. PRIOR ART: rails/rails#22092, same defect with
+  // different DDL; an advisory lock around the whole chain is Rails' accepted
+  // fix, so this is the converged answer rather than an invention.
+  //
+  // NOTE the chain is now atomic as a whole, where it used to be atomic per
+  // migration. A mid-chain failure rolls the database back to the version it
+  // started at instead of leaving it stranded part-way, which also removes the
+  // cross-migration idempotency requirement the old shape depended on. The
+  // per-migration transactions are KEPT — inside the outer one better-sqlite3
+  // makes them SAVEPOINTs — so a single migration still cannot half-apply.
+  const runChain = db.transaction(() => {
+    const currentVersion = readVersion();
+    const pendingMigrations = pendingFrom(currentVersion);
 
-  for (const migration of pendingMigrations) {
-    log.info(`  v${migration.version}: ${migration.description}`);
+    if (pendingMigrations.length === 0) {
+      // Another process ran the chain while we waited on the lock. This is the
+      // designed outcome for the loser, not an error.
+      return;
+    }
 
-    // Run migration in a transaction for safety
-    const runMigration = db.transaction(() => {
-      migration.up(db);
-      db.prepare(
-        "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
-      ).run(String(migration.version));
-    });
+    log.info(`Running ${pendingMigrations.length} migration(s) from v${currentVersion} → v${pendingMigrations[pendingMigrations.length - 1].version}`);
 
-    runMigration();
+    for (const migration of pendingMigrations) {
+      log.info(`  v${migration.version}: ${migration.description}`);
+
+      const runMigration = db.transaction(() => {
+        migration.up(db);
+        db.prepare(
+          "INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', ?)"
+        ).run(String(migration.version));
+      });
+
+      runMigration();
+    }
+
+    log.info(`Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
+  });
+
+  try {
+    runChain.immediate();
+  } catch (e) {
+    // A busy timeout means the winner is STILL running the chain — but it may
+    // also have committed in the gap between our timeout and this line. Only
+    // re-reading can tell the two apart, and reporting a fatal for a chain that
+    // has in fact completed is the same "absent server" outcome this fix
+    // exists to remove.
+    const busy = (e as { code?: string }).code === "SQLITE_BUSY"
+      || (e as { code?: string }).code === "SQLITE_BUSY_TIMEOUT";
+    if (busy && pendingFrom(readVersion()).length === 0) {
+      log.info("Migrations were applied by another process while this one waited; nothing to do.");
+      return;
+    }
+    throw e;
   }
-
-  log.info(`Migrations complete. Schema at v${pendingMigrations[pendingMigrations.length - 1].version}`);
 }
 
 export function getCurrentSchemaVersion(db: DatabaseType): number {

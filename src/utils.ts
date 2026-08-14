@@ -2,7 +2,7 @@
 // Engram MCP Server — Utilities
 // ============================================================================
 
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as os from "os";
@@ -332,10 +332,40 @@ export function detectLayer(filePath: string): ArchLayer {
 
 /**
  * Run a git command in the project root. Returns empty string on failure.
+ *
+ * SECURITY — this takes an ARGV ARRAY, not a command string, and that is the
+ * whole point. Do not add a string-accepting overload.
+ *
+ * Until 1.14.0 this was `execSync(\`cd "${projectRoot}" && git ${command}\`)`.
+ * `command` was interpolated unquoted into a shell, and one of its callers —
+ * getGitLogSince — built its literal from `since`, a free-form z.string() on
+ * the advertised engram_memory(action:"what_changed") action. That is
+ * arbitrary command execution through an ordinary documented parameter, and it
+ * was PROVEN with a working PoC on 2026-08-07 (see
+ * tests/security/git-command-injection.test.ts, which is that PoC).
+ *
+ * The 2026-08-02 deep audit graded it MEDIUM and "not currently exploitable"
+ * after surveying the call sites and finding every `command` argument to be a
+ * literal. Every one of them WAS a literal. One of those literals was a
+ * template with a user-controlled hole in it — a call-site survey that stopped
+ * one level too shallow. src/utils.ts's own file note has prescribed this exact
+ * fix since 2026-08-01.
+ *
+ * execFileSync does not spawn a shell (Node docs: "child_process.execFile()
+ * ... does not spawn a shell by default"), so metacharacters in an argument
+ * are inert. Passing cwd as an option instead of shelling `cd` also fixes
+ * paths containing spaces — this repo's own path is
+ * `d:\Projects\Engram Production\Engram`.
+ *
+ * NOTE the failure mode this preserves: the catch returns "" on error, so an
+ * injected command that ran would still produce empty output. Absence of
+ * output is not absence of execution. That is what made the first PoC attempt
+ * look like a false negative.
  */
-export function gitCommand(projectRoot: string, command: string): string {
+export function gitCommand(projectRoot: string, args: readonly string[]): string {
   try {
-    return execSync(`cd "${projectRoot}" && git ${command}`, {
+    return execFileSync("git", [...args], {
+      cwd: projectRoot,
       encoding: "utf-8",
       timeout: 10000,
       stdio: ["pipe", "pipe", "pipe"],
@@ -356,27 +386,38 @@ export function isGitRepo(projectRoot: string): boolean {
  * Get git log since a given timestamp.
  */
 export function getGitLogSince(projectRoot: string, since: string, limit: number = 50): string {
-  return gitCommand(
-    projectRoot,
-    `log --name-status --since="${since}" --pretty=format:"[%h] %s (%ar)" -${limit}`
-  );
+  // The quotes that used to wrap --since= and --pretty=format: were consumed
+  // by the shell, so they must NOT appear here — execFileSync passes each
+  // element through verbatim and git would treat a literal `"` as part of the
+  // value. `since` is now one argv element and cannot escape into a command.
+  return gitCommand(projectRoot, [
+    "log",
+    "--name-status",
+    `--since=${since}`,
+    "--pretty=format:[%h] %s (%ar)",
+    `-${limit}`,
+  ]);
 }
 
 /**
  * Get git diff stat (files changed, insertions, deletions).
  */
 export function getGitDiffStat(projectRoot: string, since: string): string {
-  return gitCommand(projectRoot, `diff --stat HEAD@{${since}} 2>/dev/null`);
+  // `2>/dev/null` was a shell redirect and is gone with the shell. It is not
+  // needed: gitCommand pipes stderr and returns "" on a non-zero exit.
+  return gitCommand(projectRoot, ["diff", "--stat", `HEAD@{${since}}`]);
 }
 
 /**
  * Get files changed in git since a timestamp.
  */
 export function getGitFilesChanged(projectRoot: string, since: string): string[] {
-  const result = gitCommand(
-    projectRoot,
-    `log --name-only --since="${since}" --pretty=format:"" 2>/dev/null`
-  );
+  const result = gitCommand(projectRoot, [
+    "log",
+    "--name-only",
+    `--since=${since}`,
+    "--pretty=format:",
+  ]);
   if (!result) return [];
   return [...new Set(result.split("\n").filter(Boolean))];
 }
@@ -385,14 +426,14 @@ export function getGitFilesChanged(projectRoot: string, since: string): string[]
  * Get the current git branch name.
  */
 export function getGitBranch(projectRoot: string): string {
-  return gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD");
+  return gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
 }
 
 /**
  * Get the latest git commit hash (short).
  */
 export function getGitHead(projectRoot: string): string {
-  return gitCommand(projectRoot, "rev-parse --short HEAD");
+  return gitCommand(projectRoot, ["rev-parse", "--short", "HEAD"]);
 }
 
 /**
@@ -446,6 +487,21 @@ export function ftsEscape(query: string): string {
   const words = query.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return '""';
   return words.map(w => `"${w.replace(/"/g, "")}"`).join(" OR ");
+}
+
+/**
+ * Escape LIKE metacharacters so a literal string matches literally.
+ *
+ * Pair with `LIKE ? ESCAPE '\'`. TASK #67 T6 is why this exists as a named
+ * helper rather than being inlined once: `_` is a single-character wildcard in
+ * SQL LIKE, underscores are pervasive in this codebase's own filenames, and
+ * the resulting over-match is invisible to the caller — decisions about
+ * file-notes.repo.ts were returned for a query about file_notes.repo.ts.
+ *
+ * Backslash first, or it would escape the escapes added after it.
+ */
+export function escapeLike(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
 /**

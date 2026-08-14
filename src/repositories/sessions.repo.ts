@@ -8,30 +8,61 @@ import type { SessionRow } from "../types.js";
 export class SessionsRepo {
     constructor(private db: DatabaseType) { }
 
-    create(agentName: string, projectRoot: string, timestamp: string): number {
+    create(agentName: string, projectRoot: string, timestamp: string, parentSessionId?: number | null): number {
         const result = this.db.prepare(
-            "INSERT INTO sessions (started_at, agent_name, project_root) VALUES (?, ?, ?)"
-        ).run(timestamp, agentName, projectRoot);
+            "INSERT INTO sessions (started_at, agent_name, project_root, parent_session_id) VALUES (?, ?, ?, ?)"
+        ).run(timestamp, agentName, projectRoot, parentSessionId ?? null);
         return result.lastInsertRowid as number;
     }
 
-    close(id: number, timestamp: string, summary: string, tags?: string[]): void {
-        this.db.prepare(
-            "UPDATE sessions SET ended_at = ?, summary = ?, tags = ? WHERE id = ?"
+    /**
+     * Close a session with a summary. Returns true only if this call did the
+     * closing — an already-closed session is left untouched.
+     *
+     * The `ended_at IS NULL` guard is the fix for audit N3a: without it, one
+     * agent's summary could overwrite the summary already written to a
+     * different agent's closed session record.
+     */
+    close(id: number, timestamp: string, summary: string, tags?: string[]): boolean {
+        const result = this.db.prepare(
+            "UPDATE sessions SET ended_at = ?, summary = ?, tags = ? WHERE id = ? AND ended_at IS NULL"
         ).run(timestamp, summary, tags ? JSON.stringify(tags) : null, id);
+        return (result.changes as number) > 0;
     }
 
-    autoClose(id: number, timestamp: string): void {
-        this.db.prepare(
-            "UPDATE sessions SET ended_at = ?, summary = ? WHERE id = ?"
+    /** Retire a still-open session. No-op if it is already closed. */
+    autoClose(id: number, timestamp: string): boolean {
+        const result = this.db.prepare(
+            "UPDATE sessions SET ended_at = ?, summary = ? WHERE id = ? AND ended_at IS NULL"
         ).run(timestamp, "(auto-closed: new session started)", id);
+        return (result.changes as number) > 0;
     }
 
-    getOpenSessionId(): number | null {
-        const row = this.db.prepare(
-            "SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
-        ).get() as { id: number } | undefined;
+    /**
+     * Newest open session, optionally scoped to one agent.
+     *
+     * AUDIT N3a: the unscoped form answers "the newest open session belonging
+     * to ANYONE", which is why sub-agents and orchestrators used to destroy
+     * each other's records. Callers that know who they are MUST pass
+     * `agentName`; the unscoped form is retained only for legacy call sites
+     * that have no identity available.
+     */
+    getOpenSessionId(agentName?: string): number | null {
+        const row = (agentName
+            ? this.db.prepare(
+                "SELECT id FROM sessions WHERE ended_at IS NULL AND agent_name = ? ORDER BY id DESC LIMIT 1"
+            ).get(agentName)
+            : this.db.prepare(
+                "SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1"
+            ).get()) as { id: number } | undefined;
         return row ? row.id : null;
+    }
+
+    /** Every currently-open session, newest first. Used to detect concurrency. */
+    getOpenSessions(): Array<{ id: number; agent_name: string; started_at: string; parent_session_id: number | null }> {
+        return this.db.prepare(
+            "SELECT id, agent_name, started_at, parent_session_id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC"
+        ).all() as Array<{ id: number; agent_name: string; started_at: string; parent_session_id: number | null }>;
     }
 
     getLastCompleted(): { id: number; ended_at: string; summary: string | null; agent_name: string } | null {

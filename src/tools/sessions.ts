@@ -4,17 +4,26 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { now, getCurrentSessionId, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, logToolCall, reinitDatabase } from "../database.js";
-import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP } from "../constants.js";
+// getCurrentSessionId is deliberately NOT imported here: session identity in this
+// file is resolved through resolveSession() below, which is agent-scoped. The
+// global helper remains for legacy call sites that have no identity available.
+import { now, getLastCompletedSession, getProjectRoot, getRepos, getServices, getDb, reinitDatabase } from "../database.js";
+import { COMPACTION_THRESHOLD_SESSIONS, FOCUS_MAX_ITEMS_PER_CATEGORY, PHASE_MAP, SESSION_START_BODY_CHARS } from "../constants.js";
 import { log } from "../logger.js";
 import { truncate, ftsEscape, coerceStringArray } from "../utils.js";
 import { success, error } from "../response.js";
-import type { SessionContext, ProjectSnapshot, ScheduledEventRow, ConventionRow } from "../types.js";
+import { detectMalformedWrite } from "../write-integrity.js";
+// ProjectSnapshot dropped with task #68: session start now returns a
+// ProjectSnapshotDigest, and the full snapshot belongs to scan_project.
+import type { SessionContext, ScheduledEventRow, ConventionRow } from "../types.js";
 import { getPMConventions, getPhaseOverview } from "../knowledge/index.js";
 import { pmSafe } from "../services/index.js";
 import * as os from "os";
 import * as path from "path";
 import { buildToolCatalog, AGENT_RULES } from "./find.js";
+import {
+  resolveSession, ambiguityNote, setProcessSession, clearProcessSession,
+} from "./session-identity.js";
 
 
 // ============================================================================
@@ -46,7 +55,59 @@ function storeCatalogDelivery(agent_name: string, tier: 0 | 1 | 2): void {
   }
 }
 
+// ─── Session identity (audit N3a/N3b) ────────────────────────────────────────
+//
+// A session belongs to exactly one agent. Nothing else in this file may assume
+// there is only one open session, because there no longer is: `start` retires
+// only the CALLING agent's previous session, so an orchestrator and its
+// sub-agents are open concurrently by design.
+//
+// Every non-start action therefore has to say which session it means. The
+// resolution order below is strict-to-loose, and the loosest rung reports that
+// it guessed rather than guessing silently.
+
+// The ladder moved to session-identity.ts so engram_memory can reach it too.
+// It had three rungs here and the memory dispatcher could reach none of them,
+// which is task #58: 16 bare getCurrentSessionId() calls, and a parent session
+// that loses attribution to its own sub-agents 100% of the time. A fourth rung
+// — the session THIS PROCESS started — is what makes the dispatcher's answer
+// deterministic. See that file's header for why the process is the right unit.
+
 export function registerSessionDispatcher(server: McpServer): void {
+  // Named so the write-integrity check can DERIVE this tool's valid parameter
+  // names instead of restating them. A parameter added below is covered by the
+  // malformed-write detector on the same commit.
+  const SESSION_INPUT_SCHEMA = {
+        action: z.enum(["start", "end", "get_history", "handoff", "acknowledge_handoff"]).describe("Session operation to perform."),
+        // start params
+        agent_name: z.string().optional().describe("Your agent identifier. REQUIRED for: start — sessions are owned by an agent and an unnamed session cannot be told apart from anyone else's. Pass the same name on 'end'/'handoff' to operate on your own session."),
+        session_id: z.number().int().optional().describe("The session handle returned by start. For: end, handoff, acknowledge_handoff. Pass it when other agents may also have sessions open — without it the newest open session is used."),
+        parent_session_id: z.number().int().optional().describe("The orchestrator's session_id. For: start with agent_role='sub'. Omit to infer the most recent open session belonging to another agent."),
+        project_root: z.string().optional().describe("Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location."),
+        resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
+        // Figures MEASURED 2026-08-13 by docs/foundations/measurements/measure-session-cost.mjs
+        // against this repo's real store, and bounded by tests/ergonomics/session-start-cost.test.ts.
+        // They were previously guesses and had drifted up to 81.8x (task #68) —
+        // an agent reads this string at the moment it picks the parameter, so a
+        // wrong number here is not documentation debt, it is misdirection.
+        verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. Measured on a mature store: nano=counts+rules only (~700 tokens), minimal=counts+agent_rules (~1,300 repeat / ~3,400 first), summary=default (~1,600 repeat / ~3,800 first), full=everything, bounded (~7,000 repeat / ~9,500 first). Figures scale with store size; prefer summary."),
+        focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
+        agent_role: z.enum(["primary", "sub"]).optional().default("primary").describe("'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~120 tokens measured; the claim was 300-500 and it was the only tier that OVERstated its own cost)."),
+        task_id: z.number().int().optional().describe("Task ID to scope context around. Required when agent_role='sub'."),
+        intent: z.enum(["full_context", "quick_op", "phase_work"]).optional().default("full_context").describe("Session start intent. For: start. Cost is dominated by `verbosity`, not by this. full_context=default; quick_op=session_id+rules+catalog only (~700 tokens repeat, ~2,800 on an agent's first ever session, when the full tool catalog is delivered once); phase_work=full context + current phase knowledge for PM-Full."),
+        // end params
+        summary: z.string().optional().describe("Session accomplishments summary. Required for: end."),
+        tags: coerceStringArray().optional().describe("Tags for session. For: end."),
+        // get_history params
+        limit: z.number().int().min(1).max(50).optional(),
+        offset: z.number().int().min(0).optional(),
+        // handoff params
+        reason: z.string().optional().describe("Why handing off. For: handoff."),
+        next_agent_instructions: z.string().optional(),
+        // acknowledge_handoff params
+        id: z.number().int().optional().describe("Handoff ID. For: acknowledge_handoff."),
+  };
+
   server.registerTool(
     "engram_session",
     {
@@ -59,32 +120,38 @@ Actions:
   - get_history: Retrieve past session summaries.
   - handoff: Create a handoff record for the next agent.
   - acknowledge_handoff: Mark a handoff as read.`,
-      inputSchema: {
-        action: z.enum(["start", "end", "get_history", "handoff", "acknowledge_handoff"]).describe("Session operation to perform."),
-        // start params
-        agent_name: z.string().optional().describe("Your agent identifier. For: start."),
-        project_root: z.string().optional().describe("Absolute path to the project workspace. For: start. Pass this when the IDE spawns MCP servers from a non-project directory (e.g. $HOME). Engram will re-initialize the database at this location."),
-        resume_task: z.string().optional().describe("Task title to focus context on. For: start."),
-        verbosity: z.enum(["full", "summary", "minimal", "nano"]).optional().describe("Response detail level. For: start. nano=counts+rules only (~10 tokens), minimal=counts+agent_rules, summary=default, full=everything."),
-        focus: z.string().optional().describe("Topic/keywords to filter context. For: start."),
-        agent_role: z.enum(["primary", "sub"]).optional().default("primary").describe("'primary' = full session context (default). 'sub' = task-focused session for orchestrator-spawned sub-agents (~300-500 tokens)."),
-        task_id: z.number().int().optional().describe("Task ID to scope context around. Required when agent_role='sub'."),
-        intent: z.enum(["full_context", "quick_op", "phase_work"]).optional().default("full_context").describe("Session start intent. For: start. full_context=current behavior (default, ~730 tokens); quick_op=minimal (session_id+rules+catalog only, ~200 tokens); phase_work=full context + current phase knowledge for PM-Full (~900 tokens)."),
-        // end params
-        summary: z.string().optional().describe("Session accomplishments summary. Required for: end."),
-        tags: coerceStringArray().optional().describe("Tags for session. For: end."),
-        // get_history params
-        limit: z.number().int().min(1).max(50).optional(),
-        offset: z.number().int().min(0).optional(),
-        // handoff params
-        reason: z.string().optional().describe("Why handing off. For: handoff."),
-        next_agent_instructions: z.string().optional(),
-        // acknowledge_handoff params
-        id: z.number().int().optional().describe("Handoff ID. For: acknowledge_handoff."),
-      },
+      inputSchema: SESSION_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // MEASURED on this store, 2026-08-07: 12 of 61 rows written through this
+      // dispatcher carry the corruption signature — 9 of 44 session summaries
+      // and 3 of 17 handoffs. Two handoffs, #8 and #9, arrived with
+      // next_agent_instructions EMPTY because the whole payload folded into
+      // `reason` (7,114 and 7,684 chars against 79-289 for every other row).
+      // Four sessions lost `tags` outright.
+      //
+      // This is the LONGEST free-text surface in the product — a handoff runs
+      // to ~8,000 characters — so it is the one the length-correlated trigger
+      // in anthropics/claude-code#49747 hits hardest, and it was the one left
+      // uncovered when the check shipped for engram_memory alone.
+      //
+      // It is also the surface whose corruption costs most: a handoff is the
+      // record the NEXT agent reads first, and unlike an observation it has no
+      // repair action. Rejecting the write is recoverable; storing an empty
+      // instruction field is not.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(SESSION_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { tool: "engram_session", field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       let repos = getRepos();
       let services = getServices();
       let projectRoot = getProjectRoot();
@@ -93,7 +160,13 @@ Actions:
       switch (params.action) {
 
         case "start": {
-          const agent_name = params.agent_name ?? "unknown";
+          // AUDIT N3b: agent_name used to default to the literal "unknown", so
+          // every agent that omitted it landed in one bucket and per-agent
+          // scoping bought nothing. It is required, and the error says so.
+          const agent_name = params.agent_name?.trim();
+          if (!agent_name) {
+            return error("agent_name is required for engram_session(action:'start'). Sessions are owned by an agent — without a name yours cannot be told apart from another agent's, and concurrent agents would corrupt each other's records. Pass a stable identifier you reuse across sessions, e.g. agent_name:'claude-backend'.");
+          }
           const verbosity = params.verbosity ?? "summary";
           const focus = params.focus;
           const resume_task = params.resume_task;
@@ -144,9 +217,35 @@ Actions:
           // ── Sub-agent path: task-scoped context (~300-500 tokens) ─────────
           if (params.agent_role === "sub") {
             if (params.task_id === undefined) return error("task_id required when agent_role='sub'. Pass the task ID assigned by the orchestrator.");
-            const openSession = getCurrentSessionId();
-            if (openSession) { repos.sessions.autoClose(openSession, timestamp); }
-            const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
+
+            // AUDIT N3a: this used to auto-close the newest open session of ANY
+            // agent — i.e. the orchestrator that just spawned this sub-agent.
+            // Only this agent's own stale session may be retired.
+            const ownStale = repos.sessions.getOpenSessionId(agent_name);
+            if (ownStale !== null) { repos.sessions.autoClose(ownStale, timestamp); }
+
+            // AUDIT N3b: link sub -> orchestrator. The column has existed since
+            // the V1 baseline migration and was never written, which is why a
+            // delegated session's lineage was unrecoverable. An explicit
+            // parent_session_id wins; otherwise infer the most recent open
+            // session belonging to a different agent.
+            let parentSessionId: number | null = null;
+            if (params.parent_session_id !== undefined) {
+              const declared = repos.sessions.getById(params.parent_session_id);
+              if (!declared) return error(`parent_session_id #${params.parent_session_id} does not exist.`);
+              parentSessionId = declared.id;
+            } else {
+              const candidate = repos.sessions.getOpenSessions().find(s => s.agent_name !== agent_name);
+              parentSessionId = candidate?.id ?? null;
+            }
+
+            const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp, parentSessionId);
+            // Task #58. This process now knows whose writes it is handling, so
+            // engram_memory stops asking the store to guess. A sub-agent needs
+            // this at least as much as an orchestrator: it is the party whose
+            // id wins the bad query, so without it the ONLY correct answer is
+            // the one that was already accidentally right.
+            setProcessSession(sessionId, agent_name);
             const task = repos.tasks.getById(params.task_id) as Record<string, unknown> | null;
             if (!task) return error(`Task #${params.task_id} not found.`);
             const assignedFiles: string[] = task.assigned_files ? (typeof task.assigned_files === "string" ? JSON.parse(task.assigned_files) : task.assigned_files as string[]) : [];
@@ -170,10 +269,10 @@ Actions:
               const keyword = `${c.category} ${c.rule}`.toLowerCase();
               return taskTags.some(t => keyword.includes(t.toLowerCase())) || assignedFiles.some(f => keyword.includes(f.toLowerCase().split("/").pop() ?? ""));
             }).slice(0, 5).map(c => ({ id: c.id, category: c.category, rule: truncate(c.rule, 100) }));
-            logToolCall("start_session_sub", "success", `agent=${agent_name} task=${params.task_id}`);
             return success({
               session_id: sessionId,
               agent_role: "sub",
+              parent_session_id: parentSessionId ?? undefined,
               task: { id: task.id, title: task.title, description: task.description, priority: task.priority, tags: taskTags },
               relevant_files: relevantFiles,
               relevant_decisions: relevantDecisions,
@@ -183,12 +282,16 @@ Actions:
           }
           // ── End sub-agent path ─────────────────────────────────────────────
 
-          // Check for already-open session and close it
-          const openSession = getCurrentSessionId();
-          if (openSession) { repos.sessions.autoClose(openSession, timestamp); }
+          // AUDIT N3a: retire only THIS agent's previous session. Sessions
+          // belonging to other agents — including sub-agents this orchestrator
+          // spawned — stay open. Restarting yourself is a legitimate reason to
+          // close your own session; it is never a reason to close someone else's.
+          const ownStale = repos.sessions.getOpenSessionId(agent_name);
+          if (ownStale !== null) { repos.sessions.autoClose(ownStale, timestamp); }
 
           const lastSession = getLastCompletedSession();
           const sessionId = repos.sessions.create(agent_name, projectRoot, timestamp);
+          setProcessSession(sessionId, agent_name);   // task #58 — see the sub path above
 
           let autoCompacted = false;
           try { autoCompacted = services.compaction.autoCompact(COMPACTION_THRESHOLD_SESSIONS); } catch { /* best effort */ }
@@ -210,7 +313,6 @@ Actions:
             let qTriggeredEvents: ScheduledEventRow[] = [];
             try { qTriggeredEvents = services.events.triggerSessionEvents(); } catch { /* best effort */ }
             const qUpdateNotification = services.update.getNotification();
-            logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=quick_op (dispatcher)`);
             return success({
               session_id: sessionId,
               intent: 'quick_op',
@@ -278,13 +380,73 @@ Actions:
           interface PendingWorkRow { id: number; agent_id: string; description: string; files: string; started_at: number; session_id: number | null; }
           let abandonedWork: PendingWorkRow[] = [];
           try {
-            if (lastSession?.id) { db.prepare(`UPDATE pending_work SET status = 'abandoned' WHERE status = 'pending' AND (session_id IS NULL OR session_id < ?)`).run(sessionId); }
-            abandonedWork = db.prepare("SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' ORDER BY started_at DESC LIMIT 5").all() as PendingWorkRow[];
+            // AUDIT N3c: this UPDATE used to be unscoped — "status='pending' AND
+            // (session_id IS NULL OR session_id < ?)" — so ANY agent starting a
+            // session flagged EVERY other agent's in-flight work as abandoned,
+            // plus every orphaned row. Nothing about C starting implies A stopped.
+            // (The old `if (lastSession?.id)` guard was dead: lastSession never
+            // appeared in the query.)
+            //
+            // Abandonment is now what it always meant: work THIS agent declared
+            // in an EARLIER session and never completed. Another agent's work is
+            // never touched, and rows belonging to a still-open session are left
+            // alone even when they are this agent's own.
+            db.prepare(`
+              UPDATE pending_work SET status = 'abandoned'
+              WHERE status = 'pending'
+                AND agent_id = ?
+                AND (session_id IS NULL OR session_id IN (
+                      SELECT id FROM sessions WHERE ended_at IS NOT NULL
+                    ))
+                AND (session_id IS NULL OR session_id != ?)
+            `).run(agent_name, sessionId);
+            abandonedWork = db.prepare(
+              "SELECT id, agent_id, description, files, started_at, session_id FROM pending_work WHERE status = 'abandoned' AND agent_id = ? ORDER BY started_at DESC LIMIT 5"
+            ).all(agent_name) as PendingWorkRow[];
           } catch { /* best effort */ }
 
           interface HandoffRow { id: number; from_agent: string | null; reason: string; next_agent_instructions: string | null; resume_at: string | null; git_branch: string | null; open_task_ids: string | null; last_file_touched: string | null; created_at: number; }
+          // AUDIT N3d: this used to be `ORDER BY created_at DESC LIMIT 1` with no
+          // agent filter, so with two outstanding handoffs one was silently
+          // invisible — and an unrelated agent could acknowledge it out from
+          // under the agent it was meant for. Surface all of them; prefer one
+          // authored by somebody else, since that is what "handed off to you"
+          // actually means.
+          // FR-0g: handoffs never superseded each other, so an unacknowledged one
+          // stayed "pending" forever and was eventually promoted as live. Handoffs
+          // #1 and #2 sat pending for two days; the moment #4 was acknowledged,
+          // this query would have handed the next agent #2 — a stale baton from a
+          // session closed days earlier — because acknowledgement was the only
+          // thing that could retire a handoff, and acknowledging the CURRENT one
+          // did nothing to the ones it had already overtaken.
+          //
+          // A handoff is a baton, and the pass is linear. Once any LATER handoff
+          // has been acknowledged, every EARLIER one has been overtaken by events
+          // and cannot still be live. So the newest acknowledgement is a cutoff.
+          // Superseded ones are still reported — losing them would repeat N3d —
+          // but they are marked stale and can never be promoted.
           let handoffPending: HandoffRow | null = null;
-          try { handoffPending = db.prepare("SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 1").get() as HandoffRow | null; } catch { /* best effort */ }
+          let otherHandoffs: Array<{ id: number; from_agent: string | null; reason: string; stale?: true }> = [];
+          try {
+            const allPending = db.prepare(
+              "SELECT * FROM handoffs WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 10"
+            ).all() as HandoffRow[];
+            const cutoff = (db.prepare(
+              "SELECT MAX(acknowledged_at) AS t FROM handoffs WHERE acknowledged_at IS NOT NULL"
+            ).get() as { t: number | null } | undefined)?.t ?? 0;
+
+            const live = allPending.filter(h => h.created_at > cutoff);
+            const superseded = allPending.filter(h => h.created_at <= cutoff);
+
+            handoffPending = live.find(h => h.from_agent !== agent_name) ?? live[0] ?? null;
+            otherHandoffs = [
+              ...live
+                .filter(h => h.id !== handoffPending?.id)
+                .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100) })),
+              ...superseded
+                .map(h => ({ id: h.id, from_agent: h.from_agent, reason: truncate(h.reason, 100), stale: true as const })),
+            ].slice(0, 4);
+          } catch { /* best effort */ }
 
           let suggestedFocus: string | undefined;
           if (!focus) {
@@ -298,7 +460,6 @@ Actions:
             if (candidates.length > 0) suggestedFocus = candidates[0];
           }
 
-          logToolCall("start_session", "success", `agent=${agent_name} verbosity=${verbosity} intent=${intent} (dispatcher)`);
 
           // ── phase_work: detect current phase from task tags ────────────────
           let phaseKnowledge: { phase: number; name: string; label: string; compact: string; entryCriteria: string[]; exitCriteria: string[]; instructionSummaries: string[] } | undefined;
@@ -352,6 +513,7 @@ Actions:
             suggested_focus: suggestedFocus,
             abandoned_work: abandoned,
             handoff_pending: handoff,
+            other_handoffs_pending: otherHandoffs.length > 0 ? otherHandoffs : undefined,
             update_available: updateNotification ?? undefined,
             agent_rules: rulesResult.rules,
             agent_rules_source: rulesResult.source,
@@ -391,8 +553,32 @@ Actions:
 
           // full verbosity
           let projectSnapshot = null;
-          try { projectSnapshot = services.scan.getOrRefresh(projectRoot); } catch { /* best effort */ }
-          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: activeDecisions, active_conventions: capConventions(activeConventions.length + 10), open_tasks: openTasks, project_snapshot: projectSnapshot, git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
+          // TASK #68 — digest(), not getOrRefresh(). The raw snapshot embeds
+          // fileNotes.getAll(), so this one field was 153,194 of the 246,118
+          // characters a full session start returned, and it grows with the
+          // store. It also duplicated recent_decisions and active_conventions,
+          // both already top-level siblings in this same response.
+          try { projectSnapshot = services.scan.digest(projectRoot); } catch { /* best effort */ }
+          // TASK #68 — `full` means every CATEGORY, in a bounded form. It used
+          // to mean every category unbounded, which is a different promise and
+          // one that grows with the store: task descriptions and decision
+          // rationales in this repo run to several thousand characters each,
+          // and 15 tasks plus 20 decisions of raw body was the bulk of what
+          // remained after project_snapshot was cut.
+          //
+          // Truncated, not dropped. The id and title are what an orienting
+          // agent needs to decide what to fetch; the body is what it fetches,
+          // through get_tasks / get_decisions, which is where a filter exists.
+          const clip = (s: unknown) =>
+            typeof s === "string" && s.length > SESSION_START_BODY_CHARS ? truncate(s, SESSION_START_BODY_CHARS) : s;
+          const boundedTasks = openTasks.map(t => ({ ...t, description: clip(t.description) }));
+          const boundedDecisions = activeDecisions.map(d => ({ ...d, rationale: clip(d.rationale), decision: clip(d.decision) }));
+          const clippedBodies = openTasks.filter(t => typeof t.description === "string" && t.description.length > SESSION_START_BODY_CHARS).length
+            + activeDecisions.filter(d => typeof d.rationale === "string" && d.rationale.length > SESSION_START_BODY_CHARS).length;
+
+          return success({ ...baseResponse, verbosity: "full", changes_since_last: { recorded: recordedChanges, git_log: gitLog }, active_decisions: boundedDecisions, active_conventions: capConventions(activeConventions.length + 10), open_tasks: boundedTasks, project_snapshot: projectSnapshot,
+            ...(clippedBodies ? { bodies_truncated: clippedBodies, bodies_note: `${clippedBodies} task/decision bodies were clipped to ${SESSION_START_BODY_CHARS} chars. Fetch one in full with engram_memory(action:'get_tasks', query:'…', compact:false) or get_decisions.` } : {}),
+            git_hook_log: gitHookLog || undefined, phase_knowledge: phaseKnowledge ?? undefined, message: lastSession ? `Session #${sessionId} started (full). ${recordedChanges.length} changes since session #${lastSession.id}. Use engram_memory — see tool_catalog.` : `Session #${sessionId} started (full). First session. Use engram_memory — see tool_catalog.` });
         }
 
         case "end": {
@@ -401,11 +587,16 @@ Actions:
           if (!endSummary) return error("summary required for end action. Pass summary:'...' or, in universal mode, query:'...'.");
           // Reassign for the rest of the handler
           (params as Record<string, unknown>).summary = endSummary;
-          const sessionId = getCurrentSessionId();
+          // AUDIT N3a: this used to re-derive "the current session" from a
+          // global query, so agent B's summary landed on agent A's record.
+          const resolution = resolveSession(params, repos);
+          const sessionId = resolution.id;
           if (!sessionId) return error("No active session. Start one first with engram_session(action:'start').");
           const timestamp = now();
 
-          const sessionRow = repos.sessions.getById(sessionId) as { agent_name?: string } | null;
+          const sessionRow = repos.sessions.getById(sessionId) as { agent_name?: string; ended_at?: string | null } | null;
+          if (!sessionRow) return error(`Session #${sessionId} not found.`);
+          if (sessionRow.ended_at) return error(`Session #${sessionId} is already closed. Its summary was left untouched — start a new session rather than re-ending a closed one.`);
           const agentName = sessionRow?.agent_name ?? null;
           let claimedTasksWarning: Array<{ id: number; title: string; status: string }> | undefined;
           if (agentName) {
@@ -420,10 +611,15 @@ Actions:
           const tasksDone = repos.tasks.countDoneInSession(sessionId);
           let observationCount = 0;
           try { observationCount = repos.observations.countBySession(sessionId); } catch { /* table may not exist */ }
-          logToolCall("end_session", "success", `changes=${changeCount} decisions=${decisionCount} tasks_done=${tasksDone} observations=${observationCount} (dispatcher)`);
-          repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
+          const didClose = repos.sessions.close(sessionId, timestamp, endSummary, params.tags);
+          if (!didClose) return error(`Session #${sessionId} is already closed. Its summary was left untouched.`);
+          // Only if it was OURS. Ending someone else's session by passing their
+          // session_id must not blank this process's identity — the next write
+          // would silently fall back to the global rung, reintroducing the
+          // defect from the path most likely to run with several sessions open.
+          clearProcessSession(sessionId);
 
-          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
+          return success({ message: `Session #${sessionId} ended.${claimedTasksWarning ? ` ⚠️ ${claimedTasksWarning.length} claimed task(s) still open.` : ""}`, session_id: sessionId, agent_name: agentName ?? undefined, stats: { changes_recorded: changeCount, decisions_made: decisionCount, tasks_completed: tasksDone, observations_recorded: observationCount }, session_resolution: ambiguityNote(resolution, "end"), ...(claimedTasksWarning ? { claimed_tasks_warning: { tasks: claimedTasksWarning } } : {}) });
         }
 
         case "get_history": {
@@ -434,7 +630,8 @@ Actions:
 
         case "handoff": {
           if (!params.reason) return error("reason required for handoff");
-          const sessionId = getCurrentSessionId();
+          const handoffResolution = resolveSession(params, repos);
+          const sessionId = handoffResolution.id;
           if (!sessionId) return error("No active session.");
           const gitBranch = services.git.getBranch();
           const openTasks = repos.tasks.getOpen(20);
@@ -442,16 +639,36 @@ Actions:
           const lastFileTouched = recentChanges.length > 0 ? recentChanges[recentChanges.length - 1].file_path : null;
           const fromAgent = (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown";
           const result = db.prepare(`INSERT INTO handoffs (from_session_id, from_agent, created_at, reason, next_agent_instructions, resume_at, git_branch, open_task_ids, last_file_touched) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(sessionId, fromAgent, Date.now(), params.reason, params.next_agent_instructions ?? null, null, gitBranch, openTasks.length > 0 ? JSON.stringify(openTasks.map(t => t.id)) : null, lastFileTouched);
-          return success({ handoff_id: result.lastInsertRowid, message: `Handoff #${result.lastInsertRowid} created. Next agent will see this in start_session.` });
+          return success({ handoff_id: result.lastInsertRowid, from_session_id: sessionId, session_resolution: ambiguityNote(handoffResolution, "handoff"), message: `Handoff #${result.lastInsertRowid} created. Next agent will see this in start_session.` });
         }
 
         case "acknowledge_handoff": {
           if (params.id === undefined) return error("id required for acknowledge_handoff");
-          const sessionId = getCurrentSessionId();
-          const fromAgent = sessionId ? (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? "unknown" : "unknown";
-          const result = db.prepare(`UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL`).run(Date.now(), fromAgent, params.id);
+          const ackResolution = resolveSession(params, repos);
+          const sessionId = ackResolution.id;
+          // AUDIT N3d: acknowledging used to be anonymous — no active session was
+          // required, `acknowledged_by` fell back to the literal "unknown", and
+          // any agent could clear any handoff. Acknowledging is a claim that YOU
+          // read it, so it needs a real identity behind it.
+          if (!sessionId) return error("No active session. Start one with engram_session(action:'start') before acknowledging a handoff — acknowledging records who read it.");
+          const ackAgent = (repos.sessions.getById(sessionId) as { agent_name?: string } | null)?.agent_name ?? null;
+          if (!ackAgent) return error(`Session #${sessionId} not found.`);
+
+          const target = db.prepare("SELECT id, from_session_id, from_agent, reason, acknowledged_at, acknowledged_by FROM handoffs WHERE id = ?")
+            .get(params.id) as { id: number; from_session_id: number; from_agent: string | null; reason: string; acknowledged_at: number | null; acknowledged_by: string | null } | undefined;
+          if (!target) return error(`Handoff #${params.id} not found.`);
+          if (target.acknowledged_at) return error(`Handoff #${params.id} was already acknowledged by "${target.acknowledged_by ?? "unknown"}".`);
+          // A handoff is addressed to whoever comes next, so a later session of
+          // the SAME agent may legitimately acknowledge it. Acknowledging one
+          // your own still-open session just created is the nonsensical case —
+          // it would clear the handoff before anyone could act on it.
+          if (target.from_session_id === sessionId) {
+            return error(`Handoff #${params.id} was created by this same session (#${sessionId}). Acknowledging it now would hide it from the agent it was written for.`);
+          }
+
+          const result = db.prepare(`UPDATE handoffs SET acknowledged_at = ?, acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL`).run(Date.now(), ackAgent, params.id);
           if ((result.changes as number) === 0) return error(`Handoff #${params.id} not found or already acknowledged.`);
-          return success({ message: `Handoff #${params.id} acknowledged.` });
+          return success({ message: `Handoff #${params.id} acknowledged.`, handoff_id: params.id, from_agent: target.from_agent, acknowledged_by: ackAgent });
         }
 
         default:

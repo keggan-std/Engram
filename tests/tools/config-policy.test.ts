@@ -16,6 +16,7 @@
 // ============================================================================
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import type { Database as DatabaseType } from "better-sqlite3";
 import {
     TUNABLE_CONFIG_KEYS,
     PROTECTED_CONFIG_KEYS,
@@ -82,7 +83,7 @@ class HandlerCapturer {
 }
 
 let callAdmin: (action: string, extra?: Record<string, unknown>) => Promise<{ data: Record<string, unknown>; text: string; isError: boolean }>;
-let db: InstanceType<typeof import("better-sqlite3").default>;
+let db: DatabaseType;
 
 function auditRows(): Array<{ action: string; actor: string; before_json: string; after_json: string }> {
     return db.prepare("SELECT action, actor, before_json, after_json FROM audit_log ORDER BY id").all() as never;

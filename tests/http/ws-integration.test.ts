@@ -51,7 +51,7 @@ const AUTH = { Authorization: `Bearer ${TOKEN}` };
 // Use a plain vi.fn() injected via createHttpServer({ broadcaster }) so we
 // never have to fight Vitest ESM module-singleton identity across file scopes.
 
-const broadcastFn = vi.fn<[WsEvent], void>();
+const broadcastFn = vi.fn<(event: WsEvent) => void>();
 const mockBroadcaster = { broadcast: broadcastFn };
 
 // ---- App setup ------------------------------------------------------------

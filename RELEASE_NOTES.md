@@ -1,3 +1,374 @@
+# Unreleased — the Foundations Review
+
+**Status:** **NOT RELEASED.** `package.json` is `1.14.0`, which is what npm serves — that is v1.14.0's number, not this section's. Nothing below the next heading has shipped.
+**Targets:** `2.0.0` — Release B in [`docs/ENGRAM-MASTER-PLAN.md`](docs/ENGRAM-MASTER-PLAN.md) §7, breaking, "ships when its targets land." Several have not.
+**Branch:** `v2-foundations` · **Date:** 2026-08-07 · **Rebased onto v1.14.0:** 2026-08-14
+
+> **Why this is not a version heading.** Bumping `package.json` would claim a release that
+> is not ready — the master plan gates 2.0.0 on targets still open on the board. A version
+> number is a claim like any other, and this project's whole problem has been claims nobody
+> executed. The heading becomes `# v2.0.0` when the release is cut, and
+> `tests/process/register-truth.test.ts` fails the build if that heading and `package.json`
+> ever disagree.
+
+---
+
+## The story so far — what Engram is, and how it got here
+
+Engram is a **persistent memory cortex for AI coding agents**: an MCP server backed by a
+local SQLite database, giving agents session continuity, decision history, file-level
+intelligence, task tracking and multi-agent coordination across sessions. It runs on your
+machine, stores nothing remotely, and installs into whichever IDEs you use.
+
+| Version | What it was about |
+|---|---|
+| **1.3.0** | Token efficiency, batch ops, path normalisation — the first serious efficiency pass |
+| **1.4.0 – 1.4.1** | Versioned installs, auto-update, installer infrastructure audit |
+| **1.5.0** | Multi-agent coordination, trustworthy context, knowledge intelligence |
+| **1.6.0** | **The consolidation.** ~50 tools collapsed into 4 dispatchers — the largest architectural change in the project |
+| **1.7.0 – 1.7.2** | Token efficiency and intelligence overhaul; universal single-tool mode |
+| **1.8.0 – 1.8.1** | Cross-instance infrastructure, sensitive-data protection, multi-IDE DB isolation |
+| **1.9.0 – 1.9.3** | The visual dashboard, then four hotfixes for project-root detection and IDE config paths |
+| **1.10.0** | The PM framework — PM-Lite and PM-Full |
+| **1.11.0** | Params coercion, observations, session efficiency |
+| **1.12.0** | Android Studio as the 14th IDE; interactive installer redesign |
+| **1.13.0** | Security, data safety, honest failures — the first release cut *from a review* rather than a feature plan |
+
+**The turn happens at 1.6.0 and only becomes visible much later.** Collapsing fifty tools
+into four dispatchers was the right call, and it silently dropped things: the consolidation
+kept the *actions* and lost some of the *validation* behind them. Nothing noticed, because
+nothing was watching. That is the defect the project later named **F5** — a capability that
+is advertised, is reachable, and does not do what it says. Every hotfix line in the table
+above is, in retrospect, the same shape surfacing one area at a time.
+
+### The Foundations Review
+
+So the project stopped shipping features and audited itself across ten domains —
+durability, trust and safety, storage, concurrency, distribution, observability,
+ergonomics, codebase, process, public surface. Each produced a document with graded
+evidence, named rejected alternatives, and — the part that matters — **a binding**: an
+executable check that fails if the finding recurs.
+
+It found one thing, ten times over:
+
+> **An advertised capability that does not execute.**
+>
+> `restore` returned success and restored nothing. `import` over HTTP returned
+> `200 {"ok":true}` and wrote nothing. `/export` claimed "all data" and shipped 5 of 24
+> tables. `/health` returned 200 with the database unavailable. `compact` reported
+> compacting sessions it never touched. Agent rules shipped at priority CRITICAL had a
+> **measured 21.1% compliance**. The security policy denied a network call the product was
+> making.
+
+v1.13.0 shipped the security and data-safety half. **This cycle is the other half — plus an
+external senior review that found the review itself had blind spots.**
+
+---
+
+## What this cycle changed
+
+Eleven findings, all addressed. Two are worth reading even if you skip the rest, and one
+thing the review *missed* is worse than anything it found.
+
+### CRITICAL — arbitrary command execution through a documented parameter
+
+`engram_memory(action:"what_changed", since:"…")` took a free-form string, passed it through
+an unguarded fall-through, and interpolated it into a **shell command**:
+
+```
+execSync(`cd "${projectRoot}" && git log --since="${since}" …`)
+```
+
+That is arbitrary command execution on the developer's machine through an ordinary
+advertised action. **Proven with a working proof-of-concept**, not argued.
+
+It matters more here than in a normal application. Engram is an MCP server, so the "user"
+supplying `since` **is the agent**, and the agent's parameters are shaped by everything in
+its context — stored memory rows, file notes, and via cross-instance sharing, content
+written by *a different project on the same machine*. It upgrades prompt injection from
+*"the agent reads the wrong thing"* to *"the attacker runs commands."*
+
+**The project had already looked at this and cleared it.** A February audit graded it MEDIUM
+and "not currently exploitable" after checking every call site and finding each passed a
+string literal. Every one did. One of those literals was a **template with a user-controlled
+hole in it** — a call-site survey that stopped one level too shallow, closing a finding with
+an argument where it needed a check.
+
+**Fixed:** `gitCommand` takes an argv array through `execFileSync`, which spawns no shell.
+The string signature is **deleted**, not merely unused, so the shape is unrepresentable
+rather than disarmed at today's call sites. `since` is separately constrained at the schema
+to the three forms it ever understood. The PoC ships as a regression test, verified to go
+**red** against the reverted code before it was trusted.
+
+### CRITICAL — the install command could not install the current version
+
+Not in the review. Found by running the README's own commands.
+
+```
+npx -y engram-mcp-server         --version   →  v1.12.0   (cached in April)
+npx -y engram-mcp-server@latest  --version   →  v1.13.0
+```
+
+Both answer **with the network disabled**, so both are cache reads. `npx` caches per *exact
+spec string* and does not re-check the registry — the bare spec is not "stale until it
+refreshes", it is pinned to an old snapshot indefinitely. Every install and check command in
+the README used that bare form, so a user who ran it once would reinstall the same old
+version forever while the installer reported success.
+
+Worse: the installer wrote that unpinned spec **into your IDE config**, so a config could
+record `_engram_version: "1.13.0"` beside arguments that launch 1.12.0. A version stamp that
+does not describe the running process is worse than no stamp.
+
+**Fixed at both ends.** Every README command pins `@latest`, with the measurement shown
+rather than the rule asserted. The installer writes a **pinned exact version**, so what was
+installed is what runs.
+
+> **The limit, stated plainly:** Engram no longer self-upgrades. You move versions by
+> re-running the installer. `@latest` in the config was rejected — it is still a cache read,
+> it lets the running version change with no config change, and it puts a registry
+> round-trip in the spawn path of a server your IDE starts every session.
+
+### HIGH — the published release had never been merged back
+
+`release/1.13.0` was cut from `main`, shipped to npm, and never merged into the working
+branch. `git merge-base --is-ancestor main v2-foundations` was **false** for seven commits.
+Merging would have **rolled `package.json` back to 1.12.0 and deleted v1.13.0's entire
+release-notes file.**
+
+The board knew 1.13.0 had shipped. Three separate documents still said the branch was
+unpushed — including a git hook telling every agent *"nothing is disclosed while this branch
+stays unpushed"*, which is a **safety** claim, not bookkeeping. The branch was pushed and the
+release was public.
+
+The document written specifically to prevent this — `DEFERRED-CHANGES.md` D11, headed *"read
+before every release"* — described the accident almost verbatim and had itself gone stale.
+**F5 reproduced inside the anti-F5 machinery.**
+
+### HIGH — the README advertised a dashboard the package does not contain
+
+`npm pack` proves it: 377 files, 1,676 KB, **zero** dashboard entries. The README said Engram
+*"ships with"* a built-in visual dashboard and that it *"is included in the package"*. In an
+installed copy the server silently served an API-only stub instead.
+
+**The dashboard is a repository-only development tool and it is not finished.** The README
+says so plainly now, and a test fails the build if that claim and `package.json` ever
+disagree again — in either direction.
+
+### The rest
+
+| Finding | Resolution |
+|---|---|
+| `import`'s dry run counted four tables; the executor wrote one | One registry drives both. Tables with no importer are **reported** as `not_imported` with row counts instead of vanishing |
+| `npm pack --dry-run` permanently modified `package.json` and turned the suite red | `postpack` restores it byte-for-byte. *(The review blamed `--dry-run` for skipping `postpack`; it does not. There was simply no `postpack` script at all)* |
+| The declared Node floor was wrong by a major version | `>=20.0.0`. `better-sqlite3` and `open` both require 20+, so Node 18 users were sent into `EBADENGINE` and a native build failure in the dependency that *is* the database |
+| Status documents asserting things that had stopped being true | Finding F4 advertised open six commits after it closed; the constitution two versions and two schema revisions behind; test count 570 against a real 899; coverage understated by seven points |
+| SQLite carried a WAL-reset corruption bug | Closed. `better-sqlite3` → `^12.11.1`, bundling SQLite **3.53.2**. A *minor* bump inside the existing range — the task row had assumed a major migration |
+| `writeJson` silently widened file permissions | Atomic replace does not inherit the target's mode, so a config chmod'd to `0600` came back `0644`. These are **other products' files** — `~/.claude.json` holds another vendor's entire user state |
+| `coverage/` tracked (105 stale files); `temp/` tracked and not temporary | `coverage/` untracked and ignored. `temp/` documented rather than moved — those are authored assets, and relocating them is the owner's call |
+
+---
+
+## Breaking changes
+
+**This is why the target is `2.0.0`.**
+
+1. **Node 18 is no longer supported.** The floor is `>=20.0.0`. It corrects a declaration
+   that was never true, but for anyone genuinely on Node 18 it is breaking.
+2. **`since` is validated.** `what_changed` accepts `"session_start"`, a relative window
+   (`24h`, `7d`, `30m`), or an ISO-8601 timestamp. Anything else is an error instead of
+   being passed to a shell.
+3. **The installer pins an exact version** in the IDE config it writes. Engram will not move
+   versions on its own.
+4. **`gitCommand` takes an argv array** — internal, but a deleted signature, not a
+   deprecated one.
+
+Plus the session-identity change already on this branch, which makes `agent_name` required
+at session start.
+
+## Upgrade
+
+Nothing to do yet — this is not released. When it is:
+
+```bash
+npx -y engram-mcp-server@latest --install
+npx -y engram-mcp-server@latest --check
+```
+
+If `--check` reports an old version, you have a stale `npx` cache or a global install
+shadowing it:
+
+```bash
+npm cache clean --force
+npm install -g engram-mcp-server@latest   # only if you use the global install
+```
+
+No schema migration runs.
+
+## Verification
+
+Every claim here was executed rather than asserted.
+
+```
+npx tsc --noEmit          exit 0
+npx vitest run            906 passed, 57 files, ~41s, zero skipped
+npm pack --dry-run        377 files, 1,676 KB, package.json byte-identical after
+```
+
+New gates, each **mutation-tested** — deliberately broken to confirm it goes red, then
+restored:
+
+- `tests/security/git-command-injection.test.ts` — the injection PoC, inverted
+- `tests/process/register-truth.test.ts` — is `main` an ancestor; do the version registers
+  agree; is a closed finding still advertised as open; does a document claim the branch is
+  unpushed while git says otherwise
+- `tests/durability/sqlite-version.test.ts` — reads the linked SQLite, not what
+  `package.json` asked for
+- five claim assertions in `tests/public-surface/public-surface.test.ts`
+
+> **The structural point, which outlives every fix above.** This project's founding insight
+> is that *a claim survives only if something executes it*. The review's closing argument was
+> that it had been applied **to structure and not to content**: the gates checked that
+> generated files matched their generators and that CI steps were mirrored, and **not one
+> checked whether a sentence was true.** Five of the eleven findings were that exact shape.
+> The new assertions are the beginning of the other half.
+
+---
+
+# v1.14.0 — The installer tells the truth about what is on your machine
+
+**Released:** v1.14.0 — August 13, 2026 · **Base:** v1.13.0
+
+## Overview
+
+`v1.13.0` shipped a working product with a broken **`--check`**. On Windows the
+command printed its entire report correctly and then **died with exit code 127**,
+and the report it printed described one install per IDE on machines that have
+several. This release fixes the command you run to find out whether the other
+fixes arrived.
+
+Everything here is installer-side. **No schema change, no MCP tool-contract
+change, no migration.** Upgrading is safe from any 1.x.
+
+---
+
+## `install --check` crashed on Windows after printing its report
+
+```
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76
+```
+
+**Cause.** `--check` fetches the npm registry to compare versions, then called
+`process.exit()`. Node's built-in `fetch` (undici) keeps the connection alive
+after the body resolves, and `process.exit()` races its teardown — upstream
+[nodejs/node#58091](https://github.com/nodejs/node/issues/58091) and
+[#64322](https://github.com/nodejs/node/issues/64322). It reproduces only on
+Windows, and the upstream fix has been stalled in review since January 2025, so
+there is no Node version to wait for.
+
+**Fix.** `--check` now sets `process.exitCode` and returns, letting Node drain
+its own handles. Rejected the common workaround of sleeping ~100 ms before
+exiting: it trades a crash for a race that is quieter and still wrong.
+
+Exit codes are unchanged and still meaningful: `0` for success, `1` when a config
+exists but cannot be parsed. *"Update available"* stays `0` on purpose — a gate
+that goes red on every release is one a developer switches off inside a week.
+
+## One IDE is not one install
+
+The interactive installer asked for a single status per IDE and took the first
+config path that matched. On a machine with four Android Studio channels that is
+not a summary, it is a coin toss: three real installs went unmentioned and the
+one named was whichever path happened to be reached first.
+
+It now reads the same discovery engine `--check` uses, and gained:
+
+- **Multi-select.** `--check` could offer *"update all"* or *"pick one"*. Faced
+  with ten outdated installs, picking one meant running the command ten times.
+- **A details view** — every instance with its scope, mode, config file, project
+  root and the database it will open.
+- **Shortened paths that stay distinguishable.** `$HOME` collapses to `~` and the
+  middle is elided, **never the tail** — sibling configs differ only in their
+  second-to-last segment, so a tail-truncating shortener would render four
+  channels identical.
+- **Deduplicated commands.** `--check` printed four *identical* update commands.
+  It now prints one and lists the paths it covers.
+
+## "installed" with no version
+
+An entry written before Engram stamped versions displayed as `v?`. That is
+honest and unreadable — it reads as a broken installer rather than as *"older
+than every stamped release"*. It is now **`unversioned (pre-1.9)`** everywhere,
+in `--check` and in the install menus, which previously disagreed about the same
+state.
+
+## `--help` printed a command the README warns against
+
+The usage line said `npx -y engram-mcp-server install`. npx caches by package
+name, so the untagged form re-runs whatever version it downloaded first — the
+trap `README.md` documents and every command in it avoids. The help text now
+carries `@latest`.
+
+## `remove_hooks` never removed anything
+
+`engram_admin(action:"remove_hooks")` matched on a `\n---\n\n` terminator that
+its own hook content never emits, so the regex matched nothing and the block
+survived every removal, while the call reported success. The CLI and MCP paths
+also used **different markers** and each refused to recognise the other's hook.
+Both now share one marker and one recogniser.
+
+## `engines` said Node 18, and Node 18 cannot run Engram
+
+v1.13.0 and earlier published `"node": ">=18.0.0"`. **PROVEN** by reading the
+installed dependency trees: `better-sqlite3@12.11.1` declares
+`20.x || 22.x || 23.x || 24.x || 25.x || 26.x` and `open@11` declares `>=20`. A
+user on Node 18 got an `EBADENGINE` warning and then a **native build failure on
+the dependency that *is* the database** — an install that cannot possibly work,
+advertised as supported. CI could not catch it: the matrix is 20.x and 22.x.
+
+Now `>=20.0.0`. Note that `better-sqlite3` enumerates majors rather than using a
+floor, so 19 and 21 are excluded too.
+
+## `better-sqlite3` floor raised to `^12.11.1` — WAL corruption
+
+Not a routine bump. `12.6.2` bundled **SQLite 3.51.2**, which carries a
+WAL-reset database-corruption bug fixed in **3.51.3**
+([sqlite.org/changes.html](https://sqlite.org/changes.html), 2026-03-13).
+
+Engram runs in WAL mode and is explicitly a multi-agent, multi-IDE tool, so the
+trigger — two or more connections writing or checkpointing the same file at the
+same instant — **is its normal operating mode**, not a corner case. `12.11.1`
+bundles 3.53.2, verified by querying `sqlite_version()`.
+
+## The published `package.json` carried the wrong release notes
+
+`prepack` injects the changelog into `package.json` at publish time, and nothing
+put it back — there was no `postpack`. The consequence was that a **stale value
+sat committed in the file**: the v1.14.0 tree carried v1.13.0's notes, 6,320
+characters of them, and nothing reported it because `prepack` silently
+overwrites the field anyway. The injector now writes a backup, `postpack`
+restores it, and the committed value is removed with a note saying never to
+commit one.
+
+## Also
+
+- The two generated-surface gates are wired as npm scripts (`surface:check`,
+  `http-surface:check`). The generators shipped in v1.13.0; the scripts to run
+  them did not, so nothing invoked them on the published line.
+- Five type errors in the test suite are fixed, including one that was a real
+  defect: a task-status assertion used `"in-progress"` on both the write and the
+  read, so it passed by writing and reading the same wrong string and never
+  exercised the actual `in_progress` literal.
+
+## Not in this release
+
+The larger work on the `v2-foundations` branch — memory attribution under
+concurrency, session-start payload bounds, and the schema-honesty gates — is
+**not** here. It contains breaking changes and ships as `2.0.0` when its targets
+land. This release is deliberately narrow: the fixes a user needs in order to
+receive the next one.
+
+---
+
 # v1.13.0 — Security, data-safety, and honest failures
 
 **Released:** v1.13.0 — August 5, 2026

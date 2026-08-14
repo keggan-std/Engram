@@ -11,6 +11,7 @@
 // against future misuse.
 
 export type { KnowledgeEntry, PhaseDefinition, ChecklistItem, PhaseChecklist, EstimationGuide } from "./types.js";
+import type { EstimationGuide } from "./types.js";
 
 export { PRINCIPLES } from "./principles.js";
 export { PHASES } from "./phases.js";
@@ -85,10 +86,15 @@ export function getInstruction(id: string): KnowledgeEntry | null {
     return INSTRUCTIONS.find(i => i.id === id) ?? null;
 }
 
+type CompactEstimationGuide = Pick<EstimationGuide, "method" | "formula" | "commitFormula" | "compact">;
+
 /**
  * Get PERT estimation guidance.
  * @param compact When true, returns compact form only (skips worked examples).
  */
+export function getEstimationGuide(compact: true): CompactEstimationGuide;
+export function getEstimationGuide(compact: false): EstimationGuide;
+export function getEstimationGuide(compact?: boolean): CompactEstimationGuide | EstimationGuide;
 export function getEstimationGuide(compact: boolean = true) {
     if (compact) {
         return {

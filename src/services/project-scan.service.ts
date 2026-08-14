@@ -3,7 +3,7 @@
 // ============================================================================
 
 import type { Repositories } from "../repositories/index.js";
-import type { ProjectSnapshot } from "../types.js";
+import type { ProjectSnapshot, ProjectSnapshotDigest } from "../types.js";
 import { scanFileTree, detectLayer, minutesSince, safeJsonParse } from "../utils.js";
 import { SNAPSHOT_TTL_MINUTES, MAX_FILE_TREE_DEPTH } from "../constants.js";
 
@@ -33,6 +33,66 @@ export class ProjectScanService {
         } catch {
             return null; // scan is best-effort
         }
+    }
+
+    /**
+     * A bounded description of the project, for the session-start replay.
+     *
+     * TASK #68. `engram_session(start, verbosity:"full")` embedded the ENTIRE
+     * snapshot, and the snapshot embeds `fileNotes.getAll()` — every note, in
+     * full. MEASURED by docs/foundations/measurements/measure-session-cost.mjs:
+     * 59,721 tokens against a documented ~730, an 81.8x overstatement, of which
+     * project_snapshot alone was 153,194 of 246,118 characters.
+     *
+     * The growth is the finding, not the absolute number: the payload scales
+     * with how much the store remembers, so a memory tool got more expensive to
+     * orient in the more it had remembered.
+     *
+     * TWO KINDS OF WASTE ARE REMOVED HERE.
+     *   1. Bulk. The note bodies become a count and a layer histogram. An agent
+     *      that wants a note calls get_file_notes, which is the action for it
+     *      and which now filters properly (task #103).
+     *   2. DUPLICATION. The snapshot carries recent_decisions and
+     *      active_conventions, and the session-start response already returns
+     *      both as top-level siblings. They were shipped twice, in one object,
+     *      to be read once.
+     *
+     * `scan_project` still returns the full snapshot — it is the action whose
+     * entire purpose is that payload, and a caller reaching for it has asked.
+     * This is only the auto-replayed copy nobody requested.
+     */
+    digest(projectRoot: string): ProjectSnapshotDigest | null {
+        const snap = this.getOrRefresh(projectRoot);
+        if (!snap) return null;
+
+        const notes = snap.file_notes ?? [];
+        const byLayer: Record<string, number> = {};
+        for (const n of notes) {
+            const key = (n.layer as string | null) ?? "unclassified";
+            byLayer[key] = (byLayer[key] ?? 0) + 1;
+        }
+
+        // Top-level directories only. The full tree is up to
+        // MAX_FILE_TREE_ENTRIES paths and answers a question nobody asked at
+        // session start; the shape of the repo answers the one they did.
+        const topLevel = [...new Set(
+            (snap.file_tree ?? [])
+                .map(f => f.split("/")[0])
+                .filter(Boolean)
+        )].sort().slice(0, 40);
+
+        return {
+            project_root: snap.project_root,
+            total_files: snap.total_files,
+            layer_distribution: snap.layer_distribution,
+            top_level_entries: topLevel,
+            file_notes_count: notes.length,
+            file_notes_by_layer: byLayer,
+            generated_at: snap.generated_at,
+            // Say what was left out and how to get it. A digest that does not
+            // name its own omission reads as the whole thing.
+            hint: `File notes are summarised, not included. engram_memory(action:"get_file_notes", file_path_filter:"…") for the ones you need, or engram_admin(action:"scan_project") for the full snapshot.`,
+        };
     }
 
     /**

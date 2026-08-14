@@ -60,6 +60,7 @@ export const MEMORY_CATALOG: Record<string, { desc: string; params: string }> = 
   get_knowledge:        { desc: "Query the PM framework knowledge base (PM-Full required).", params: "{ knowledge_type: 'principles'|'phase_info'|'checklist'|'instructions'|'estimation'|'conventions'|'all', phase?: number, compact?: boolean }" },
   // Observations
   record_observation:   { desc: "Record a lightweight observation — findings, patterns, concerns, ideas, friction.", params: "{ content: string, observation_category?: 'finding'|'pattern'|'concern'|'idea'|'friction'|'behavior'|'other', file_path?: string, tags?: string[] }" },
+  update_observation:   { desc: "Repair an existing observation — the only fix for a record corrupted on write.", params: "{ id: number, content?: string, observation_category?: string, file_path?: string, tags?: string[] }" },
   get_observations:     { desc: "Retrieve stored observations, optionally filtered.", params: "{ query?: string, observation_category?: string, file_path?: string, session_id?: number, limit?: number }" },
 };
 
@@ -88,11 +89,18 @@ export const ADMIN_CATALOG: Record<string, { desc: string; params: string }> = {
   search_all_instances: { desc: "Search across all sharing instances at once.", params: "{ query: string, scope?: string, limit?: number }" },
   import_from_instance: { desc: "Import records from another instance (requires full sharing).", params: "{ instance_id: string, type?: string, ids?: number[] }" },
   set_instance_label: { desc: "Set a human-readable label for this instance.", params: "{ label: string }" },
-  // Sensitive data actions
-  mark_sensitive:     { desc: "Lock specific records as sensitive (hidden from cross-instance queries).", params: "{ type: string, ids: number[] }" },
-  unmark_sensitive:   { desc: "Remove sensitivity lock from specific records.", params: "{ type: string, ids: number[] }" },
-  list_sensitive:     { desc: "List all currently locked sensitive records by type.", params: "{}" },
-  request_access:     { desc: "Create a pending access request for sensitive data (requires human approval).", params: "{ requester_instance_id: string, type: string, ids: number[], requester_label?: string, reason?: string }" },
+  // Sensitive data actions.
+  // FR-D2 T4: these descriptions are AGENT-FACING — an AI reads them before
+  // deciding what to lock — and they promised an enforcement that does not run.
+  // filterSensitive() and isAccessApproved() have ZERO callers in src/, and
+  // cross-instance.service.ts contains no occurrence of "sensitive" anywhere.
+  // Marking a record changes nothing about what another instance can read.
+  // The claims are corrected rather than the feature wired, because whether the
+  // code is wired or deleted is domain 4's call — see task #39.
+  mark_sensitive:     { desc: "Record a local sensitivity marker on specific records. DOES NOT hide them from cross-instance queries — that filter exists but is not wired to any read path. Local bookkeeping only.", params: "{ type: string, ids: number[] }" },
+  unmark_sensitive:   { desc: "Remove the local sensitivity marker from specific records.", params: "{ type: string, ids: number[] }" },
+  list_sensitive:     { desc: "List all records currently carrying a local sensitivity marker, by type.", params: "{}" },
+  request_access:     { desc: "Record a pending access request for marked data. NOTE: approvals are never consulted by any read path, and approve_access is an ordinary tool action with a self-supplied resolved_by — nothing verifies a human. Bookkeeping only.", params: "{ requester_instance_id: string, type: string, ids: number[], requester_label?: string, reason?: string }" },
   approve_access:     { desc: "Approve a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   deny_access:        { desc: "Deny a pending access request (human action).", params: "{ request_id: number, resolved_by?: string }" },
   list_access_requests: { desc: "List access requests, optionally filtered by status.", params: "{ status?: 'pending'|'approved'|'denied' }" },

@@ -48,9 +48,18 @@ class SchemaCapturer {
 /** Peel ZodOptional / ZodDefault / ZodEffects until a concrete type remains. */
 function unwrap(schema) {
   let s = schema;
-  const flags = { optional: false, hasDefault: false, defaultValue: undefined, preprocessed: false };
+  const flags = { optional: false, hasDefault: false, defaultValue: undefined, preprocessed: false, description: undefined };
   // Bounded: a pathological schema should not hang the build.
   for (let i = 0; i < 20 && s?._def; i++) {
+    // TASK #75. `.describe()` sets `_def.description` on whatever wrapper it is
+    // called on, and this codebase writes both `z.string().optional().describe()`
+    // and `z.string().describe().optional()`. Collect on the way down and keep
+    // the OUTERMOST — that is the one a later `.describe()` was meant to win.
+    // Reading only the concrete inner type would have silently dropped every
+    // description in the memory dispatcher, which is the commoner spelling.
+    if (flags.description === undefined && typeof s._def.description === "string") {
+      flags.description = s._def.description;
+    }
     const t = s._def.typeName;
     if (t === "ZodOptional") { flags.optional = true; s = s._def.innerType; continue; }
     if (t === "ZodDefault") {
@@ -109,7 +118,7 @@ function describeType(schema) {
   if (flags.preprocessed) constraints.push("coerced");
   if (flags.hasDefault) constraints.push(`default ${JSON.stringify(flags.defaultValue)}`);
 
-  return { type, required: !flags.optional && !flags.hasDefault, constraints };
+  return { type, required: !flags.optional && !flags.hasDefault, constraints, description: flags.description };
 }
 
 /** Pull the action list out of a tool's `action` parameter, if it has one. */
@@ -193,16 +202,37 @@ async function build() {
       lines.push("");
     }
 
-    lines.push("| Parameter | Type | Required | Constraints |");
-    lines.push("|---|---|---|---|");
+    lines.push("| Parameter | Type | Required | Constraints | Description |");
+    lines.push("|---|---|---|---|---|");
     // Pipes inside a cell would break the table; escape rather than drop them.
-    const cell = (s) => String(s).replace(/\|/g, "\\|");
+    // Newlines too — a multi-line .describe() would otherwise end the row.
+    const cell = (s) => String(s).replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
     for (const key of Object.keys(tool.schema).sort()) {
-      const { type, required, constraints } = describeType(tool.schema[key]);
+      const { type, required, constraints, description } = describeType(tool.schema[key]);
       const c = constraints.length ? cell(constraints.join("; ")) : "—";
-      lines.push(`| \`${key}\` | ${cell(type)} | ${required ? "**yes**" : "no"} | ${c} |`);
+      // TASK #75. This column is the whole point of the change. The gate
+      // caught structural drift exactly as designed and was COMPLETELY BLIND
+      // to semantic drift: a deliberately false parameter description,
+      // compiled into the shipped schema, passed --check at exit 0.
+      //
+      // That blindness is not cosmetic. FR-D7 traced AR-01's 21.1% compliance
+      // to record_change advertising file_path, change_type and description
+      // while ignoring all three — a defect that IS a description telling an
+      // agent something false. The gate built to keep the agent-facing
+      // contract honest could not read the part of the contract that lied.
+      const d = description ? cell(description) : "—";
+      lines.push(`| \`${key}\` | ${cell(type)} | ${required ? "**yes**" : "no"} | ${c} | ${d} |`);
     }
     lines.push("");
+
+    // Named, not silently blank. A parameter with no description is a
+    // parameter an agent has to guess at, and the count makes that visible in
+    // review instead of leaving 40 em-dashes to be skimmed past.
+    const undescribed = Object.keys(tool.schema).filter((k) => !describeType(tool.schema[k]).description);
+    if (undescribed.length) {
+      lines.push(`> **No description** (${undescribed.length} of ${Object.keys(tool.schema).length}): ${undescribed.sort().map((u) => `\`${u}\``).join(", ")}`);
+      lines.push("");
+    }
 
     // The thing this file is really for: params that accept anything.
     const unbounded = Object.keys(tool.schema).filter((k) => {

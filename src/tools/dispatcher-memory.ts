@@ -6,17 +6,24 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  now, getCurrentSessionId, getRepos, getProjectRoot, getDb, getServices
+  // getCurrentSessionId is deliberately NOT imported. Its unscoped form was
+  // called at 16 sites in this file and answered "the newest open session
+  // belonging to anyone" — task #58. Identity comes from resolveSession().
+  now, getRepos, getProjectRoot, getDb, getServices, getToolCallsSince
 } from "../database.js";
 import {
   normalizePath, coerceStringArray, coerceNumberArray, ftsEscape, getFileMtime, getFileHash, gitCommand, truncate,
   safeJsonParse, detectLayer, isGitRepo, getGitLogSince, getGitFilesChanged, minutesSince,
 } from "../utils.js";
 import { success, error } from "../response.js";
+import { log } from "../logger.js";
+import { detectMalformedWrite } from "../write-integrity.js";
+import { resolveSession, ambiguityNote } from "./session-identity.js";
 import { writeGlobalDecision, writeGlobalConvention } from "../global-db.js";
 import {
   FILE_MTIME_STALE_HOURS, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES,
-  MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES,
+  MAX_SEARCH_RESULTS, DEFAULT_SEARCH_LIMIT, SNAPSHOT_TTL_MINUTES, TASK_COMPACT_DESCRIPTION_CHARS,
+  isValidSince, SINCE_RELATIVE, SINCE_ISO, SINCE_REJECTION,
 } from "../constants.js";
 import { pmSafe } from "../services/index.js";
 import { getKnowledge } from "../knowledge/index.js";
@@ -78,6 +85,75 @@ function withStaleness(note: FileNoteRow, projectRoot: string): FileNoteWithStal
   const driftHours = driftMs / 3_600_000;
   const confidence: FileNoteConfidence = driftHours > FILE_MTIME_STALE_HOURS ? "stale" : "medium";
   return { ...note, confidence, stale: true, staleness_hours: Math.round(driftHours) };
+}
+
+// ─── Freshness certification (FR-D3 T1 / task #64) ─────────────────────────
+
+/**
+ * The fields a note uses to DESCRIBE the file. An agent can only write these
+ * honestly by having read it.
+ *
+ * `layer` and `complexity` are deliberately NOT here. They are classification,
+ * they almost never change, and a stale one does not tell the next agent the
+ * file is understood — so requiring them would make `stale` the permanent
+ * verdict, which is the kill switch this task warns about ("a signal that
+ * always says stale is a slower way of saying: always open the file").
+ */
+const CONTENT_FIELDS = ["purpose", "notes", "executive_summary", "dependencies", "dependents"] as const;
+
+/**
+ * May this write refresh `file_mtime` / `content_hash` — the evidence that says
+ * the stored note describes the file as it is now?
+ *
+ * THE DEFECT, PROVEN before this existed. `set_file_notes` re-stat'd the file
+ * UNCONDITIONALLY on every write, while `FileNotesRepo.upsert` wraps every
+ * content column in `COALESCE(?, col)` so omitted fields are preserved. The two
+ * combine into laundering: a write that supplies ONE field refreshes the
+ * freshness evidence for ALL of them, including fields it did not touch and did
+ * not read.
+ *
+ * Agent A writes a full note; the file is then rewritten and is 72 hours newer,
+ * and confidence correctly reports `stale` — the feature works. Agent B then
+ * writes only `purpose`, never opening the file, and confidence flips back to
+ * `high` while A's `executive_summary`, which now describes code that no longer
+ * exists, is served unchanged.
+ *
+ * WHY THAT IS THE WORST DEFECT IN THE DOMAIN rather than a nuisance: agent rule
+ * AR-02 is CRITICAL priority and says to call `get_file_notes` first and open
+ * the file only if the notes are absent or stale. So a forged freshness signal
+ * does not merely misinform — it instructs the next agent NOT to read the real
+ * file. Under charter §10.3 that scores MISLEADING, the bucket the charter
+ * singles out as the one that matters and nobody measures.
+ *
+ * THE RULE. Refresh only when nothing survives from an earlier write: for every
+ * content field the row already holds, this write must supply it too. Then the
+ * timestamp certifies exactly what the row now says, which is what it claims.
+ * A partial write leaves the verdict alone and the row keeps saying `stale`
+ * until someone actually re-reads.
+ *
+ * A brand-new note has nothing to survive, so a first write always certifies.
+ *
+ * REJECTED (03-storage.md §4 T1): making the agent pass `file_mtime` explicitly
+ * — that moves a correctness guarantee onto caller discipline, which this
+ * project has eight-plus documented failures of. Dropping the freshness feature
+ * — it is right, and STALE (arXiv:2605.06527) argues it should exist: the best
+ * evaluated model recognises only 55.2% of its own invalid memories, and memory
+ * frameworks score below 10%, so this cannot be left to the reader. Per-field
+ * provenance — correct, but a schema change across the widest table plus every
+ * read path; revisit only if FR-D2 wants per-field provenance anyway.
+ */
+export function certifiesContent(
+  existing: FileNoteRow | null,
+  supplied: Record<string, unknown>,
+): boolean {
+  if (!existing) return true; // nothing to launder
+  for (const field of CONTENT_FIELDS) {
+    const held = (existing as unknown as Record<string, unknown>)[field];
+    const alreadyHas = held !== null && held !== undefined && held !== "";
+    const nowSupplied = supplied[field] !== null && supplied[field] !== undefined && supplied[field] !== "";
+    if (alreadyHas && !nowSupplied) return false;
+  }
+  return true;
 }
 
 // ─── Dump Classification ───────────────────────────────────────────────────
@@ -163,7 +239,13 @@ function calculateNextTrigger(recurrence: string, currentValue: string | null): 
 
 // ─── Actions ───────────────────────────────────────────────────────────────
 
-const MEMORY_ACTIONS = [
+// Exported so tests/ergonomics/universal-parity.test.ts can compare this list
+// against find.ts's MEMORY_CATALOG. Universal mode derives its routing set from
+// the CATALOG, not from this enum (universal.ts:34), so an action added here and
+// not there is advertised by the four-tool surface and unreachable in universal
+// mode — the hazard ENGRAM_CONSTITUTION.md:424 states as a convention (D8-C5)
+// and nothing enforced.
+export const MEMORY_ACTIONS = [
   "get_file_notes", "set_file_notes", "set_file_notes_batch",
   "record_change", "get_file_history", "begin_work",
   "record_decision", "record_decisions_batch", "get_decisions", "update_decision",
@@ -174,29 +256,17 @@ const MEMORY_ACTIONS = [
   "record_milestone", "get_milestones",
   "schedule_event", "get_scheduled_events", "update_scheduled_event", "acknowledge_event", "check_events",
   "dump", "claim_task", "release_task", "agent_sync", "get_agents", "broadcast", "route_task",
-  "record_observation", "get_observations",
+  "record_observation", "get_observations", "update_observation",
   "get_knowledge",
 ] as const;
 
 // ─── Dispatcher ────────────────────────────────────────────────────────────
 
 export function registerMemoryDispatcher(server: McpServer): void {
-  server.registerTool(
-    "engram_memory",
-    {
-      title: "Memory Operations",
-      description: `All Engram memory operations. Pass action + relevant params.
-
-Actions: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history,
-begin_work, record_decision, record_decisions_batch, get_decisions, update_decision,
-add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
-checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
-get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
-check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task,
-record_observation, get_observations.
-
-Use engram_find(query: "...") to look up exact param schemas.`,
-      inputSchema: {
+  // Named so the write-integrity check can DERIVE the valid parameter names
+  // for this tool instead of restating them. A parameter added below is
+  // covered by the malformed-write detector on the same commit.
+  const MEMORY_INPUT_SCHEMA = {
         action: z.enum(MEMORY_ACTIONS).describe("Memory operation to perform."),
         // File notes
         file_path: z.string().optional(),
@@ -271,7 +341,9 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         query: z.string().optional(),
         scope: z.string().optional(),
         context_chars: z.number().int().optional(),
-        since: z.string().optional(),
+        // Constrained, not free text. See SINCE_* in constants.ts — this
+        // parameter carried the 1.14.0 command-execution defect.
+        since: z.string().refine(isValidSince, { message: SINCE_REJECTION }).optional(),
         include_git: z.boolean().optional(),
         depth: z.number().int().optional(),
         // Milestones
@@ -308,12 +380,69 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         phase: z.number().int().optional().describe("Phase number 1-6 for phase_info, checklist, or instructions."),
         knowledge_type: z.enum(["principles", "phase_info", "checklist", "instructions", "estimation", "conventions", "all"]).optional(),
         compact: z.boolean().optional().describe("Return compact forms only (default: true)."),
-      },
+  } as const;
+
+  server.registerTool(
+    "engram_memory",
+    {
+      title: "Memory Operations",
+      description: `All Engram memory operations. Pass action + relevant params.
+
+Actions: get_file_notes, set_file_notes, set_file_notes_batch, record_change, get_file_history,
+begin_work, record_decision, record_decisions_batch, get_decisions, update_decision,
+add_convention, get_conventions, toggle_convention, create_task, update_task, get_tasks,
+checkpoint, get_checkpoint, search, what_changed, get_dependency_map, record_milestone,
+get_milestones, schedule_event, get_scheduled_events, update_scheduled_event, acknowledge_event,
+check_events, dump, claim_task, release_task, agent_sync, get_agents, broadcast, route_task,
+record_observation, get_observations, update_observation.
+
+Use engram_find(query: "...") to look up exact param schemas.`,
+      inputSchema: MEMORY_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // Upstream bug anthropics/claude-code#49747, open and unfixed, folds a
+      // trailing parameter into the tail of the preceding string and its own
+      // column never arrives. 51 records in this store already carry it, 31
+      // with a field outright NULL. Convention #7 is a prompt-layer mitigation
+      // and the issue states plainly that the prompt layer cannot fix it — the
+      // server is the only layer downstream of the decoder.
+      //
+      // Siblings are DERIVED from the registered schema, never restated, so a
+      // new parameter is covered the day it is added.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(MEMORY_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       // ── PM Advisor: record this action (best-effort) ─────────────────────
       pmSafe(() => getServices().advisor.recordAction(String(params.action), params as Record<string, unknown>), undefined, 'advisor.recordAction');
+
+      // ── Who is writing this row (task #58) ───────────────────────────────
+      //
+      // Resolved ONCE, here, instead of sixteen bare getCurrentSessionId()
+      // calls further down. Bare, that query is "the newest open session
+      // belonging to ANYONE", and since a parent session always predates the
+      // sub-agents it spawns, ORDER BY id DESC hands every one of those
+      // sixteen writes to a live child. The orchestrator lost 100% of the
+      // time — deterministic, not a race. See session-identity.ts.
+      //
+      // One resolution per call rather than per case: sixteen sites resolving
+      // independently is sixteen chances for the next one to be added bare,
+      // which is exactly how this got to sixteen.
+      //
+      // Outside the IIFE because the advisory note below is attached after it
+      // returns, and the whole point of resolving once is that both halves see
+      // the same answer.
+      const actingSession = resolveSession(params, getRepos());
+      const sessionAttribution = ambiguityNote(actingSession, String(params.action));
 
       // Execute the action in an IIFE so we can intercept the result for nudge injection
       const _result = await (async () => {
@@ -327,7 +456,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         // ── FILE NOTES ────────────────────────────────────────────────────────
 
         case "get_file_notes": {
-          const currentBranch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+          const currentBranch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           if (params.file_path) {
             const fp = normalizePath(params.file_path);
             const note = repos.fileNotes.getByPath(fp);
@@ -350,23 +479,50 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               lock_status: lock ? { locked: true, agent_id: lock.agent_id, reason: lock.reason, locked_ago_minutes: Math.round((Date.now() - lock.locked_at) / 60_000), expires_in_minutes: Math.round((lock.expires_at - Date.now()) / 60_000) } : { locked: false },
             });
           }
+          // TASK #103 — file_path_filter is now READ.
+          //
+          // engram_memory declares it on its one flat schema and this handler
+          // ignored it; it was wired to get_decisions alone. So a caller
+          // narrowing the read got all 96 notes at 99,655 characters and
+          // overflowed the tool result — on the call made specifically to keep
+          // the read small. CLAUDE.md tells every agent to filter reads rather
+          // than pull the board whole, and on this path that instruction could
+          // not be complied with and the agent could not tell.
+          const noteTotal = repos.fileNotes.countAll();
           const notesList = repos.fileNotes.getFiltered({
             layer: params.layer as Parameters<typeof repos.fileNotes.getFiltered>[0]["layer"],
             complexity: params.complexity as Parameters<typeof repos.fileNotes.getFiltered>[0]["complexity"],
+            file_path_filter: params.file_path_filter,
+            task_focus: params.task_focus,
+            limit: params.limit,
           });
           const enrichedList = notesList.map(n => withStaleness(n, projectRoot));
-          return success({ count: enrichedList.length, stale_count: enrichedList.filter(n => n.stale).length, files: enrichedList });
+          return success({
+            count: enrichedList.length,
+            total: noteTotal,
+            stale_count: enrichedList.filter(n => n.stale).length,
+            // Say when the answer is a subset. A truncated list that looks
+            // complete is the failure mode this whole task is about.
+            ...(enrichedList.length < noteTotal
+              ? { truncated: true, hint: `Showing ${enrichedList.length} of ${noteTotal}. Narrow with file_path_filter, layer or complexity, or raise limit.` }
+              : {}),
+            files: enrichedList,
+          });
         }
 
         case "set_file_notes": {
           if (!params.file_path) return error("file_path required for set_file_notes.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const fp = normalizePath(params.file_path);
           purgeExpiredLocks();
-          const file_mtime = getFileMtime(fp, projectRoot);
-          const content_hash = getFileHash(fp, projectRoot);
-          const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
+          // FR-D3 T1 / task #64 — a write that did not read the file must not
+          // certify the file as read. See certifiesContent() for the whole
+          // argument; this is the call site the defect lived at.
+          const refresh = certifiesContent(repos.fileNotes.getByPath(fp), params);
+          const file_mtime = refresh ? getFileMtime(fp, projectRoot) : undefined;
+          const content_hash = refresh ? getFileHash(fp, projectRoot) : undefined;
+          const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
           repos.fileNotes.upsert(fp, timestamp, sessionId, {
             purpose: params.purpose,
             dependencies: params.dependencies,
@@ -379,13 +535,27 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             content_hash,
             executive_summary: params.executive_summary as string | null | undefined,
           });
-          acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, FILE_LOCK_DEFAULT_TIMEOUT_MINUTES);
+          // timeout_minutes was advertised and read by nothing (#103) while the
+          // lock it names was always taken for the hardcoded default. Clamped:
+          // a zero or negative lease is a lock that is already expired, and a
+          // caller cannot be allowed to hold one for a week by typo.
+          const lockMinutes = params.timeout_minutes === undefined
+            ? FILE_LOCK_DEFAULT_TIMEOUT_MINUTES
+            : Math.max(1, Math.min(Math.floor(params.timeout_minutes), 24 * 60));
+          acquireSoftLock(fp, `session-${sessionId ?? "unknown"}`, lockMinutes);
           const missingExecSummary = !params.executive_summary;
           return success({
             message: `File notes saved for ${fp}.`,
-            file_mtime_captured: file_mtime !== null,
+            file_mtime_captured: file_mtime != null,
             git_branch_captured: git_branch,
-            content_hash_captured: content_hash !== null,
+            content_hash_captured: content_hash != null,
+            // Say so, rather than letting the two `false`s above read as a
+            // failure to stat the file. This write kept an earlier agent's
+            // description, so it cannot certify the file as read (task #64).
+            ...(refresh ? {} : {
+              freshness_unchanged: true,
+              hint: "Freshness evidence was left as it was: this write did not supply every field the note already holds, so it cannot certify the file as read. Supply purpose, notes, executive_summary, dependencies and dependents together after actually reading the file to mark it fresh.",
+            }),
             ...(missingExecSummary ? { hint: "Tip: Include executive_summary (2-3 sentences) for instant context in future sessions without re-reading the file." } : {}),
           });
         }
@@ -393,15 +563,24 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "set_file_notes_batch": {
           if (!params.files || !Array.isArray(params.files)) return error("files array required for set_file_notes_batch.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
-          const git_branch = gitCommand(projectRoot, "rev-parse --abbrev-ref HEAD").trim() || null;
-          const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => ({
-            ...f,
-            file_mtime: getFileMtime(normalizePath(String(f["file_path"] ?? "")), projectRoot),
-            content_hash: getFileHash(normalizePath(String(f["file_path"] ?? "")), projectRoot),
-            executive_summary: f["executive_summary"] as string | null | undefined,
-            git_branch,
-          }));
+          const sessionId = actingSession.id;
+          const git_branch = gitCommand(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).trim() || null;
+          // Same certification rule as set_file_notes. The batch path re-stat'd
+          // unconditionally too, so it laundered freshness exactly as the single
+          // path did — and it is the one an orientation sweep uses, which is
+          // precisely where a partial write over someone else's note is most
+          // likely (task #64).
+          const enrichedFiles = (params.files as Array<Record<string, unknown>>).map(f => {
+            const fp = normalizePath(String(f["file_path"] ?? ""));
+            const refresh = certifiesContent(repos.fileNotes.getByPath(fp), f);
+            return {
+              ...f,
+              file_mtime: refresh ? getFileMtime(fp, projectRoot) : undefined,
+              content_hash: refresh ? getFileHash(fp, projectRoot) : undefined,
+              executive_summary: f["executive_summary"] as string | null | undefined,
+              git_branch,
+            };
+          });
           const count = repos.fileNotes.upsertBatch(
             enrichedFiles as Parameters<typeof repos.fileNotes.upsertBatch>[0],
             timestamp, sessionId
@@ -414,16 +593,23 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_change": {
           if (!params.changes || !Array.isArray(params.changes)) return error("changes array required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const normalized = (params.changes as Array<Record<string, unknown>>).map(c => ({
             ...c,
             file_path: normalizePath(String(c["file_path"] ?? "")),
           }));
           repos.changes.recordBulk(normalized as Parameters<typeof repos.changes.recordBulk>[0], sessionId, timestamp);
-          // Auto-close pending_work
+          // Auto-close pending_work.
+          // AUDIT N3c (same family): this used to sweep EVERY agent's pending
+          // rows, so agent B recording a change marked agent A's declared work
+          // "completed" on nothing more than a file-path overlap. Scope it to
+          // the session's own agent.
           const changedPaths = normalized.map(c => c["file_path"]);
           try {
-            const pending = db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending'").all() as { id: number; files: string }[];
+            const changeAgent = sessionId ? repos.sessions.getById(sessionId)?.agent_name ?? null : null;
+            const pending = (changeAgent
+              ? db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending' AND agent_id = ?").all(changeAgent)
+              : db.prepare("SELECT id, files FROM pending_work WHERE status = 'pending'").all()) as { id: number; files: string }[];
             for (const pw of pending) {
               const pwFiles: string[] = JSON.parse(pw.files);
               if (pwFiles.some(f => changedPaths.includes(normalizePath(f)))) {
@@ -446,12 +632,19 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "begin_work": {
           if (!params.description) return error("description required for begin_work.");
           if (!params.files || !Array.isArray(params.files)) return error("files array required for begin_work.");
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const normalizedFiles = (params.files as unknown as string[]).map(f => normalizePath(String(f)));
           try {
+            // AUDIT N3c: agent_id used to fall back to the literal "unknown", so
+            // every agent that omitted it shared one bucket and the abandonment
+            // scoping in sessions.ts could not tell whose work was whose. Fall
+            // back to the owning session's agent_name instead.
+            const owningAgent = params.agent_id
+              ?? (sessionId ? repos.sessions.getById(sessionId)?.agent_name : undefined)
+              ?? "unknown";
             const result = db.prepare(
               `INSERT INTO pending_work (agent_id, session_id, description, files, started_at, status) VALUES (?, ?, ?, ?, ?, 'pending')`
-            ).run(params.agent_id ?? "unknown", sessionId ?? null, params.description, JSON.stringify(normalizedFiles), Date.now());
+            ).run(owningAgent, sessionId ?? null, params.description, JSON.stringify(normalizedFiles), Date.now());
             return success({ work_id: result.lastInsertRowid, message: `Pending work #${result.lastInsertRowid} recorded.`, files: normalizedFiles });
           } catch (e) { return success({ message: `Failed to record pending work: ${e}` }); }
         }
@@ -461,7 +654,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_decision": {
           if (!params.decision) return error("decision string required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const newId = repos.decisions.create(
             sessionId, timestamp,
             params.decision, params.rationale,
@@ -495,7 +688,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_decisions_batch": {
           if (!params.decisions || !Array.isArray(params.decisions)) return error("decisions array required.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const ids = repos.decisions.createBatch(
             params.decisions as Parameters<typeof repos.decisions.createBatch>[0],
             sessionId, timestamp
@@ -537,7 +730,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "add_convention": {
           if (!params.category || !params.rule) return error("category and rule required for add_convention.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             "INSERT INTO conventions (session_id, timestamp, category, rule, examples) VALUES (?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.category, params.rule, params.examples ? JSON.stringify(params.examples) : null);
@@ -578,7 +771,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "create_task": {
           if (!params.title) return error("title required for create_task.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             `INSERT INTO tasks (session_id, created_at, updated_at, title, description, status, priority, assigned_files, tags, blocked_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(
@@ -648,6 +841,21 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         case "get_tasks": {
+          // TASK #103 / #68 — `query` and `compact` are now READ.
+          //
+          // Both were declared on the shared schema and neither was consumed
+          // here. MEASURED on this project's own store, 2026-08-13:
+          // get_tasks({compact:true, limit:60}) returned 120,020 characters and
+          // overflowed the tool result; a user reported 190,018 at higher
+          // limits. `compact` was accepted, ignored, and the full description
+          // of every row shipped anyway — descriptions in this store run to
+          // thousands of characters each, so "compact" was the single most
+          // load-bearing word in the call and it did nothing.
+          //
+          // CLAUDE.md instructs every agent to filter reads rather than pull
+          // the board whole. On this path that instruction could not be
+          // complied with, and the failure was always toward MORE context on
+          // exactly the calls made to save it.
           let taskQuery = "SELECT * FROM tasks WHERE 1=1";
           const taskParams: unknown[] = [];
           const statusAll = params.status === "all";
@@ -655,18 +863,55 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (params.status && !statusAll) { taskQuery += " AND status = ?"; taskParams.push(params.status); }
           if (params.priority) { taskQuery += " AND priority = ?"; taskParams.push(params.priority); }
           if (params.tag) { taskQuery += " AND EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"; taskParams.push(params.tag); }
+          // Keyword filter through fts_tasks, which is already populated and
+          // indexes title, description and tags. Same ftsEscape the `search`
+          // action uses, so one query syntax covers both.
+          if (params.query) {
+            taskQuery += " AND id IN (SELECT rowid FROM fts_tasks WHERE fts_tasks MATCH ?)";
+            taskParams.push(ftsEscape(params.query));
+          }
+          // Clamped. SQLite reads LIMIT -1 as unlimited, so an unclamped
+          // negative turns the bound into its opposite (task #44's shape).
+          const taskLimit = Math.max(1, Math.min(Math.floor(params.limit ?? 20), MAX_SEARCH_RESULTS));
           taskQuery += ` ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, created_at ASC LIMIT ?`;
-          taskParams.push(params.limit ?? 20);
-          const tasks = db.prepare(taskQuery).all(...taskParams);
+          taskParams.push(taskLimit);
+          const taskRows = db.prepare(taskQuery).all(...taskParams) as Array<Record<string, unknown>>;
           const openCount = (db.prepare("SELECT COUNT(*) as c FROM tasks WHERE status NOT IN ('done','cancelled')").get() as { c: number }).c;
-          return success({ total_open: openCount, returned: tasks.length, tasks });
+
+          // compact defaults TRUE, matching the schema's own documented
+          // default ("Return compact forms only (default: true)"). The default
+          // was already advertised; only the behaviour was missing. A caller
+          // that genuinely wants full descriptions asks for one task by filter
+          // — or passes compact:false and accepts the size.
+          const isCompactTasks = params.compact !== false;
+          const tasks = isCompactTasks
+            ? taskRows.map(t => ({
+              ...t,
+              description: typeof t.description === "string" && t.description.length > TASK_COMPACT_DESCRIPTION_CHARS
+                ? truncate(t.description, TASK_COMPACT_DESCRIPTION_CHARS)
+                : t.description,
+            }))
+            : taskRows;
+
+          return success({
+            total_open: openCount,
+            returned: tasks.length,
+            ...(isCompactTasks ? {
+              compact: true,
+              hint: `Descriptions over ${TASK_COMPACT_DESCRIPTION_CHARS} chars are truncated. Pass compact:false for full text, ideally with a filter.`,
+            } : {}),
+            ...(openCount > tasks.length && !params.status && !params.priority && !params.tag && !params.query
+              ? { truncated: true, more: openCount - tasks.length }
+              : {}),
+            tasks,
+          });
         }
 
         // ── CHECKPOINT ────────────────────────────────────────────────────────
 
         case "checkpoint": {
           if (!params.current_understanding || !params.progress) return error("current_understanding and progress required for checkpoint.");
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           db.prepare(
             `INSERT INTO checkpoints (session_id, agent_name, created_at, current_understanding, progress, relevant_files) VALUES (?, ?, ?, ?, ?, ?)`
           ).run(
@@ -681,7 +926,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         case "get_checkpoint": {
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const cp = db.prepare("SELECT * FROM checkpoints WHERE session_id = ? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string, unknown> | undefined;
           if (!cp) return success({ message: "No checkpoint found for current session.", session_id: sessionId });
           const files = cp.relevant_files ? (JSON.parse(cp.relevant_files as string) as unknown) : null;
@@ -796,15 +1041,21 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             sinceTimestamp = last?.ended_at || new Date(Date.now() - 86400000).toISOString();
           } else if (params.since === "session_start") {
             // Resolve to the current session's started_at — prevents alphabetic-comparison bug
-            const sessionId = getCurrentSessionId();
+            const sessionId = actingSession.id;
             const session = sessionId ? db.prepare("SELECT started_at FROM sessions WHERE id = ? LIMIT 1").get(sessionId) as { started_at: string } | undefined : undefined;
             sinceTimestamp = session?.started_at || new Date(Date.now() - 3600000).toISOString();
-          } else if (/^\d+[hdm]$/.test(params.since)) {
+          } else if (SINCE_RELATIVE.test(params.since)) {
             const m = params.since.match(/^(\d+)([hdm])$/)!;
             const ms = m[2] === "h" ? +m[1] * 3600000 : m[2] === "d" ? +m[1] * 86400000 : +m[1] * 60000;
             sinceTimestamp = new Date(Date.now() - ms).toISOString();
-          } else {
+          } else if (SINCE_ISO.test(params.since)) {
             sinceTimestamp = params.since;
+          } else {
+            // The `else` that used to live here assigned params.since verbatim
+            // and was the entry point for the command-execution defect. Zod's
+            // refine already rejects this, so reaching here means the schema
+            // and this switch have drifted apart — fail rather than guess.
+            return error(SINCE_REJECTION);
           }
           const agentChanges = db.prepare("SELECT * FROM changes WHERE timestamp > ? ORDER BY timestamp DESC").all(sinceTimestamp);
           const newDecisions = db.prepare("SELECT * FROM decisions WHERE timestamp > ? ORDER BY timestamp DESC").all(sinceTimestamp);
@@ -817,11 +1068,25 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           }
           const recordedFiles = new Set((agentChanges as Array<Record<string, unknown>>).map(c => c["file_path"]));
           const unrecordedGitChanges = gitFilesChanged.filter(f => !recordedFiles.has(f));
+
+          // include_tool_log was advertised on this schema and read by nothing
+          // (#103). Its only implementation lives on session_timeline in
+          // src/tools/intelligence.ts — a module that is never registered, so
+          // the parameter was inert TWICE over. Wired here with the meaning
+          // intelligence.ts:501 already documents for it, verbatim: "Include
+          // raw tool_call_log entries if available (default: false)". Bounded,
+          // because this table gets one row per tool call and is the largest
+          // in a busy store.
+          const toolLog = params.include_tool_log
+            ? getToolCallsSince(Date.parse(sinceTimestamp), MAX_SEARCH_RESULTS)
+            : undefined;
+
           return success({
             since: sinceTimestamp,
             agent_recorded: { count: agentChanges.length, changes: agentChanges },
             new_decisions: newDecisions,
             git: includeGit ? { log: gitLog, files_changed: gitFilesChanged.length, unrecorded_changes: unrecordedGitChanges } : null,
+            ...(toolLog ? { tool_log: toolLog, tool_log_capped_at: MAX_SEARCH_RESULTS } : {}),
             summary: `${agentChanges.length} recorded changes, ${newDecisions.length} new decisions, ${gitFilesChanged.length} git file changes (${unrecordedGitChanges.length} unrecorded) since ${sinceTimestamp}.`,
           });
         }
@@ -856,7 +1121,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         case "record_milestone": {
           if (!params.title) return error("title required for record_milestone.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             "INSERT INTO milestones (session_id, timestamp, title, description, version, tags) VALUES (?, ?, ?, ?, ?, ?)"
           ).run(sessionId, timestamp, params.title, params.description || null, params.version || null, params.tags ? JSON.stringify(params.tags) : null);
@@ -876,7 +1141,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (params.trigger_type === "datetime" && !params.trigger_value) return error("trigger_value (ISO datetime) required when trigger_type is 'datetime'.");
           if (params.trigger_type === "task_complete" && !params.trigger_value) return error("trigger_value (task ID) required when trigger_type is 'task_complete'.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const result = db.prepare(
             `INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
           ).run(sessionId, timestamp, params.title, params.description || null, params.trigger_type, params.trigger_value || null, (params.requires_approval ?? true) ? 1 : 0, params.action_summary || null, params.action_data || null, params.priority ?? "medium", params.tags ? JSON.stringify(params.tags) : null, params.recurrence || null);
@@ -929,7 +1194,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
             db.prepare("UPDATE scheduled_events SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?").run(now(), params.id);
             if (event.recurrence && event.recurrence !== "once") {
               const nextVal = event.trigger_type === "datetime" ? calculateNextTrigger(event.recurrence, event.trigger_value ?? null) : event.trigger_value;
-              db.prepare(`INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`).run(getCurrentSessionId(), now(), event.title, event.description, event.trigger_type, nextVal, event.requires_approval, event.action_summary, event.action_data, event.priority, event.tags, event.recurrence);
+              db.prepare(`INSERT INTO scheduled_events (session_id, created_at, title, description, trigger_type, trigger_value, status, requires_approval, action_summary, action_data, priority, tags, recurrence) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`).run(actingSession.id, now(), event.title, event.description, event.trigger_type, nextVal, event.requires_approval, event.action_summary, event.action_data, event.priority, event.tags, event.recurrence);
             }
             return success({ event_id: params.id, status: "acknowledged", message: `Event #${params.id} approved.${params.note ? ` Note: ${params.note}` : ""}` });
           } else {
@@ -963,7 +1228,7 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           const scores = scoreDump(params.content);
           const classified = pickDumpType(scores, params.hint === "auto" ? undefined : params.hint);
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const extractedItems: Array<{ type: DumpType; id: number; summary: string }> = [];
           try {
             switch (classified) {
@@ -1000,10 +1265,31 @@ Use engram_find(query: "...") to look up exact param schemas.`,
         }
 
         // ─── OBSERVATIONS ─────────────────────────────────────────────────
+        case "update_observation": {
+          // The repair path. Task #91: decisions had update_decision and
+          // observations had nothing, so a corrupted observation could only be
+          // superseded — leaving the wrong text in the store, retrievable
+          // forever. This must exist BEFORE the malformed-write rejection
+          // above is trusted, or a rejected write has no remedy for what is
+          // already broken.
+          if (!params.id) return error("id required for update_observation.");
+          const existing = repos.observations.getById(params.id);
+          if (!existing) return error(`Observation #${params.id} not found.`);
+
+          const changed = repos.observations.update(params.id, {
+            content: params.content,
+            category: params.observation_category,
+            filePath: params.file_path ? normalizePath(params.file_path, projectRoot) : undefined,
+            tags: params.tags,
+          });
+          if (!changed) return error("Nothing to update — supply at least one of content, observation_category, file_path or tags.");
+          return success({ id: params.id, message: `Observation #${params.id} updated.` });
+        }
+
         case "record_observation": {
           if (!params.content) return error("content required for record_observation.");
           const timestamp = now();
-          const sessionId = getCurrentSessionId();
+          const sessionId = actingSession.id;
           const category = params.observation_category ?? "other";
           const filePath = params.file_path ? normalizePath(params.file_path, projectRoot) : undefined;
           const id = repos.observations.create(
@@ -1034,9 +1320,31 @@ Use engram_find(query: "...") to look up exact param schemas.`,
           if (!params.task_id) return error("task_id required for claim_task.");
           const agentId = params.agent_id ?? "unknown";
           const timestamp = now();
-          const result = db.prepare(
-            `UPDATE tasks SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND claimed_by IS NULL AND status NOT IN ('done', 'cancelled')`
-          ).run(agentId, Date.now(), timestamp, params.task_id);
+          // TASK #61 — register the claimer and take the claim atomically.
+          //
+          // claim_task only ever SELECTed from `agents`, and a SELECT creates
+          // no row, so after a claim the table was EMPTY and the stale-claim
+          // sweep had nothing to match on. A crashed claimer's task was then
+          // unreclaimable by anything except release_task force:true, which
+          // requires a human to notice.
+          //
+          // One transaction, not two statements: a claim recorded without its
+          // claimer is precisely the state that was broken, so it must not be
+          // reachable through a crash between them either.
+          //
+          // The compare-and-swap below is untouched. It is the one genuinely
+          // correct coordination primitive here — PROVEN 15/15 two-process
+          // races with zero double-claims — and this task is about the RELEASE
+          // path, not the acquire path.
+          let result!: { changes: number };
+          db.transaction(() => {
+            result = db.prepare(
+              `UPDATE tasks SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ? AND claimed_by IS NULL AND status NOT IN ('done', 'cancelled')`
+            ).run(agentId, Date.now(), timestamp, params.task_id);
+            if (result.changes > 0) {
+              repos.agents.register(agentId, params.agent_name ?? agentId, Date.now());
+            }
+          })();
           if (result.changes === 0) {
             const task = db.prepare("SELECT id, status, claimed_by FROM tasks WHERE id = ?").get(params.task_id) as { id: number; status: string; claimed_by: string | null } | undefined;
             if (!task) return error(`Task #${params.task_id} not found.`);
@@ -1087,10 +1395,21 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               `INSERT INTO agents (id, name, last_seen, current_task_id, status, specializations) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, name), last_seen = excluded.last_seen, current_task_id = excluded.current_task_id, status = excluded.status, specializations = COALESCE(excluded.specializations, specializations)`
             ).run(params.agent_id, params.agent_name ?? params.agent_id, nowMs, params.current_task_id ?? null, params.status ?? "idle", specsJson);
           } catch { return error("Agent coordination tables not yet initialised."); }
+          // TASK #61 — the recovery sweep, now able to fire.
+          //
+          // Both statements used to live here inline and both required
+          // `status = 'working'`, a value nothing in the product ever wrote:
+          // agent_sync defaults to 'idle' (see the upsert above) and claim_task
+          // wrote no row at all. Two independent reasons the sweep was dead.
+          //
+          // Routed through AgentsRepo, which is also where releaseStale() has
+          // sat with zero callers since it was written — the method named for
+          // this job, while the dispatcher ran its own broken copy.
           const STALE_MS = 30 * 60 * 1000;
+          let reclaimed: Array<{ task_id: number; agent_id: string }> = [];
           try {
-            db.prepare(`UPDATE tasks SET claimed_by = NULL, claimed_at = NULL WHERE claimed_by IN (SELECT id FROM agents WHERE status = 'working' AND last_seen < ?)`).run(nowMs - STALE_MS);
-            db.prepare("UPDATE agents SET status = 'stale' WHERE status = 'working' AND last_seen < ?").run(nowMs - STALE_MS);
+            reclaimed = repos.agents.reclaimStaleClaims(nowMs, STALE_MS);
+            repos.agents.releaseStale(nowMs, STALE_MS);
           } catch { /* best effort */ }
           let broadcasts: unknown[] = [];
           try {
@@ -1102,7 +1421,22 @@ Use engram_find(query: "...") to look up exact param schemas.`,
               if (!readers.includes(params.agent_id!)) { readers.push(params.agent_id!); db.prepare("UPDATE broadcasts SET read_by = ? WHERE id = ?").run(JSON.stringify(readers), b.id); }
             }
           } catch { /* best effort */ }
-          return success({ agent: db.prepare("SELECT * FROM agents WHERE id = ?").get(params.agent_id), unread_broadcasts: broadcasts, message: broadcasts.length > 0 ? `Agent "${params.agent_id}" synced. ${broadcasts.length} unread broadcast(s).` : `Agent "${params.agent_id}" synced.` });
+          // Report the reclaim. A sweep that releases another agent's claim
+          // silently is the fencing-token hazard with the evidence removed —
+          // the preempted agent cannot learn it was preempted, and neither can
+          // the one that triggered the sweep. Saying so is the cheap half of a
+          // problem whose expensive half (fencing tokens) is out of scope here.
+          return success({
+            agent: repos.agents.getById(params.agent_id),
+            unread_broadcasts: broadcasts,
+            ...(reclaimed.length ? {
+              reclaimed_tasks: reclaimed,
+              reclaim_note: `Released ${reclaimed.length} claim(s) held by agent(s) with no heartbeat for over ${STALE_MS / 60_000} minutes. If one of them is still running, it has NOT been told.`,
+            } : {}),
+            message: broadcasts.length > 0
+              ? `Agent "${params.agent_id}" synced. ${broadcasts.length} unread broadcast(s).`
+              : `Agent "${params.agent_id}" synced.`,
+          });
         }
 
         case "route_task": {
@@ -1168,6 +1502,20 @@ Use engram_find(query: "...") to look up exact param schemas.`,
 
       }
       })(); // end action IIFE
+
+      // ── Say when attribution was a guess (task #58) ───────────────────────
+      //
+      // Attached here, once, rather than at sixteen return sites — the same
+      // reason the resolution itself is computed once. Present ONLY on the
+      // bottom rung: with a session_id, an agent_name, or this process's own
+      // session, the answer is a fact and annotating it would train the reader
+      // to ignore the field on the one call where it means something.
+      if (sessionAttribution) {
+        try {
+          const _parsed = JSON.parse(_result.content[0].text);
+          _result.content[0].text = JSON.stringify({ ..._parsed, session_attribution: sessionAttribution });
+        } catch { /* best effort — a non-JSON body is still a valid response */ }
+      }
 
       // ── PM Advisor: inject nudge if warranted (best-effort) ───────────────
       const _nudge = pmSafe(() => getServices().advisor.checkNudge(), null as string | null, 'advisor.checkNudge');

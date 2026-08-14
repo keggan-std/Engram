@@ -1,0 +1,56 @@
+{
+  "measurement": "FR-0c/1 — action catalog distinctness",
+  "written": "2026-08-02",
+  "method": "Three independent raters route each phrase to exactly one action, blind to each other. Disagreement between raters is the collision signal. Inter-rater disagreement is used rather than self-reported confidence because introspective confidence is not calibrated and cannot be audited.",
+  "committed_before_results": true,
+  "gaming_note": "This set was written and committed BEFORE any routing was run, because Trellis §5.2 identifies 'curate the phrase set until it passes' as the way a distinctness budget gets gamed. If phrases are added later, they go in a separate file with its own date.",
+  "phrasing_rule": "No phrase contains an action name. A phrase that names its action measures nothing.",
+  "phrases": [
+    { "id": 1,  "cluster": "record-knowledge", "text": "We chose Postgres over MySQL because of the JSONB support. Write that down." },
+    { "id": 2,  "cluster": "record-knowledge", "text": "Note that the FTS index rebuilds on every migration — that surprised me." },
+    { "id": 3,  "cluster": "record-knowledge", "text": "Save what I just figured out about the auth flow." },
+    { "id": 4,  "cluster": "record-knowledge", "text": "From now on, everyone on this repo uses tabs, not spaces. Make that stick." },
+    { "id": 5,  "cluster": "record-knowledge", "text": "I noticed the test suite is flaky on Windows. Keep that in mind for later." },
+    { "id": 6,  "cluster": "record-knowledge", "text": "Remember that we're deliberately not supporting IE11." },
+    { "id": 7,  "cluster": "record-knowledge", "text": "Here's a pile of notes from our meeting, sort them into the right places." },
+    { "id": 8,  "cluster": "record-knowledge", "text": "Record that we're switching the queue from Redis to SQS, and why." },
+    { "id": 9,  "cluster": "record-knowledge", "text": "The team agreed all PRs need two approvals. Log it." },
+    { "id": 10, "cluster": "record-knowledge", "text": "Something feels off about how retries are handled — flag it so we look later." },
+    { "id": 11, "cluster": "record-knowledge", "text": "We hit v2.0 today. Mark the occasion." },
+    { "id": 12, "cluster": "record-knowledge", "text": "That earlier call about using bcrypt is no longer right — we moved to argon2." },
+
+    { "id": 13, "cluster": "retrieve", "text": "Why did we pick this database again?" },
+    { "id": 14, "cluster": "retrieve", "text": "Find anything we know about rate limiting." },
+    { "id": 15, "cluster": "retrieve", "text": "What are the coding standards on this project?" },
+    { "id": 16, "cluster": "retrieve", "text": "What's changed since Tuesday?" },
+    { "id": 17, "cluster": "retrieve", "text": "What do we know about src/auth/login.ts?" },
+    { "id": 18, "cluster": "retrieve", "text": "Show me everything that happened to the config file over time." },
+
+    { "id": 19, "cluster": "tasks", "text": "Add a to-do: migrate the logging to structured JSON." },
+    { "id": 20, "cluster": "tasks", "text": "That migration work is finished, close it out." },
+    { "id": 21, "cluster": "tasks", "text": "What's still outstanding?" },
+    { "id": 22, "cluster": "tasks", "text": "I'm taking the caching work — make sure nobody else picks it up." },
+    { "id": 23, "cluster": "tasks", "text": "Who on the team is best suited to the database work?" },
+
+    { "id": 24, "cluster": "files", "text": "I've read through the router and here's what it does — store that." },
+    { "id": 25, "cluster": "files", "text": "I just edited three files, log what I did to each." },
+    { "id": 26, "cluster": "files", "text": "What depends on the database module?" },
+    { "id": 27, "cluster": "files", "text": "I'm about to start editing the parser, let others know." },
+
+    { "id": 28, "cluster": "session", "text": "Wrap up — here's what I got done today." },
+    { "id": 29, "cluster": "session", "text": "I'm handing this over to the next person, here's where things stand." },
+    { "id": 30, "cluster": "session", "text": "What did the last few work sessions accomplish?" },
+    { "id": 31, "cluster": "session", "text": "I'm running low on context — save where I've got to." },
+
+    { "id": 32, "cluster": "admin", "text": "Make a copy of everything in case this goes wrong." },
+    { "id": 33, "cluster": "admin", "text": "How much is stored in here at this point?" },
+    { "id": 34, "cluster": "admin", "text": "Is the database in good shape?" },
+    { "id": 35, "cluster": "admin", "text": "Trim the old stuff, it's getting big." },
+    { "id": 36, "cluster": "admin", "text": "Give me a written summary of the whole project's memory." },
+
+    { "id": 37, "cluster": "multi-agent", "text": "Tell the other agents that the schema changed." },
+    { "id": 38, "cluster": "multi-agent", "text": "What other projects on this machine am I able to see?" },
+    { "id": 39, "cluster": "multi-agent", "text": "Look up how the other project handled auth." },
+    { "id": 40, "cluster": "multi-agent", "text": "The API keys in here shouldn't be visible to other projects. Lock them down." }
+  ]
+}

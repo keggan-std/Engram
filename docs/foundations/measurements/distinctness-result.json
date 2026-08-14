@@ -1,0 +1,967 @@
+{
+  "analysed_at": "2026-08-01T20:34:21.628Z",
+  "limitation": "All three raters are the same model (Sonnet) with the same prompt. This measures ROUTING STABILITY of one model, not inter-model agreement. High agreement here does NOT prove the catalog is unambiguous to a different model or a different phrasing. Stated up front because the alternative is quietly overclaiming.",
+  "totals": {
+    "n": 40,
+    "unanimous": 39,
+    "majority": 1,
+    "split": 0,
+    "cleanAndConfident": 22,
+    "unanimousButShaky": 17,
+    "ambiguous": 18
+  },
+  "clusters": {
+    "record-knowledge": {
+      "n": 12,
+      "unanimous": 11,
+      "low_confidence": 7
+    },
+    "retrieve": {
+      "n": 6,
+      "unanimous": 6,
+      "low_confidence": 2
+    },
+    "tasks": {
+      "n": 5,
+      "unanimous": 5,
+      "low_confidence": 2
+    },
+    "files": {
+      "n": 4,
+      "unanimous": 4,
+      "low_confidence": 1
+    },
+    "session": {
+      "n": 4,
+      "unanimous": 4,
+      "low_confidence": 2
+    },
+    "admin": {
+      "n": 5,
+      "unanimous": 5,
+      "low_confidence": 3
+    },
+    "multi-agent": {
+      "n": 4,
+      "unanimous": 4,
+      "low_confidence": 1
+    }
+  },
+  "rows": [
+    {
+      "id": 1,
+      "cluster": "record-knowledge",
+      "phrase": "We chose Postgres over MySQL because of the JSONB support. Write that down.",
+      "actions": [
+        "record_decision",
+        "record_decision",
+        "record_decision"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "dump"
+      ]
+    },
+    {
+      "id": 2,
+      "cluster": "record-knowledge",
+      "phrase": "Note that the FTS index rebuilds on every migration — that surprised me.",
+      "actions": [
+        "record_observation",
+        "record_observation",
+        "record_observation"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "record_decision",
+        "dump"
+      ]
+    },
+    {
+      "id": 3,
+      "cluster": "record-knowledge",
+      "phrase": "Save what I just figured out about the auth flow.",
+      "actions": [
+        "record_observation",
+        "record_observation",
+        "record_observation"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "dump"
+      ]
+    },
+    {
+      "id": 4,
+      "cluster": "record-knowledge",
+      "phrase": "From now on, everyone on this repo uses tabs, not spaces. Make that stick.",
+      "actions": [
+        "add_convention",
+        "add_convention",
+        "add_convention"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "record_decision"
+      ]
+    },
+    {
+      "id": 5,
+      "cluster": "record-knowledge",
+      "phrase": "I noticed the test suite is flaky on Windows. Keep that in mind for later.",
+      "actions": [
+        "record_observation",
+        "record_observation",
+        "record_observation"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "create_task"
+      ]
+    },
+    {
+      "id": 6,
+      "cluster": "record-knowledge",
+      "phrase": "Remember that we're deliberately not supporting IE11.",
+      "actions": [
+        "record_decision",
+        "record_decision",
+        "record_decision"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "add_convention"
+      ]
+    },
+    {
+      "id": 7,
+      "cluster": "record-knowledge",
+      "phrase": "Here's a pile of notes from our meeting, sort them into the right places.",
+      "actions": [
+        "dump",
+        "dump",
+        "dump"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "record_decisions_batch",
+        "record_observation"
+      ]
+    },
+    {
+      "id": 8,
+      "cluster": "record-knowledge",
+      "phrase": "Record that we're switching the queue from Redis to SQS, and why.",
+      "actions": [
+        "record_decision",
+        "record_decision",
+        "record_decision"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "record_observation",
+        "dump"
+      ]
+    },
+    {
+      "id": 9,
+      "cluster": "record-knowledge",
+      "phrase": "The team agreed all PRs need two approvals. Log it.",
+      "actions": [
+        "add_convention",
+        "record_decision",
+        "record_decision"
+      ],
+      "agreement": "majority",
+      "margins": [
+        "coinflip",
+        "close",
+        "coinflip"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "record_decision",
+        "add_convention"
+      ]
+    },
+    {
+      "id": 10,
+      "cluster": "record-knowledge",
+      "phrase": "Something feels off about how retries are handled — flag it so we look later.",
+      "actions": [
+        "record_observation",
+        "record_observation",
+        "record_observation"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "create_task"
+      ]
+    },
+    {
+      "id": 11,
+      "cluster": "record-knowledge",
+      "phrase": "We hit v2.0 today. Mark the occasion.",
+      "actions": [
+        "record_milestone",
+        "record_milestone",
+        "record_milestone"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "record_decision",
+        "dump"
+      ]
+    },
+    {
+      "id": 12,
+      "cluster": "record-knowledge",
+      "phrase": "That earlier call about using bcrypt is no longer right — we moved to argon2.",
+      "actions": [
+        "record_decision",
+        "record_decision",
+        "record_decision"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "update_decision"
+      ]
+    },
+    {
+      "id": 13,
+      "cluster": "retrieve",
+      "phrase": "Why did we pick this database again?",
+      "actions": [
+        "get_decisions",
+        "get_decisions",
+        "get_decisions"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "search"
+      ]
+    },
+    {
+      "id": 14,
+      "cluster": "retrieve",
+      "phrase": "Find anything we know about rate limiting.",
+      "actions": [
+        "search",
+        "search",
+        "search"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "get_observations"
+      ]
+    },
+    {
+      "id": 15,
+      "cluster": "retrieve",
+      "phrase": "What are the coding standards on this project?",
+      "actions": [
+        "get_conventions",
+        "get_conventions",
+        "get_conventions"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "search",
+        "get_knowledge"
+      ]
+    },
+    {
+      "id": 16,
+      "cluster": "retrieve",
+      "phrase": "What's changed since Tuesday?",
+      "actions": [
+        "what_changed",
+        "what_changed",
+        "what_changed"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "get_file_history",
+        "search"
+      ]
+    },
+    {
+      "id": 17,
+      "cluster": "retrieve",
+      "phrase": "What do we know about src/auth/login.ts?",
+      "actions": [
+        "get_file_notes",
+        "get_file_notes",
+        "get_file_notes"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "get_file_history"
+      ]
+    },
+    {
+      "id": 18,
+      "cluster": "retrieve",
+      "phrase": "Show me everything that happened to the config file over time.",
+      "actions": [
+        "get_file_history",
+        "get_file_history",
+        "get_file_history"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "get_file_notes",
+        "get_dependency_map",
+        "what_changed"
+      ]
+    },
+    {
+      "id": 19,
+      "cluster": "tasks",
+      "phrase": "Add a to-do: migrate the logging to structured JSON.",
+      "actions": [
+        "create_task",
+        "create_task",
+        "create_task"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "dump"
+      ]
+    },
+    {
+      "id": 20,
+      "cluster": "tasks",
+      "phrase": "That migration work is finished, close it out.",
+      "actions": [
+        "update_task",
+        "update_task",
+        "update_task"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "release_task"
+      ]
+    },
+    {
+      "id": 21,
+      "cluster": "tasks",
+      "phrase": "What's still outstanding?",
+      "actions": [
+        "get_tasks",
+        "get_tasks",
+        "get_tasks"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "get_scheduled_events"
+      ]
+    },
+    {
+      "id": 22,
+      "cluster": "tasks",
+      "phrase": "I'm taking the caching work — make sure nobody else picks it up.",
+      "actions": [
+        "claim_task",
+        "claim_task",
+        "claim_task"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "update_task"
+      ]
+    },
+    {
+      "id": 23,
+      "cluster": "tasks",
+      "phrase": "Who on the team is best suited to the database work?",
+      "actions": [
+        "route_task",
+        "route_task",
+        "route_task"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "close",
+        "clear"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "get_agents"
+      ]
+    },
+    {
+      "id": 24,
+      "cluster": "files",
+      "phrase": "I've read through the router and here's what it does — store that.",
+      "actions": [
+        "set_file_notes",
+        "set_file_notes",
+        "set_file_notes"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "record_observation",
+        "dump"
+      ]
+    },
+    {
+      "id": 25,
+      "cluster": "files",
+      "phrase": "I just edited three files, log what I did to each.",
+      "actions": [
+        "record_change",
+        "record_change",
+        "record_change"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "set_file_notes_batch"
+      ]
+    },
+    {
+      "id": 26,
+      "cluster": "files",
+      "phrase": "What depends on the database module?",
+      "actions": [
+        "get_dependency_map",
+        "get_dependency_map",
+        "get_dependency_map"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "get_file_notes",
+        "get_file_history"
+      ]
+    },
+    {
+      "id": 27,
+      "cluster": "files",
+      "phrase": "I'm about to start editing the parser, let others know.",
+      "actions": [
+        "begin_work",
+        "begin_work",
+        "begin_work"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "coinflip",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "broadcast"
+      ]
+    },
+    {
+      "id": 28,
+      "cluster": "session",
+      "phrase": "Wrap up — here's what I got done today.",
+      "actions": [
+        "end",
+        "end",
+        "end"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "clear"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "checkpoint"
+      ]
+    },
+    {
+      "id": 29,
+      "cluster": "session",
+      "phrase": "I'm handing this over to the next person, here's where things stand.",
+      "actions": [
+        "handoff",
+        "handoff",
+        "handoff"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "checkpoint",
+        "end"
+      ]
+    },
+    {
+      "id": 30,
+      "cluster": "session",
+      "phrase": "What did the last few work sessions accomplish?",
+      "actions": [
+        "get_history",
+        "get_history",
+        "get_history"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "get_milestones"
+      ]
+    },
+    {
+      "id": 31,
+      "cluster": "session",
+      "phrase": "I'm running low on context — save where I've got to.",
+      "actions": [
+        "checkpoint",
+        "checkpoint",
+        "checkpoint"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "end",
+        "get_checkpoint"
+      ]
+    },
+    {
+      "id": 32,
+      "cluster": "admin",
+      "phrase": "Make a copy of everything in case this goes wrong.",
+      "actions": [
+        "backup",
+        "backup",
+        "backup"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "clear"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "export"
+      ]
+    },
+    {
+      "id": 33,
+      "cluster": "admin",
+      "phrase": "How much is stored in here at this point?",
+      "actions": [
+        "stats",
+        "stats",
+        "stats"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "close",
+        "clear"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "generate_report"
+      ]
+    },
+    {
+      "id": 34,
+      "cluster": "admin",
+      "phrase": "Is the database in good shape?",
+      "actions": [
+        "health",
+        "health",
+        "health"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "stats"
+      ]
+    },
+    {
+      "id": 35,
+      "cluster": "admin",
+      "phrase": "Trim the old stuff, it's getting big.",
+      "actions": [
+        "compact",
+        "compact",
+        "compact"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "clear"
+      ]
+    },
+    {
+      "id": 36,
+      "cluster": "admin",
+      "phrase": "Give me a written summary of the whole project's memory.",
+      "actions": [
+        "generate_report",
+        "generate_report",
+        "generate_report"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "stats"
+      ]
+    },
+    {
+      "id": 37,
+      "cluster": "multi-agent",
+      "phrase": "Tell the other agents that the schema changed.",
+      "actions": [
+        "broadcast",
+        "broadcast",
+        "broadcast"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": []
+    },
+    {
+      "id": 38,
+      "cluster": "multi-agent",
+      "phrase": "What other projects on this machine am I able to see?",
+      "actions": [
+        "discover_instances",
+        "discover_instances",
+        "discover_instances"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "get_instance_info"
+      ]
+    },
+    {
+      "id": 39,
+      "cluster": "multi-agent",
+      "phrase": "Look up how the other project handled auth.",
+      "actions": [
+        "query_instance",
+        "query_instance",
+        "query_instance"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "close",
+        "close",
+        "close"
+      ],
+      "low_confidence": true,
+      "runners_up": [
+        "search_all_instances"
+      ]
+    },
+    {
+      "id": 40,
+      "cluster": "multi-agent",
+      "phrase": "The API keys in here shouldn't be visible to other projects. Lock them down.",
+      "actions": [
+        "mark_sensitive",
+        "mark_sensitive",
+        "mark_sensitive"
+      ],
+      "agreement": "unanimous",
+      "margins": [
+        "clear",
+        "clear",
+        "clear"
+      ],
+      "low_confidence": false,
+      "runners_up": [
+        "set_sharing"
+      ]
+    }
+  ],
+  "collision_pairs": [
+    {
+      "pair": "record_observation -> create_task",
+      "weight": 6
+    },
+    {
+      "pair": "record_decision -> dump",
+      "weight": 5
+    },
+    {
+      "pair": "record_observation -> dump",
+      "weight": 5
+    },
+    {
+      "pair": "record_decision -> add_convention",
+      "weight": 5
+    },
+    {
+      "pair": "add_convention -> record_decision",
+      "weight": 4
+    },
+    {
+      "pair": "record_decision -> update_decision",
+      "weight": 3
+    },
+    {
+      "pair": "get_decisions -> search",
+      "weight": 3
+    },
+    {
+      "pair": "search -> get_observations",
+      "weight": 3
+    },
+    {
+      "pair": "get_file_notes -> get_file_history",
+      "weight": 3
+    },
+    {
+      "pair": "update_task -> release_task",
+      "weight": 3
+    },
+    {
+      "pair": "route_task -> get_agents",
+      "weight": 3
+    },
+    {
+      "pair": "record_change -> set_file_notes_batch",
+      "weight": 3
+    },
+    {
+      "pair": "begin_work -> broadcast",
+      "weight": 3
+    },
+    {
+      "pair": "end -> checkpoint",
+      "weight": 3
+    },
+    {
+      "pair": "backup -> export",
+      "weight": 3
+    }
+  ],
+  "broadest_shadowers": [
+    {
+      "action": "dump",
+      "weight": 14
+    },
+    {
+      "action": "record_decision",
+      "weight": 7
+    },
+    {
+      "action": "get_file_history",
+      "weight": 7
+    },
+    {
+      "action": "create_task",
+      "weight": 6
+    },
+    {
+      "action": "search",
+      "weight": 6
+    },
+    {
+      "action": "stats",
+      "weight": 6
+    },
+    {
+      "action": "add_convention",
+      "weight": 5
+    },
+    {
+      "action": "record_observation",
+      "weight": 4
+    },
+    {
+      "action": "checkpoint",
+      "weight": 4
+    },
+    {
+      "action": "update_decision",
+      "weight": 3
+    }
+  ]
+}

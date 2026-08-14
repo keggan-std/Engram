@@ -1,6 +1,6 @@
 # HTTP Surface — the dashboard API contract
 
-**Generated:** 2026-08-05 · **Source:** `dist/http-server.js` via [`scripts/generate-http-surface.mjs`](../scripts/generate-http-surface.mjs)
+**Generated:** 2026-08-07 · **Source:** `dist/http-server.js` via [`scripts/generate-http-surface.mjs`](../scripts/generate-http-surface.mjs)
 
 > **Generated artifact — never hand-edit.** Regenerate with `npm run http-surface`;
 > `npm run http-surface:check` fails on drift and runs in CI.

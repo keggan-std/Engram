@@ -11,6 +11,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { InstanceRegistryService } from "./instance-registry.service.js";
 import type { InstanceEntry, CrossInstanceSearchResult, SharingMode } from "../types.js";
+import { QUERYABLE_TABLES } from "../constants.js";
 import { log } from "../logger.js";
 
 // ─── Constants ───────────────────────────────────────────────────────
@@ -21,16 +22,8 @@ const DB_CACHE_TTL_MS = 5 * 60_000;
 /** Maximum number of cached DB handles at once */
 const MAX_CACHED_DBS = 10;
 
-/** Tables that can be queried cross-instance */
-const QUERYABLE_TABLES = new Set([
-  "decisions",
-  "conventions",
-  "file_notes",
-  "tasks",
-  "sessions",
-  "changes",
-  "milestones",
-]);
+// QUERYABLE_TABLES moved to constants.ts (FR-D2 F4) — setSharing needs the same
+// list to refuse writing a type name no reader will ever serve.
 
 // ============================================================================
 // Service
@@ -440,14 +433,41 @@ export class CrossInstanceService {
     const limit = options?.limit ?? 10;
     const scope = options?.scope ?? "decisions"; // default search scope
 
+    // FR-D2 F4. Validate the scope ONCE, loudly, before any instance is opened.
+    // This used to be absent entirely: an unlisted scope fell through to the
+    // generic branch below and read the table anyway. Throwing rather than
+    // returning [] also fixes the lesser bug that a misspelled scope reported
+    // "no results" — indistinguishable from a search that genuinely found none.
+    if (!QUERYABLE_TABLES.has(scope)) {
+      throw new Error(
+        `'${scope}' is not a queryable type. Valid types: ${[...QUERYABLE_TABLES].join(", ")}`
+      );
+    }
+
     for (const instance of instances) {
-      // Skip self and non-sharing instances
       if (instance.instance_id === selfId) continue;
-      if (instance.sharing_mode === "none") continue;
-      if (!instance.sharing_types.includes(scope)) continue;
 
       try {
-        const db = this.openReadOnly(instance.db_path);
+        // Authorization is checkPermission's job, here as everywhere else.
+        // This method used to re-implement its sharing_mode and sharing_types
+        // tests inline and omit both the whitelist above and the db_path
+        // resolution below — the F4 bypass. The outer loop still SELECTS on
+        // active-only; checkPermission (which looks in the include-stale list,
+        // a superset) still AUTHORIZES. Selection and authorization stay
+        // separate on purpose.
+        //
+        // A refusal skips that instance instead of aborting the fan-out: one
+        // peer declining to share must not turn a multi-instance search into
+        // an error. Genuine misuse is caught by the scope check above, which
+        // is instance-independent and therefore safe to raise.
+        let target: InstanceEntry;
+        try {
+          target = this.checkPermission(instance.instance_id, scope);
+        } catch {
+          continue;
+        }
+
+        const db = this.openReadOnly(target.db_path);
         if (!db) continue;
 
         let rows: Record<string, unknown>[] = [];
@@ -487,7 +507,14 @@ export class CrossInstanceService {
              ORDER BY id DESC LIMIT ?`
           ).all(`%${query}%`, `%${query}%`, limit) as Record<string, unknown>[];
         } else {
-          // Generic table search — try direct LIKE on common text columns
+          // Remaining whitelisted scopes: sessions, changes, milestones. There
+          // is no per-scope text column list for these, so the query degrades
+          // to "most recent N" and ignores `query`.
+          //
+          // `scope` is interpolated as a SQL identifier and cannot be bound.
+          // It is safe ONLY because QUERYABLE_TABLES gated it at the top of
+          // this method. Before F4 was fixed nothing gated it and this line
+          // read whatever table name the caller passed.
           try {
             rows = db.prepare(
               `SELECT * FROM ${scope} ORDER BY id DESC LIMIT ?`
@@ -497,9 +524,9 @@ export class CrossInstanceService {
 
         if (rows.length > 0) {
           results.push({
-            source_instance_id: instance.instance_id,
-            source_label: instance.label,
-            source_project: instance.project_root,
+            source_instance_id: target.instance_id,
+            source_label: target.label,
+            source_project: target.project_root,
             type: scope,
             results: rows,
             total: rows.length,

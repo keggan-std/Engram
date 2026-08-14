@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import type { Database as DatabaseType } from "better-sqlite3";
 import * as fs from "fs";
 import * as path from "path";
-import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME } from "./constants.js";
+import { DB_DIR_NAME, DB_FILE_NAME, BACKUP_DIR_NAME, TOOL_CALL_LOG_MAX_ROWS, TOOL_CALL_LOG_PRUNE_INTERVAL } from "./constants.js";
 import { runMigrations } from "./migrations.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import { CompactionService, ProjectScanService, GitService, EventTriggerService, UpdateService, AgentRulesService, InstanceRegistryService, CrossInstanceService, SensitiveDataService, WorkflowAdvisorService, PMDiagnosticsTracker } from "./services/index.js";
@@ -52,6 +52,70 @@ let _ideKey: string | undefined;
  * corrupt it is renamed to a timestamped .corrupt file and a fresh database
  * is created.
  */
+/**
+ * Put the database into WAL mode, tolerating a concurrent cold start.
+ *
+ * PROVEN 2026-08-12 against the real `initDatabase()`: spawn four or five
+ * processes at one fresh project root and 5–15% of them die with
+ * `SQLITE_BUSY: database is locked`, thrown from `db.pragma("journal_mode =
+ * WAL")` — NOT from the migration chain, which task #59 covers separately. The
+ * process dies; the data is fine. IDE MCP hosts discard stderr (FR-D6 T6), so
+ * what the user sees is an Engram that is simply absent, on first run, in
+ * exactly the two-IDE topology this product supports.
+ *
+ * WHY `busy_timeout` DOES NOT COVER IT. Converting a database to WAL needs an
+ * exclusive lock, and SQLite returns SQLITE_BUSY for a lock upgrade it judges
+ * could deadlock rather than invoking the busy handler. Measured directly: with
+ * `busy_timeout = 15000` and another connection holding BEGIN EXCLUSIVE, the
+ * conversion still threw SQLITE_BUSY. The timeout is not the mechanism that
+ * saves this.
+ *
+ * WHY READING THE MODE FIRST IS THE ACTUAL FIX, not merely a fast path.
+ * `journal_mode` is a property of the FILE, and reading it needs only a shared
+ * lock — measured: a second connection reports "wal" as soon as the first has
+ * converted. So the loser of the race does not need to win the lock at all. It
+ * needs to notice it no longer has to.
+ *
+ * REJECTED — raise `busy_timeout`: it is already 15 s and the measurement above
+ * shows the conversion failing anyway, so this treats a symptom that is not the
+ * cause. REJECTED — a lock file around open: a second coordination primitive
+ * with its own staleness and cleanup problems, to serialise something SQLite
+ * already serialises correctly. REJECTED — abandon WAL: it is what makes
+ * concurrent readers work here, and multi-IDE is the supported topology.
+ *
+ * A persistent failure WARNS AND CONTINUES rather than throwing. The fallback
+ * is the rollback journal — slower under concurrency, entirely correct — and a
+ * degraded server beats an absent one whose reason went to a discarded stderr.
+ */
+function ensureWalMode(db: DatabaseType, attempts = 100, delayMs = 25): void {
+  for (let i = 0; i <= attempts; i++) {
+    // Cheap, shared-lock read. In the race this is what ends it.
+    try {
+      const mode = db.pragma("journal_mode", { simple: true }) as string | undefined;
+      if (typeof mode === "string" && mode.toLowerCase() === "wal") return;
+    } catch { /* fall through and try the conversion */ }
+
+    try {
+      db.pragma("journal_mode = WAL");
+      return;
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code ?? "";
+      if (code !== "SQLITE_BUSY" && code !== "SQLITE_BUSY_TIMEOUT") throw err;
+      if (i === attempts) {
+        console.error(
+          "[Engram] [WARN] Could not switch the database to WAL mode — another " +
+          "process is holding it. Continuing on the rollback journal, which is " +
+          "correct but slower under concurrent access.",
+        );
+        return;
+      }
+      // Synchronous by necessity: better-sqlite3 is synchronous throughout, so
+      // there is no event loop turn to yield to here.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
+  }
+}
+
 function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   const CORRUPTION_CODES = new Set(["SQLITE_CORRUPT", "SQLITE_NOTADB"]);
 
@@ -59,7 +123,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s — multi-IDE shards may still share a file
-    db.pragma("journal_mode = WAL");   // set WAL (or confirm already in WAL) — no-op if already WAL
+    ensureWalMode(db);                 // survives a concurrent cold start; see above
     return db;
   } catch (err: unknown) {
     const code = (err as { code?: string }).code ?? "";
@@ -80,7 +144,7 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   try {
     const db = new Database(dbPath);
     db.pragma("busy_timeout = 15000"); // 15 s
-    db.pragma("journal_mode = WAL");
+    ensureWalMode(db);
     console.error("[Engram] [WARN] Recovered from corrupt WAL/SHM — some recent changes may be lost.");
     return db;
   } catch (err: unknown) {
@@ -93,6 +157,11 @@ function openDatabaseWithRecovery(dbPath: string): DatabaseType {
   console.error("[Engram] [WARN] Main database was corrupt — renamed to backup, starting fresh.");
   const freshDb = new Database(dbPath);
   freshDb.pragma("busy_timeout = 15000"); // 15 s
+  // This path used to be the ONE that never set WAL, leaving the caller's
+  // line 119 as its only source — which is why that line is not simply
+  // redundant. Setting it here makes the function's contract uniform: every
+  // database it returns is in WAL mode, or has warned that it is not.
+  ensureWalMode(freshDb);
   return freshDb;
 }
 
@@ -115,8 +184,11 @@ export function initDatabase(projectRoot: string, ideKey?: string): DatabaseType
   _dbPath = path.join(dbDir, dbFileName);
   _db = openDatabaseWithRecovery(_dbPath);
 
-  // Performance pragmas (busy_timeout already set inside openDatabaseWithRecovery)
-  _db.pragma("journal_mode = WAL");
+  // Performance pragmas. busy_timeout and WAL are both already established by
+  // openDatabaseWithRecovery on every one of its three return paths, so the
+  // bare `journal_mode = WAL` that used to sit here is gone rather than routed
+  // through ensureWalMode(): it was a second, unprotected conversion attempt of
+  // exactly the kind that produced the SQLITE_BUSY crash.
   _db.pragma("foreign_keys = ON");
   _db.pragma("synchronous = NORMAL");
   _db.pragma("cache_size = -8000");       // 8MB cache
@@ -191,6 +263,49 @@ export function getProjectRoot(): string {
 
 export function getDbPath(): string {
   return _dbPath;
+}
+
+/** A user table and the two categories deliberately left out of it. */
+export interface UserTableCensus {
+  /** Every real data table, sorted. Safe to SELECT * from. */
+  tables: string[];
+  /** FTS5 shadow tables — a derived index over rows the base tables hold. */
+  ftsArtifacts: string[];
+  /** SQLite's own bookkeeping (`sqlite_*`). */
+  sqliteInternal: string[];
+}
+
+/**
+ * Enumerate the database's real data tables from `sqlite_master`.
+ *
+ * Task #32 needed this because the export's table list was EIGHT names typed
+ * into the handler while the schema had 24, so 16 tables were silently absent
+ * from every "export". Deriving the list means a table added by a future
+ * migration is covered the day it exists, with no second register to forget —
+ * charter §2 applied to what happened to be a string array.
+ *
+ * It lives HERE rather than in the dispatcher for two reasons. Schema
+ * introspection is a property of the database, not of any one domain, so no
+ * `repositories/` file owns it — repositories are per-table and this question
+ * is about which tables exist. And ENGRAM_CONSTITUTION.md:58 makes
+ * `repositories/` the owner of SQL, enforced by the raw-SQL ratchet in
+ * tests/codebase/maintainability.test.ts; putting the query in the dispatcher
+ * raised that ceiling, which is task #80's number moving the wrong way. The
+ * ratchet caught it, and this is the fix rather than a raised ceiling.
+ *
+ * The two exclusions are RETURNED rather than dropped, so a caller can report
+ * what it skipped instead of quietly deciding for the reader.
+ */
+export function listUserTables(db: DatabaseType = getDb()): UserTableCensus {
+  const names = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+  ).all() as Array<{ name: string }>).map(t => t.name);
+
+  return {
+    tables: names.filter(n => !n.startsWith("fts_") && !n.startsWith("sqlite_")),
+    ftsArtifacts: names.filter(n => n.startsWith("fts_")),
+    sqliteInternal: names.filter(n => n.startsWith("sqlite_")),
+  };
 }
 
 // ─── Runtime Re-Initialization ───────────────────────────────────────
@@ -300,8 +415,95 @@ export function backupDatabase(destPath?: string): string {
   // it would throw ENOENT before the file is written. Using WAL checkpoint +
   // synchronous file copy guarantees the backup file is fully written before
   // we return the path to callers.
-  try { db.pragma("wal_checkpoint(FULL)"); } catch { /* WAL may not be in use */ }
+  //
+  // ── FR-D1 T2 / task #29 — check the checkpoint, then check the copy ──
+  //
+  // The checkpoint's RESULT was discarded (`try { ... } catch {}`), and that is
+  // not cosmetic. `wal_checkpoint(FULL)` returns `busy = 1` when another
+  // connection holds a read lock and the WAL could NOT be folded into the main
+  // database file. `copyFileSync` copies only the main file — never the `-wal`
+  // sidecar — so a busy checkpoint means every commit still living in the WAL
+  // is silently absent from the "backup", which then reports success and a
+  // plausible byte count. That is the H2 shape: a backup that restores less
+  // than it claimed, discovered only when someone needs it.
+  let checkpointBusy = true;
+  for (let attempt = 0; attempt < 5 && checkpointBusy; attempt++) {
+    try {
+      const rows = db.pragma("wal_checkpoint(FULL)") as Array<{ busy: number }> | undefined;
+      // No rows means the database is not in WAL mode, so there is nothing to
+      // fold in and the main file is already the whole story.
+      checkpointBusy = Array.isArray(rows) && rows.length > 0 ? rows[0].busy === 1 : false;
+    } catch {
+      checkpointBusy = false; // WAL not in use
+    }
+    if (checkpointBusy) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+  if (checkpointBusy) {
+    throw new Error(
+      "Backup aborted: the write-ahead log could not be folded into the database " +
+      "file because another connection is holding it. Copying now would silently " +
+      "omit every change still in the WAL. Nothing was written. Retry when other " +
+      "Engram processes for this project are idle.",
+    );
+  }
+
   fs.copyFileSync(getDbPath(), destPath);
+
+  // ── Verify what was written, rather than trusting that it was ──────
+  // A backup nobody has opened is a file, not a backup. This is cheap
+  // (integrity_check on a local SQLite file) and it is the only moment the
+  // check is worth anything — after the fact, the original may be gone.
+  let verified: DatabaseType | null = null;
+  try {
+    verified = new Database(destPath, { readonly: true, fileMustExist: true });
+
+    const integrity = verified.pragma("integrity_check", { simple: true });
+    if (integrity !== "ok") {
+      throw new Error(`the copy failed SQLite's integrity check (${String(integrity)})`);
+    }
+
+    // Every table the live database has must exist in the copy. This catches a
+    // truncated or torn copy that still happens to parse.
+    const sourceTables = listUserTables(db).tables;
+    const copyTables = new Set(listUserTables(verified).tables);
+    const missing = sourceTables.filter(t => !copyTables.has(t));
+    if (missing.length > 0) {
+      throw new Error(`the copy is missing ${missing.length} table(s): ${missing.join(", ")}`);
+    }
+
+    // Row counts are REPORTED, not asserted equal. Another process may commit
+    // between the copy and this read, so an exact-equality check would fail
+    // honestly-taken backups intermittently — and per FR-D6 kill switch 1 a
+    // flaky gate is worse than no gate. Emptiness IS asserted: a copy where
+    // every table is empty while the source is not is the failure this exists
+    // to catch, and no race explains it.
+    const countRows = (d: DatabaseType, tables: string[]) =>
+      tables.reduce((sum, t) => {
+        try {
+          return sum + (d.prepare(`SELECT COUNT(*) c FROM "${t.replace(/"/g, '""')}"`).get() as { c: number }).c;
+        } catch { return sum; }
+      }, 0);
+
+    const sourceRows = countRows(db, sourceTables);
+    const copyRows = countRows(verified, sourceTables);
+    if (sourceRows > 0 && copyRows === 0) {
+      throw new Error(`the copy is empty (source holds ${sourceRows} row(s))`);
+    }
+  } catch (e) {
+    // Remove the unusable file. Leaving it would put a backup that failed
+    // verification into the same directory the restore path lists as a
+    // candidate, which is worse than having no backup at all.
+    try { verified?.close(); verified = null; } catch { /* already closed */ }
+    try { fs.unlinkSync(destPath); } catch { /* best-effort */ }
+    throw new Error(
+      `Backup verification failed and the file was removed: ${(e as Error).message}. ` +
+      `The original database is untouched.`,
+    );
+  } finally {
+    try { verified?.close(); } catch { /* best-effort */ }
+  }
 
   return destPath;
 }
@@ -475,8 +677,18 @@ export function now(): string {
   return new Date().toISOString();
 }
 
-export function getCurrentSessionId(): number | null {
-  const row = queryOne("SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1");
+/**
+ * Newest open session, optionally scoped to one agent.
+ *
+ * AUDIT N3a: the unscoped form answers "the newest open session belonging to
+ * ANYONE". Since sessions are no longer force-closed on every start, more than
+ * one may be open at a time, so any caller that knows its own identity should
+ * pass `agentName`. Mirrors SessionsRepo.getOpenSessionId().
+ */
+export function getCurrentSessionId(agentName?: string): number | null {
+  const row = agentName
+    ? queryOne("SELECT id FROM sessions WHERE ended_at IS NULL AND agent_name = ? ORDER BY id DESC LIMIT 1", [agentName])
+    : queryOne("SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1");
   return row ? (row.id as number) : null;
 }
 
@@ -508,26 +720,93 @@ export function forceFlush(): void {
   db.pragma("wal_checkpoint(TRUNCATE)");
 }
 
+/** Insert counter driving the periodic prune below. Process-local, not persisted. */
+let _toolCallsSincePrune = 0;
+
 /**
- * F10: Log a tool invocation for session replay diagnostics.
- * Silent no-op if the tool_call_log table doesn't exist (older schemas).
+ * Log a tool invocation. Feeds two things that did not previously work:
+ * the `replay` timeline, and the "which actions are never called" signal that
+ * licenses deleting an action.
+ *
+ * Until 2026-08-02 this was called from five sites, all in sessions.ts, so 72 of
+ * the 83 actions had no telemetry at all and the unused-action report could not
+ * be computed. See docs/foundations/measurements/README.md §2.
+ *
+ * `agent_id` is resolved from the owning session rather than passed in — it is
+ * derivable, and deriving it means it cannot disagree with the session record.
+ * Previously hardcoded `null`.
+ *
+ * Silent no-op if the table doesn't exist (older schemas). Never throws: losing
+ * a diagnostic row must never fail the operation being diagnosed.
  */
 export function logToolCall(
   toolName: string,
   outcome: "success" | "error" = "success",
-  notes?: string
+  notes?: string,
+  agentName?: string
 ): void {
   try {
     const db = getDb();
+
+    // Resolve the owning session. Prefer the caller's own OPEN session; fall
+    // back to its most recent closed one. The fallback matters for `end`, which
+    // logs from a finally block after the session it belongs to is already
+    // closed — without it, every session-end event would be unattributed.
+    let sessionId: number | null;
+    if (agentName) {
+      const row = db.prepare(
+        `SELECT id FROM sessions WHERE agent_name = ?
+          ORDER BY (ended_at IS NULL) DESC, id DESC LIMIT 1`
+      ).get(agentName) as { id: number } | undefined;
+      sessionId = row?.id ?? getCurrentSessionId();
+    } else {
+      sessionId = getCurrentSessionId();
+    }
+
+    // agent_id prefers the name the caller supplied over the one derived from
+    // the session: the caller identifying itself is the stronger signal, and it
+    // still resolves when no session is open.
     db.prepare(
-      "INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes) VALUES (?, ?, ?, ?, ?, ?)"
-    ).run(
-      getCurrentSessionId(),
-      null,
-      toolName,
-      Date.now(),
-      outcome,
-      notes ?? null
-    );
+      `INSERT INTO tool_call_log (session_id, agent_id, tool_name, called_at, outcome, notes)
+       VALUES (?, COALESCE(?, (SELECT agent_name FROM sessions WHERE id = ?)), ?, ?, ?, ?)`
+    ).run(sessionId, agentName ?? null, sessionId, toolName, Date.now(), outcome, notes ?? null);
+
+    // Now that every action logs, this table grows without bound — nothing else
+    // prunes it (compaction does not touch it). Trim on a counter rather than
+    // every insert so the cost is amortised.
+    if (++_toolCallsSincePrune >= TOOL_CALL_LOG_PRUNE_INTERVAL) {
+      _toolCallsSincePrune = 0;
+      db.prepare(
+        `DELETE FROM tool_call_log WHERE id < (
+           SELECT MIN(id) FROM (
+             SELECT id FROM tool_call_log ORDER BY id DESC LIMIT ?
+           )
+         )`
+      ).run(TOOL_CALL_LOG_MAX_ROWS);
+    }
   } catch { /* table may not exist on older schemas — always silent */ }
+}
+
+/**
+ * Tool calls logged since `sinceMs`, newest first.
+ *
+ * TASK #103's `include_tool_log`. Lives here rather than in the dispatcher
+ * because this file already owns tool_call_log's insert and its prune, and the
+ * raw-SQL ratchet (tests/codebase/maintainability.test.ts) exists to stop
+ * exactly that query being added to a dispatcher instead — it caught this one
+ * on the first run and the query moved rather than the ceiling.
+ *
+ * Bounded by `limit`, clamped. This is the largest table in a busy store: one
+ * row per tool call, pruned only every TOOL_CALL_LOG_PRUNE_INTERVAL inserts.
+ * Returns [] rather than throwing on an older schema, matching logToolCall.
+ */
+export function getToolCallsSince(sinceMs: number, limit: number): Array<Record<string, unknown>> {
+  try {
+    return getDb().prepare(
+      `SELECT id, session_id, agent_id, tool_name, called_at, outcome, notes
+         FROM tool_call_log WHERE called_at > ? ORDER BY called_at DESC LIMIT ?`
+    ).all(sinceMs, Math.max(1, Math.floor(limit))) as Array<Record<string, unknown>>;
+  } catch {
+    return [];
+  }
 }

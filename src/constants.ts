@@ -17,7 +17,7 @@ export const TOOL_PREFIX = "engram";
 // Database
 export const DB_DIR_NAME = ".engram";
 export const DB_FILE_NAME = "memory.db";
-export const DB_VERSION = 24; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade, V24 observations
+export const DB_VERSION = 26; // V18 http-token, V19 soft-delete, V20 audit-log, V21 import-jobs, V22 annotations, V23 pm-convention-upgrade, V24 observations, V25 superseded_by repair, V26 fts_file_notes triggers
 
 // PM Framework — Phase / Keyword / Nudge constants
 /** Maps canonical phase name strings (from task tags like `phase:planning`) to phase numbers 1-6. */
@@ -57,6 +57,27 @@ export const MAX_SEARCH_RESULTS = 50;
 export const DEFAULT_SEARCH_LIMIT = 8; // 8 gives headroom for noise; 50 (max) is available via explicit limit param
 export const MAX_GIT_LOG_ENTRIES = 50;
 export const MAX_RESPONSE_LENGTH = 50000;
+/**
+ * How much of a task description survives `get_tasks(compact:true)`.
+ *
+ * Task #103/#68. `compact` was declared on the schema, documented as defaulting
+ * to true, and never read — so the full description of every row shipped.
+ * MEASURED 2026-08-13: get_tasks({compact:true, limit:60}) returned 120,020
+ * characters and overflowed the tool result. Descriptions in a mature store run
+ * to several thousand characters each; 400 is enough to recognise a row and
+ * decide whether to fetch it in full.
+ */
+export const TASK_COMPACT_DESCRIPTION_CHARS = 400;
+/**
+ * How much of a task description or decision rationale survives session start.
+ *
+ * Task #68. `verbosity:"full"` returned 59,721 tokens against a documented
+ * ~730 (81.8x), and the payload GREW with the store — a memory tool got more
+ * expensive to orient in the more it had remembered. Tighter than the
+ * get_tasks bound above because session start is unavoidable and automatic,
+ * where get_tasks is a call an agent chose to make.
+ */
+export const SESSION_START_BODY_CHARS = 240;
 export const DEFAULT_PAGINATION_LIMIT = 20;
 export const SNAPSHOT_TTL_MINUTES = 30;
 export const COMPACTION_THRESHOLD_SESSIONS = 50;
@@ -65,6 +86,13 @@ export const FOCUS_MAX_ITEMS_PER_CATEGORY = 15;
 export const FILE_MTIME_STALE_HOURS = 24; // After this many hours of drift, confidence = "stale"
 export const FILE_LOCK_DEFAULT_TIMEOUT_MINUTES = 30; // Auto-expire file locks after this many minutes
 export const DEFAULT_RETENTION_DAYS = 90;
+
+// tool_call_log retention. Every action logs a row (since 2026-08-02), and
+// nothing else prunes this table — compaction does not touch it. The cap is
+// generous enough to keep several sessions of replay history and small enough
+// that the table cannot become the largest thing in the database.
+export const TOOL_CALL_LOG_MAX_ROWS = 20_000;
+export const TOOL_CALL_LOG_PRUNE_INTERVAL = 200;
 export const MAX_BACKUP_COUNT = 10;
 
 // File patterns to exclude from scanning
@@ -288,6 +316,64 @@ export const PRUNE_THRESHOLD_MS = 7 * 24 * 60 * 60_000; // 7 days
 // Sharing defaults
 export const DEFAULT_SHARING_MODE = "none";
 export const DEFAULT_SHARING_TYPES = ["decisions", "conventions"];
+
+// ─── Cross-instance read policy (FR-D2 F4) ──────────────────────────────────
+//
+// The only tables another instance may read out of this one. It lives here, not
+// in cross-instance.service.ts, because it has two enforcement points and used
+// to have one: the READER (checkPermission) tested it, and the WRITER
+// (setSharing) stored whatever type names it was handed. searchAll() then
+// re-implemented the reader's checks inline and omitted this test, so a name
+// that setSharing accepted became a table searchAll would read — including
+// `observations`, `handoffs` and `audit_log`. PROVEN by scratchpad PoC before
+// the fix: checkPermission refused 'observations' while searchAll returned the
+// row. Same shape as audit N2 above — one policy, two doors, and the door
+// nobody looked at was the open one.
+//
+// `scope` is interpolated into SQL as an identifier in searchAll's generic
+// branch. That is only safe because this set constrains it. Do not relax the
+// check without removing the interpolation.
+export const QUERYABLE_TABLES: ReadonlySet<string> = new Set([
+  "decisions",
+  "conventions",
+  "file_notes",
+  "tasks",
+  "sessions",
+  "changes",
+  "milestones",
+]);
+
+// ── `since`: the accepted forms, enforced at BOTH ends ─────────────────────
+//
+// Same shape as QUERYABLE_TABLES above, and for the same reason. `since` is
+// the parameter that carried the arbitrary-command-execution defect fixed in
+// 1.14.0 (see gitCommand in src/utils.ts). The sink is closed — execFileSync
+// spawns no shell — so this is defence in depth, not the fix. It exists
+// because the audit that missed the first bug missed it by reasoning about
+// call sites instead of about the parameter, and a bounded parameter survives
+// a future caller who reintroduces a shell.
+//
+// The three accepted forms are exactly the three the handler ever understood:
+//   "session_start"          — resolved against the sessions table
+//   /^\d+[hdm]$/             — a relative window: 24h, 7d, 30m
+//   an ISO-8601 timestamp    — compared directly against stored timestamps
+//
+// Anything else used to fall through an `else` and be passed along verbatim.
+// That fall-through is deleted; unmatched input is now an error, not a shrug.
+export const SINCE_LITERALS: ReadonlySet<string> = new Set(["session_start"]);
+export const SINCE_RELATIVE = /^\d+[hdm]$/;
+// Deliberately stricter than Date.parse, which accepts "now", "Dec 25" and a
+// great deal else. Engram stores ISO-8601 and compares as text, so anything
+// that is not ISO-8601 would silently compare wrong even with the shell gone.
+export const SINCE_ISO = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+export function isValidSince(value: string): boolean {
+  return SINCE_LITERALS.has(value) || SINCE_RELATIVE.test(value) || SINCE_ISO.test(value);
+}
+
+export const SINCE_REJECTION =
+  "since must be 'session_start', a relative window like '24h' / '7d' / '30m', " +
+  "or an ISO-8601 timestamp like '2026-08-07' or '2026-08-07T10:02:08Z'.";
 
 // Architecture layer detection patterns
 export const LAYER_PATTERNS: Record<string, RegExp[]> = {

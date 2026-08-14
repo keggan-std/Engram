@@ -20,7 +20,7 @@ import { initDatabase, getProjectRoot, getServices } from "./database.js";
 import { log } from "./logger.js";
 import { findProjectRoot } from "./utils.js";
 import { runInstaller } from "./installer/index.js";
-import { ensureToken } from "./http-auth.js";
+import { ensureToken, tokenMatches, isLocalHostHeader } from "./http-auth.js";
 import { createHttpServer } from "./http-server.js";
 import { broadcaster } from "./ws-broadcaster.js";
 
@@ -29,6 +29,7 @@ import { registerSessionDispatcher } from "./tools/sessions.js";
 import { registerMemoryDispatcher } from "./tools/dispatcher-memory.js";
 import { registerAdminDispatcher } from "./tools/dispatcher-admin.js";
 import { registerFindTool } from "./tools/find.js";
+import { withToolTelemetry } from "./tool-telemetry.js";
 
 // ─── v1.7 Universal Mode — 1 tool ~80 token schema ──────────────────────────
 import { registerUniversalMode } from "./modes/universal.js";
@@ -207,14 +208,39 @@ async function main(): Promise<void> {
     // Track HTTP activity (fires on every request, before any route handlers)
     httpServer.on("request", resetActivity);
 
-    // Validate token + route upgrade to /ws only
+    // Validate host + token, and route upgrade to /ws only.
+    //
+    // FR-D2 T6. This handler is attached to the raw server and NEVER PASSES
+    // THROUGH EXPRESS, so the Host allow-list added in http-server.ts does not
+    // protect it. The check is repeated here because the middleware stack it
+    // would otherwise inherit does not exist on this path — not by oversight.
     httpServer.on("upgrade", (req, socket, head) => {
       const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
       if (url.pathname !== "/ws") {
         socket.destroy();
         return;
       }
-      if (url.searchParams.get("token") !== token) {
+
+      if (!isLocalHostHeader(req.headers.host)) {
+        log.warn(`[Dashboard] Refused WS upgrade with foreign Host header: ${JSON.stringify(req.headers.host)}`);
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
+      // Accept the token from Sec-WebSocket-Protocol in preference to the query
+      // string. The query form remains ACCEPTED, not preferred: the dashboard
+      // bundle ships separately and a version of it that only knows ?token=
+      // must keep working against a newer server. Removing it outright would
+      // break the shipped SPA — see the note on the browser-open call below.
+      const fromHeader = (req.headers["sec-websocket-protocol"] ?? "")
+        .toString()
+        .split(",")
+        .map(s => s.trim())
+        .find(s => s.startsWith("engram-token."))
+        ?.slice("engram-token.".length);
+
+      if (!tokenMatches(fromHeader ?? url.searchParams.get("token"), token)) {
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
         return;
@@ -245,7 +271,12 @@ async function main(): Promise<void> {
       log.info(`WebSocket live-updates on ws://127.0.0.1:${port}/ws`);
       if (!args.includes("--no-open")) {
         const { default: open } = await import("open");
-        open(`http://localhost:${openPort}?token=${token}`).catch(() => {});
+        // FR-D2 T6: the token goes in the FRAGMENT, not the query string. A
+        // fragment is never sent to the server, so it cannot land in an access
+        // log, and it is stripped from the Referer of every subresource the
+        // page loads. The dashboard bundle reads the fragment first and falls
+        // back to ?token= — see packages/engram-dashboard/src/api/client.ts.
+        open(`http://localhost:${openPort}#token=${token}`).catch(() => {});
       }
     });
 
@@ -278,16 +309,22 @@ async function main(): Promise<void> {
 
   const isUniversalMode = args.includes("--mode=universal") || process.env.ENGRAM_MODE === "universal";
 
+  // Every tool registered through this view logs its invocations to
+  // tool_call_log. Registering here rather than inside each dispatcher means a
+  // new action is instrumented because it came through the same door — it
+  // cannot be forgotten. See src/tool-telemetry.ts.
+  const instrumented = withToolTelemetry(server);
+
   if (isUniversalMode) {
     // Universal mode: 1 "engram" tool, ~80 schema tokens. All agents.
-    registerUniversalMode(server);
+    registerUniversalMode(instrumented);
     log.info(`${SERVER_NAME} v${SERVER_VERSION} — universal mode (1 tool, ~80 schema tokens)`);
   } else {
     // Standard mode: 4 dispatcher tools, ~1,600 schema tokens.
-    registerSessionDispatcher(server);  // engram_session: start, end, get_history, handoff
-    registerMemoryDispatcher(server);   // engram_memory: all memory operations via action enum
-    registerAdminDispatcher(server);    // engram_admin: backup, restore, stats, health, config, scan
-    registerFindTool(server);           // engram_find: catalog keyword search
+    registerSessionDispatcher(instrumented);  // engram_session: start, end, get_history, handoff
+    registerMemoryDispatcher(instrumented);   // engram_memory: all memory operations via action enum
+    registerAdminDispatcher(instrumented);    // engram_admin: backup, restore, stats, health, config, scan
+    registerFindTool(instrumented);           // engram_find: catalog keyword search
     log.info(`${SERVER_NAME} v${SERVER_VERSION} — standard mode (4 tools, ~1,600 schema tokens)`);
   }
 

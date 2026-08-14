@@ -5,11 +5,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, now } from "../database.js";
+import { getDb, getDbSizeKb, getRepos, getServices, getProjectRoot, backupDatabase, restoreDatabase, getDbPath, listUserTables, now } from "../database.js";
 import { success, error } from "../response.js";
+import { detectMalformedWrite } from "../write-integrity.js";
 import { SERVER_VERSION, DB_DIR_NAME, BACKUP_DIR_NAME, MAX_BACKUP_COUNT, CFG_AUTO_UPDATE_AVAILABLE, CFG_AUTO_UPDATE_LAST_CHECK, CFG_AUTO_UPDATE_CHECK, GITHUB_RELEASES_URL, configWriteRejection, SECRET_CONFIG_KEYS, REDACTED_VALUE } from "../constants.js";
 import { queryGlobalDecisions, queryGlobalConventions } from "../global-db.js";
+import { getCurrentSchemaVersion } from "../migrations.js";
 import { log } from "../logger.js";
+import { ENGRAM_HOOK_MARKER, isEngramHook, stripEngramHookBlock } from "../git-hook.js";
 import { pmSafe } from "../services/index.js";
 import { detectCurrentPhase } from "../services/event-trigger.service.js";
 import { KNOWLEDGE_BASE_VERSION } from "../constants.js";
@@ -42,7 +45,8 @@ function recordConfigAudit(key: string, before: string | null, after: string): v
   } catch (e) { log.warn(`[Engram] audit_log write failed for config."${key}": ${e}`); }
 }
 
-const ADMIN_ACTIONS = [
+// Exported for the same reason as MEMORY_ACTIONS — see dispatcher-memory.ts.
+export const ADMIN_ACTIONS = [
   "backup", "restore", "list_backups",
   "export", "import",
   "compact", "clear",
@@ -64,14 +68,10 @@ const ADMIN_ACTIONS = [
 ] as const;
 
 export function registerAdminDispatcher(server: McpServer): void {
-  server.registerTool(
-    "engram_admin",
-    {
-      title: "Admin Operations",
-      description: `Engram admin and maintenance operations. Use only when needed.
-
-Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
-      inputSchema: {
+  // Named so the write-integrity check can DERIVE this tool's valid parameter
+  // names instead of restating them. A parameter added below is covered by the
+  // malformed-write detector on the same commit.
+  const ADMIN_INPUT_SCHEMA = {
         action: z.enum(ADMIN_ACTIONS).describe("Admin operation to perform."),
         output_path: z.string().optional(),
         input_path: z.string().optional(),
@@ -104,10 +104,41 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
         resolved_by: z.string().optional().describe("Who approved/denied (default: human)."),
         requester_instance_id: z.string().optional().describe("Instance ID of the requester."),
         requester_label: z.string().optional().describe("Human-readable label of the requester."),
-      },
+  };
+
+  server.registerTool(
+    "engram_admin",
+    {
+      title: "Admin Operations",
+      description: `Engram admin and maintenance operations. Use only when needed.
+
+Actions: backup, restore, list_backups, export, import, compact, clear, stats, health, config, scan_project, discover_instances, set_sharing, set_visibility, query_instance, search_all_instances, mark_sensitive, unmark_sensitive, list_sensitive, request_access, approve_access, deny_access, list_access_requests, enable_pm, disable_pm, enable_pm_lite, disable_pm_lite, decline_pm, reset_pm_offer, pm_status.`,
+      inputSchema: ADMIN_INPUT_SCHEMA,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
     async (params) => {
+      // ── Write integrity: refuse a decoder-corrupted call ─────────────────
+      // Task #91's stated remainder: the check shipped wired into
+      // engram_memory's dispatch only. This surface stores `value` (config),
+      // `label`, `reason` and `query` — shorter than a session summary, so a
+      // lower-probability trigger, but `set_instance_label` and
+      // `request_access` reasons are persisted and unrepairable like every
+      // other row type except observations.
+      //
+      // Deliberately placed BEFORE the switch, so it cannot fire between a
+      // backup's file write and its response — a rejection here means nothing
+      // was attempted, which is the property the message promises.
+      {
+        const bad = detectMalformedWrite(
+          params as Record<string, unknown>,
+          Object.keys(ADMIN_INPUT_SCHEMA),
+        );
+        if (bad) {
+          log.warn("Rejected malformed write", { tool: "engram_admin", field: bad.field, swallowed: bad.swallowed });
+          return error(bad.message);
+        }
+      }
+
       const { action } = params;
       const repos = getRepos();
       const services = getServices();
@@ -165,15 +196,115 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
 
         // ─── EXPORT ─────────────────────────────────────────────────────
         case "export": {
+          // ── FR-D1 T5 / task #32 — complete, or it names what it skipped ────
+          //
+          // The table list was EIGHT names, hand-typed. MEASURED on a real store
+          // at schema V26: 24 real tables exist, so 16 were silently absent —
+          // including observations (146 rows, and observations ARE the product),
+          // handoffs (22), tool_call_log (488), config (43) and checkpoints. The
+          // call still reported "Memory exported" and a KB figure, so the only
+          // signal that two thirds of the store was missing was a smaller file.
+          //
+          // Worse, the old `catch { exported[table] = [] }` rendered a table it
+          // could not read as an EMPTY ARRAY — indistinguishable from a table
+          // that is genuinely empty. A read failure became a factual-looking
+          // claim that there was nothing there.
+          //
+          // Derived from sqlite_master now, so a table added by a future
+          // migration is exported the day it exists and there is no second list
+          // to forget. This is charter §2's rule applied to a register that
+          // happened to be a string array.
+          //
+          // TWO EXCLUSIONS, both named in the payload rather than assumed:
+          //   sqlite_*  — SQLite's own bookkeeping, not ours to carry.
+          //   fts_*     — 40 FTS5 shadow tables. They are a DERIVED index over
+          //               rows this file already contains, they are rebuilt by
+          //               migration V26 on import, and carrying them would
+          //               roughly double the file to restate what is already in
+          //               it. Excluded because they are redundant, not because
+          //               they are inconvenient — and the payload says so.
           const outputPath = params.output_path ?? path.join(projectRoot, DB_DIR_NAME, "export.json");
-          const tables = ["sessions", "changes", "decisions", "file_notes", "conventions", "tasks", "milestones", "scheduled_events"];
-          const exported: Record<string, unknown> = { exported_at: new Date().toISOString(), version: SERVER_VERSION };
+          // listUserTables() lives in database.ts, not here: schema
+          // introspection belongs to the database rather than to any domain
+          // repository, and putting the query in this file raised the raw-SQL
+          // ratchet (tests/codebase/maintainability.test.ts) — task #80's
+          // number moving the wrong way. The ratchet caught it.
+          const { tables, ftsArtifacts, sqliteInternal } = listUserTables(db);
+
+          const rowCounts: Record<string, number> = {};
+          const failed: Record<string, string> = {};
+          const exported: Record<string, unknown> = {};
+
+          let redactedSecrets = 0;
           for (const table of tables) {
-            try { exported[table] = db.prepare(`SELECT * FROM ${table}`).all(); } catch { exported[table] = []; }
+            try {
+              // Quoted identifier. The name comes from sqlite_master and never
+              // from a caller, but an unquoted interpolation here would be the
+              // pattern rather than the exception, and the next table with a
+              // reserved-word name would break it silently.
+              const rows = db.prepare(`SELECT * FROM "${table.replace(/"/g, '""')}"`).all();
+
+              // `config` was NOT in the old eight-table list, so completing the
+              // export is what puts it in reach — and it can hold http_token,
+              // which SECRET_CONFIG_KEYS already redacts on every other read
+              // path. Completeness must not become the one route that serves a
+              // credential in plaintext, on a file the user is being encouraged
+              // to treat as a backup. Redacted with the same constant the config
+              // surface uses, so there is one definition of what is secret.
+              if (table === "config") {
+                for (const row of rows as Array<{ key?: string; value?: unknown }>) {
+                  if (typeof row.key === "string" && SECRET_CONFIG_KEYS.has(row.key)) {
+                    row.value = REDACTED_VALUE;
+                    redactedSecrets++;
+                  }
+                }
+              }
+
+              exported[table] = rows;
+              rowCounts[table] = rows.length;
+            } catch (e) {
+              // Reported, never rendered as an empty table. A read failure and
+              // an empty table are different facts and were the same one.
+              failed[table] = (e as Error).message;
+            }
           }
-          fs.writeFileSync(outputPath, JSON.stringify(exported, null, 2), "utf-8");
+
+          const payload = {
+            exported_at: new Date().toISOString(),
+            version: SERVER_VERSION,
+            schema_version: getCurrentSchemaVersion(db),
+            complete: Object.keys(failed).length === 0,
+            table_count: Object.keys(rowCounts).length,
+            total_rows: Object.values(rowCounts).reduce((a, b) => a + b, 0),
+            row_counts: rowCounts,
+            excluded: {
+              fts_artifacts: ftsArtifacts.length,
+              sqlite_internal: sqliteInternal.length,
+              why: "FTS5 shadow tables are a derived index over rows already in this file and are rebuilt on import; sqlite_* is SQLite's own bookkeeping.",
+            },
+            failed_to_read: failed,
+            redacted_secrets: redactedSecrets,
+            note: "Secret config keys are redacted (see redacted_secrets). `config` still carries instance_id, which identifies this instance rather than authenticating it — importing it elsewhere would clone this instance's identity in the cross-instance registry.",
+            ...exported,
+          };
+
+          fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), "utf-8");
           const sizeKb = Math.round(fs.statSync(outputPath).size / 1024);
-          return success({ path: outputPath, size_kb: sizeKb, message: `Memory exported to ${outputPath} (${sizeKb} KB).` });
+          const failNote = Object.keys(failed).length
+            ? ` ${Object.keys(failed).length} table(s) COULD NOT BE READ and are absent: ${Object.keys(failed).join(", ")}.`
+            : "";
+          return success({
+            path: outputPath,
+            size_kb: sizeKb,
+            complete: payload.complete,
+            table_count: payload.table_count,
+            total_rows: payload.total_rows,
+            row_counts: rowCounts,
+            failed_to_read: failed,
+            message:
+              `Exported ${payload.table_count} table(s), ${payload.total_rows} row(s) to ${outputPath} (${sizeKb} KB).` +
+              failNote,
+          });
         }
 
         // ─── IMPORT ─────────────────────────────────────────────────────
@@ -182,22 +313,239 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           if (!fs.existsSync(params.input_path)) return error(`Import file not found: ${params.input_path}`);
           const data = JSON.parse(fs.readFileSync(params.input_path, "utf-8")) as Record<string, unknown>;
           const dryRun = params.dry_run ?? true;
-          const counts: Record<string, number> = {};
-          const importable = ["decisions", "conventions", "file_notes", "milestones"];
-          for (const table of importable) {
-            const rows = data[table] as Array<Record<string, unknown>> | undefined;
-            counts[table] = rows?.length ?? 0;
-          }
-          if (dryRun) return success({ dry_run: true, would_import: counts, message: "Dry run complete. Set dry_run: false to execute." });
-          // Actual import (decisions only — safe to merge)
-          let imported = 0;
-          const rows = data["decisions"] as Array<Record<string, unknown>> | undefined;
-          if (rows) {
-            for (const row of rows) {
-              try { db.prepare("INSERT OR IGNORE INTO decisions (id, session_id, timestamp, decision, rationale, affected_files, tags, status) VALUES (?,?,?,?,?,?,?,?)").run(row.id, row.session_id, row.timestamp, row.decision, row.rationale, row.affected_files, row.tags, row.status); imported++; } catch { /* skip duplicates */ }
+
+          // ── SENIOR REVIEW S6 / task #33 — one registry, both halves ───────
+          //
+          // The dry run used to count FOUR tables — decisions, conventions,
+          // file_notes, milestones — from a local `importable` array, and the
+          // executor below then wrote exactly ONE of them. A user ran the
+          // preview, was told four categories would import, set dry_run:false,
+          // and three vanished with no warning. "Import complete. N decisions
+          // merged." is technically true and reads as total success.
+          //
+          // FR-D6 made this worse by pointing at it: export-import.routes.ts:70
+          // tells users to "use engram_admin(action:'import', input_path) over
+          // MCP, WHICH DOES APPLY THE DATA". It applied one quarter of it.
+          //
+          // The two lists are now ONE list. A table is importable if and only
+          // if it has an `apply` here, so the preview cannot describe work the
+          // executor will not do — adding a table fixes both halves at once,
+          // and there is no second place to forget.
+          //
+          // Task #33's definition of done is "honest dry run first, THEN
+          // implement". The honest dry run landed first, on its own, so the lie
+          // stopped immediately rather than waiting for the feature. The
+          // implementation is the block below, added 2026-08-12 — all four
+          // tables now have importers, so `not_imported` is empty in practice
+          // and stays as the mechanism that keeps preview and executor from
+          // ever diverging again.
+          // ── SECOND HALF, task #33 — the three defects the honest dry run
+          //    deliberately left standing ────────────────────────────────────
+          //
+          // 1. ID REMAPPING, not INSERT OR IGNORE on the source id. The old
+          //    importer carried `row.id` across and relied on OR IGNORE, so
+          //    merging a second store into a populated one silently DROPPED
+          //    every decision whose id already existed — for two Engram stores
+          //    of similar age, most of them. Ids are now omitted so SQLite
+          //    assigns fresh ones, which is what makes a merge a merge.
+          //
+          //    `session_id` is deliberately set to NULL rather than carried.
+          //    It references a `sessions` row that this import does not bring
+          //    with it, so preserving the number would attribute an imported
+          //    decision to whatever local session happens to hold that id —
+          //    inventing provenance, which is the exact failure FR-D2 T1 is
+          //    about. NULL says "imported, origin session unknown", which is
+          //    true. `superseded_by` and `depends_on` are dropped for the same
+          //    reason: they are id references that no longer point anywhere.
+          //
+          // 2. COUNT ROWS THAT LANDED, not calls that did not throw. The old
+          //    loop incremented on every call that didn't raise, and
+          //    INSERT OR IGNORE does not raise when it ignores — so the
+          //    reported count was the number of rows OFFERED. `.changes` is
+          //    what actually landed.
+          //
+          // 3. SHAPE VALIDATION. `JSON.parse` went straight into prepared
+          //    statements. A row that is not an object, or is missing the
+          //    NOT NULL columns, is now rejected and counted rather than
+          //    throwing mid-file or inserting a half-row.
+          //
+          // file_notes is keyed by `file_path`, a natural key, so it needs no
+          // remapping — but it DOES need a policy, and the policy is: never
+          // overwrite a local note with an imported one. A local note describes
+          // this checkout; an imported one describes someone else's. Conflicts
+          // are skipped and counted, not silently applied.
+          interface ImportOutcome { inserted: number; skipped: number; rejected: number }
+
+          // EVERY importer goes through `repositories/`, not through raw SQL in
+          // this file. The first version wrote four prepared statements here and
+          // the raw-SQL ratchet (tests/codebase/maintainability.test.ts) caught
+          // it at 25 against a frozen ceiling of 22 — Law 1, and task #80's
+          // number moving the wrong way. The repositories already expose exactly
+          // what an import needs, including a nullable session id, so the bypass
+          // was never justified.
+          const isRow = (r: unknown): r is Record<string, unknown> =>
+            typeof r === "object" && r !== null && !Array.isArray(r);
+
+          const str = (v: unknown): string | null =>
+            typeof v === "string" ? v : v == null ? null : String(v);
+
+          /** Export columns hold JSON text; the repositories take arrays. */
+          const arr = (v: unknown): string[] | null => {
+            if (Array.isArray(v)) return v.map(String);
+            if (typeof v === "string" && v.trim()) {
+              try { const p = JSON.parse(v); return Array.isArray(p) ? p.map(String) : null; } catch { return null; }
             }
+            return null;
+          };
+
+          const IMPORTERS: Record<string, (rows: unknown[]) => ImportOutcome> = {
+            decisions: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.decision)) { out.rejected++; continue; }
+                repos.decisions.create(
+                  null, str(r.timestamp)!, str(r.decision)!, str(r.rationale),
+                  arr(r.affected_files), arr(r.tags), str(r.status) ?? "active",
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            conventions: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.category) || !str(r.rule)) { out.rejected++; continue; }
+                repos.conventions.create(
+                  null, str(r.timestamp)!, str(r.category)!, str(r.rule)!,
+                  arr(r.examples), str(r.summary), arr(r.tags),
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            milestones: (rows) => {
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.timestamp) || !str(r.title)) { out.rejected++; continue; }
+                repos.milestones.create(
+                  null, str(r.timestamp)!, str(r.title)!,
+                  str(r.description), str(r.version), arr(r.tags),
+                );
+                out.inserted++;
+              }
+              return out;
+            },
+            file_notes: (rows) => {
+              // Natural key (`file_path`), so no remapping — but it needs a
+              // POLICY, and the policy is: never overwrite a local note with an
+              // imported one. A local note describes THIS checkout; an imported
+              // one describes someone else's. Expressed as check-then-write
+              // rather than INSERT OR IGNORE precisely so it goes through the
+              // repository — and it is sound because the whole import runs
+              // inside one BEGIN IMMEDIATE, so nothing can insert between the
+              // read and the write.
+              const out: ImportOutcome = { inserted: 0, skipped: 0, rejected: 0 };
+              for (const r of rows) {
+                if (!isRow(r) || !str(r.file_path)) { out.rejected++; continue; }
+                const fp = str(r.file_path)!;
+                if (repos.fileNotes.getByPath(fp)) { out.skipped++; continue; }
+                repos.fileNotes.upsert(fp, str(r.last_reviewed) ?? now(), null, {
+                  purpose: str(r.purpose),
+                  dependencies: arr(r.dependencies),
+                  dependents: arr(r.dependents),
+                  layer: str(r.layer) as Parameters<typeof repos.fileNotes.upsert>[3]["layer"],
+                  complexity: str(r.complexity) as Parameters<typeof repos.fileNotes.upsert>[3]["complexity"],
+                  notes: str(r.notes),
+                  file_mtime: typeof r.file_mtime === "number" ? r.file_mtime : null,
+                  git_branch: str(r.git_branch),
+                  content_hash: str(r.content_hash),
+                  executive_summary: str(r.executive_summary),
+                });
+                out.inserted++;
+              }
+              return out;
+            },
+          };
+
+          // Every table the export format can carry. Anything here without an
+          // IMPORTERS entry is reported as not-imported rather than counted as
+          // if it were.
+          const KNOWN_TABLES = ["decisions", "conventions", "file_notes", "milestones"];
+
+          const wouldImport: Record<string, number> = {};
+          const notImported: Record<string, number> = {};
+          for (const table of KNOWN_TABLES) {
+            const count = (data[table] as unknown[] | undefined)?.length ?? 0;
+            if (IMPORTERS[table]) wouldImport[table] = count;
+            else if (count > 0) notImported[table] = count;
           }
-          return success({ imported, message: `Import complete. ${imported} decisions merged.` });
+
+          const skipped = Object.keys(notImported);
+          const skipNote = skipped.length > 0
+            ? ` NOT imported (no importer implemented — task #33): ${skipped.map(t => `${t} (${notImported[t]} row(s))`).join(", ")}.`
+            : "";
+
+          if (dryRun) {
+            return success({
+              dry_run: true,
+              would_import: wouldImport,
+              not_imported: notImported,
+              message:
+                `Dry run complete. Set dry_run: false to execute.` + skipNote +
+                (skipped.length > 0 ? " These rows will be LEFT IN THE FILE, not merged." : ""),
+            });
+          }
+
+          // ONE transaction across every table. Without it, a failure at row 400
+          // of 500 left 399 rows committed with no rollback — on the path a user
+          // reaches for during recovery, which is the worst possible moment to
+          // half-apply. All-or-nothing: either the merge happened or the store
+          // is exactly as it was.
+          const imported: Record<string, number> = {};
+          const keptLocal: Record<string, number> = {};
+          const rejected: Record<string, number> = {};
+          let total = 0;
+
+          const runImport = db.transaction(() => {
+            for (const [table, apply] of Object.entries(IMPORTERS)) {
+              const rows = data[table];
+              if (!Array.isArray(rows)) { imported[table] = 0; continue; }
+              const out = apply(rows);
+              imported[table] = out.inserted;
+              if (out.skipped) keptLocal[table] = out.skipped;
+              if (out.rejected) rejected[table] = out.rejected;
+              total += out.inserted;
+            }
+          });
+
+          try {
+            runImport.immediate();
+          } catch (e) {
+            return error(
+              `Import failed and NOTHING was written — the whole merge was rolled back. ` +
+              `Reason: ${(e as Error).message}`,
+            );
+          }
+
+          const detail = Object.entries(imported).filter(([, n]) => n > 0)
+            .map(([t, n]) => `${n} ${t}`).join(", ") || "nothing";
+          const skipNote2 = Object.keys(keptLocal).length
+            ? ` Kept the local copy for ${Object.entries(keptLocal).map(([t, n]) => `${n} ${t}`).join(", ")}.`
+            : "";
+          const rejectNote = Object.keys(rejected).length
+            ? ` REJECTED as malformed: ${Object.entries(rejected).map(([t, n]) => `${n} ${t}`).join(", ")}.`
+            : "";
+
+          return success({
+            imported: total,
+            imported_by_table: imported,
+            skipped_existing: keptLocal,
+            rejected_malformed: rejected,
+            not_imported: notImported,
+            message:
+              `Import complete. ${total} row(s) merged (${detail}).` +
+              skipNote + skipNote2 + rejectNote,
+          });
         }
 
         // ─── COMPACT ────────────────────────────────────────────────────
@@ -361,11 +709,14 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           const hooksDir = path.join(gitDir, "hooks");
           fs.mkdirSync(hooksDir, { recursive: true });
           const hookPath = path.join(hooksDir, "post-commit");
-          const hookContent = `#!/bin/bash\n# Engram Post-Commit Hook\nENGRAM_DIR=".engram"\nCHANGE_LOG="$ENGRAM_DIR/git-changes.log"\nmkdir -p "$ENGRAM_DIR"\nHASH=$(git rev-parse --short HEAD)\nMSG=$(git log -1 --pretty=format:"%s")\nDATE=$(git log -1 --pretty=format:"%aI")\nFILES=$(git diff-tree --no-commit-id --name-status -r HEAD)\n{ echo "--- COMMIT $HASH ---"; echo "date: $DATE"; echo "message: $MSG"; echo "files:"; echo "$FILES"; echo "---"; echo ""; } >> "$CHANGE_LOG"\n`;
+          const hookContent = `#!/bin/bash\n# ${ENGRAM_HOOK_MARKER}\nENGRAM_DIR=".engram"\nCHANGE_LOG="$ENGRAM_DIR/git-changes.log"\nmkdir -p "$ENGRAM_DIR"\nHASH=$(git rev-parse --short HEAD)\nMSG=$(git log -1 --pretty=format:"%s")\nDATE=$(git log -1 --pretty=format:"%aI")\nFILES=$(git diff-tree --no-commit-id --name-status -r HEAD)\n{ echo "--- COMMIT $HASH ---"; echo "date: $DATE"; echo "message: $MSG"; echo "files:"; echo "$FILES"; echo "---"; echo ""; } >> "$CHANGE_LOG"\n`;
           if (fs.existsSync(hookPath)) {
             const existing = fs.readFileSync(hookPath, "utf-8");
-            if (existing.includes("Engram Post-Commit Hook")) return success({ message: "Engram post-commit hook already installed.", hook_path: hookPath });
-            fs.appendFileSync(hookPath, "\n\n" + hookContent);
+            // Shared recognition with the CLI installer — see src/git-hook.ts.
+            // These two paths previously used different markers and each refused
+            // to remove the other's hook.
+            if (isEngramHook(existing)) return success({ message: "Engram post-commit hook already installed.", hook_path: hookPath });
+            fs.appendFileSync(hookPath, "\n\n" + hookContent.replace(/^#!\/bin\/bash\n/, ""));
           } else {
             fs.writeFileSync(hookPath, hookContent);
           }
@@ -377,10 +728,12 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           const hookPath2 = path.join(projectRoot, ".git", "hooks", "post-commit");
           if (!fs.existsSync(hookPath2)) return success({ message: "No post-commit hook found." });
           const existing2 = fs.readFileSync(hookPath2, "utf-8");
-          if (!existing2.includes("Engram Post-Commit Hook")) return success({ message: "Engram hook not found in existing post-commit hook." });
-          // Remove only the engram section
-          const cleaned = existing2.replace(/\n?\n?# Engram Post-Commit Hook[\s\S]*?\n---\n\n/g, "").trim();
-          if (cleaned) { fs.writeFileSync(hookPath2, cleaned + "\n"); } else { fs.unlinkSync(hookPath2); }
+          if (!isEngramHook(existing2)) return success({ message: "Engram hook not found in existing post-commit hook." });
+          // Remove only the engram section. The previous regex anchored on a
+          // "\n---\n\n" terminator that this hook's own content never emits, so
+          // it matched nothing and the block survived every removal.
+          const cleaned = stripEngramHookBlock(existing2);
+          if (cleaned.replace(/^#!.*$/m, "").trim()) { fs.writeFileSync(hookPath2, cleaned); } else { fs.unlinkSync(hookPath2); }
           return success({ message: "Engram post-commit hook removed.", hook_path: hookPath2 });
         }
 
@@ -679,11 +1032,21 @@ Actions: backup, restore, list_backups, export, import, compact, clear, stats, h
           if (!params.type) return error("type is required (e.g. decisions, conventions, file_notes).");
           if (!params.ids || params.ids.length === 0) return error("ids array is required.");
           const lockResult = services.sensitiveData.lockRecords(params.type, params.ids);
+          // FR-D2 T4, task #39. The caveat is on the RESPONSE and not only in
+          // the catalog description, because this is the moment the caller
+          // decides whether the record is now safe to leave in a shared
+          // instance. The old message said "Marked ... as sensitive" and
+          // stopped there, which reads as an enforcement that does not exist.
           return success({
             type: params.type,
             ids: params.ids,
             newly_locked: lockResult.locked,
-            message: `Marked ${lockResult.locked} ${params.type} record(s) as sensitive.`,
+            enforced: false,
+            message:
+              `Marked ${lockResult.locked} ${params.type} record(s) as sensitive. ` +
+              `NOT ENFORCED: this marker is local bookkeeping only. It does NOT hide these ` +
+              `records from cross-instance queries — no read path consults it. If this data ` +
+              `must not leave the machine, set sharing_mode to 'none' instead.`,
           });
         }
 
